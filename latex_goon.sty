@@ -1,0 +1,231 @@
+% A collection of useful latex packages and commands
+
+
+%Importing various packages
+
+\usepackage{amsmath} %Displaying equations nicely
+\usepackage{amssymb} %Standard math symbols
+\usepackage{slashed} %Dirac slash notation
+\usepackage{graphicx} %For including graphics
+\usepackage{framed}	 %For framing areas
+\usepackage{jcapmod_goon} %Loads edited version of the jcapmod style file, which must be placed in same folder as tex file
+\usepackage{minted} %For code
+
+
+% New commands:
+
+\newcommand{\nn}{ \nonumber\\}
+\newcommand{\e}{{\rm e}}
+\newcommand{\g}{{\rm g}}
+\newcommand{\h}{{\rm h}}
+\newcommand{\GG}[1]{\textcolor{red}{(GG: #1)}}
+\newcommand{\rd}{{\rm d}}
+\newcommand{\Acal}{\mathcal{A}}
+\newcommand{\bfAcal}{\boldsymbol{\Acal}}
+\newcommand{\Bcal}{\mathcal{B}}
+\newcommand{\bfBcal}{\boldsymbol{\Bcal}}
+\newcommand{\Ccal}{\mathcal{C}}
+\newcommand{\Dcal}{\mathcal{D}}
+\newcommand{\bfDcal}{\boldsymbol{\Dcal}}
+\newcommand{\dcal}{D}
+\newcommand{\Ecal}{\mathcal{E}}
+\newcommand{\Fcal}{\mathcal{F}}
+\newcommand{\bfFcal}{\boldsymbol{\Fcal}}
+\newcommand{\Gcal}{\mathcal{G}}
+\newcommand{\Hcal}{\mathcal{H}}
+\newcommand{\Ical}{\mathcal{I}}
+\newcommand{\Jcal}{\mathcal{J}}
+\newcommand{\Kcal}{\mathcal{K}}
+\newcommand{\Lcal}{\mathcal{L}}
+\newcommand{\Mcal}{\mathcal{M}}
+\newcommand{\Ncal}{\mathcal{N}}
+\newcommand{\Ocal}{\mathcal{O}}
+\newcommand{\Pcal}{\mathcal{P}}
+\newcommand{\Rcal}{\mathcal{R}}
+\newcommand{\Scal}{\mathcal{S}}
+\newcommand{\Tcal}{\mathcal{T}}
+\newcommand{\Ucal}{\mathcal{U}}
+\newcommand{\Vcal}{\mathcal{V}}
+\newcommand{\Wcal}{\mathcal{W}}
+\newcommand{\Qcal}{\mathcal{Q}}
+\newcommand{\rcal}{\mathrm{R}}
+\newcommand{\MP}{M_{\rm pl}}
+\newcommand{\sgn}{{\rm sign}}
+\newcommand{\im}{\, {\rm Im} \, }
+\newcommand{\re}{\, {\rm Re} \, }
+\newcommand{\Tr}{\, {\rm Tr} \, }
+\newcommand{\tr}{\, {\rm tr} \, }
+\newcommand{\Det}{\, {\rm Det} \, }
+\newcommand{\bfk}{{\bf  k}}
+\newcommand{\bfP}{{\bf  P}}
+\newcommand{\bfA}{{\bf  A}}
+\newcommand{\bfF}{{\bf  F}}
+\newcommand{\bfp}{{\bf  p}}
+\newcommand{\bfu}{{\bf  u}}
+\newcommand{\bfv}{{\bf  v}}
+\newcommand{\bfq}{{\bf  q}}
+\newcommand{\bfx}{{\bf  x}}
+\newcommand{\bfX}{{\bf  X}}
+\newcommand{\bfT}{{\bf  T}}
+\newcommand{\bfe}{{\bf  e}}
+\newcommand{\bfE}{{\bf  E}}
+\newcommand{\bfomega}{\boldsymbol{  \omega}}
+\newcommand{\bfnabla}{\boldsymbol{  \nabla}}
+\newcommand{\bfepsilon}{\boldsymbol{  \epsilon}}
+\newcommand{\bfOmega}{\boldsymbol{  \Omega}}
+\newcommand{\bftheta}{\boldsymbol{  \theta}}
+\newcommand{\bfTheta}{\boldsymbol{  \Theta}}
+\newcommand{\bfy}{{\bf  y}}
+\newcommand{\bfz}{{\bf  z}}
+\newcommand{\bfb}{{\bf  b}}
+\newcommand{\ts}{\tau_{\star}}
+\newcommand{\tts}{t_{\star}}
+\newcommand{\Q}{\mathcal{Q}}
+\newcommand{\QQ}{\mathsf{Q}}
+\newcommand{\ket}[1]{|#1\rangle}
+\newcommand{\sket}[1]{|#1]}
+\newcommand{\bra}[1]{\langle #1|}
+\newcommand{\sbra}[1]{[#1|}
+\newcommand{\braket}[3]{\langle #1 |#2|#3\rangle}
+\newcommand{\sbraket}[3]{[ #1 |#2|#3]}
+
+\newcommand{\mvec}{\vec{\mu}}
+\newcommand{\pivec}{\vec{\pi}}
+\newcommand{\phivec}{\vec{\phi}}
+\newcommand{\phibar}{\bar{\phi}}
+\newcommand{\Phivec}{\vec{\Phi}}
+\newcommand{\Qcalvec}{\vec{\mathcal{Q}}}
+\newcommand{\bfJ}{\mathbf{J}}
+
+
+%For making symbols both bolded and mathcal-ed.  use as in \mathbfcal{A}
+\DeclareMathAlphabet\mathbfcal{OMS}{cmsy}{b}{n}
+
+
+% Modified from Flip Tanedo's original
+
+
+\usepackage{tikz}
+\usetikzlibrary{arrows,shapes,patterns}
+\usetikzlibrary{trees}
+\usetikzlibrary{matrix,arrows} 				% For commutative diagram
+											% http://www.felixl.de/commu.pdf
+\usetikzlibrary{positioning}				% For "above of=" commands
+\usetikzlibrary{calc,through}				% For coordinates
+\usetikzlibrary{decorations.pathreplacing}  % For curly braces
+\usepackage[tikz]{bclogo} 					% For cute logo boxes
+\usepackage{pgffor}							% For repeating patterns
+\usepackage{tkz-euclide}					% For Euclidean geometry
+
+
+% Code for drawing right angles. Command was defined by \Perp[<number>]{<coord1>}{<coord2>}{<name>}[<length>] <coord1> and <coord1> are the two given points and <name> will be used to internally label the end point of the perpendicular. <number> can be any real number; if 0<=<number><=1 the perpendicular will lie inside the segment (0,5, the default value, gives the perpendicular through the middle point).  Taken from a stack exchange post
+
+\NewDocumentCommand\Perp{O{0.5}mmmO{1cm}}{%
+  \coordinate (#4) at
+    ($ ($ #2!#1!#3 $) ! {sin(90)} ! 90:#3 $) {};
+  \draw[thick,densely dotted,->] ($ #2!#1!#3 $) -- ($ ($ #2!#1!#3 $) ! #5 ! (#4)$);
+  \coordinate (#4) at ($ ($ #2!#1!#3 $) ! #5 ! (#4)$);
+}
+
+%Defining a standard length for tikz diagrams
+\newcommand{\tikzlength}{.75}
+\newcommand{\tikzlengthsmall}{.3}
+
+
+% Custom colors for various lines
+
+
+\definecolor{gravitoncolor}{RGB}{15,15,120} %custom color for graviton lines
+\definecolor{pmfieldcolor}{RGB}{120,15,15}  %custom color for pm lines
+\definecolor{lightbluegray}{RGB}{240,240,240}  %custom color for vertex box fill
+
+\definecolor{lightcolor}{rgb}{0.76, 0.13, 0.28}
+\definecolor{heavycolor}{rgb}{0.36, 0.54, 0.66}
+
+\usetikzlibrary{decorations.pathmorphing}	% For Feynman Diagrams
+\usetikzlibrary{decorations.markings}
+
+% Various graviton lines
+
+
+\tikzset{
+%% Different kind of QFT lines
+    phonon/.style={decorate, decoration={snake},line width=1pt, draw,lightcolor},
+    Phi/.style={decorate, decoration={snake}, draw,gravitoncolor},
+    graviton/.style={decorate, decoration={snake}, draw,gravitoncolor},
+    pmfield/.style={decorate,
+        decoration={coil,amplitude=4pt, segment length=5.5pt},pmfieldcolor},
+    doubleline/.style={line width=2pt,style=double},
+    dashedline/.style={line width=1pt,style=dashed},
+%% in-in lines
+	heavyarline/.style={decoration={markings,mark=at position 0.5 with {\arrow[black,line width=1.5]{stealth}}},line width=2pt,heavycolor,postaction={decorate},densely dashed},
+	heavyrrline/.style={line width=2pt,heavycolor,densely dashed},
+	lightarline/.style={decoration={markings,mark=at position 0.5 with {\arrow[black,line width=1.5]{stealth}}},line width=1pt,lightcolor,postaction={decorate}},
+	lightrrline/.style={line width=1pt,lightcolor},
+% Vertices, sources, etc
+	vertex/.style={circle,draw=black,pattern=north east lines,inner sep=0pt},
+	heavysource/.style={circle,draw=heavycolor,pattern=crosshatch,inner sep=0pt},
+	lightsource/.style={circle,draw=lightcolor,pattern=north east lines,inner sep=0pt},
+	smalldot/.style={circle,draw=black,fill=black,inner sep=0pt},
+	mix/.style={circle,draw=black,inner sep=0pt},
+% define crosses
+cross/.style={cross out, draw=black, minimum size=.2cm, inner sep=0pt, outer sep=0pt},
+}
+
+% curves to be used in-line
+
+
+\newcommand*\philine{\tikz[baseline=-0.6ex]{ \draw[line width=2pt] (-1,0) -- (1,0);}}
+\newcommand*\psiline{\tikz[baseline=-0.6ex]{ \draw[graviton, line width=2pt] (-1,0) -- (1,0);}}
+\newcommand*\barphiline{\tikz[baseline=-0.6ex]{ \draw[line width=1pt] (-1,0) -- (1,0);}}
+\newcommand*\barpsiline{\tikz[baseline=-0.6ex]{ \draw[graviton, line width=1pt] (-1,0) -- (1,0);}}
+\newcommand*\varphilinehalf{\tikz[baseline=-0.6ex]{ \draw[line width=1.2pt] (-.5,0) -- (.5,0);}}
+\newcommand*\varphilinefull{\tikz[baseline=-0.6ex]{ \draw[line width=1.2pt] (-1,0) -- (1,0);}}
+\newcommand*\Philine{\tikz[baseline=-0.6ex]{  \draw[blue, dotted,line width=1.2pt] (-.5,0) -- (.5,0);}}
+
+
+
+% For italicizing paragraphs
+
+\newenvironment{itquote}
+  {\begin{quote}\itshape}
+  {\end{quote}\ignorespacesafterend}
+\newenvironment{itpars}
+  {\par\itshape}
+  {\par}
+
+  %Geometry of pdf output
+ %%With \oddsidemargin = \evensidemargin = 0 then the total width of the page W = 2(1+x) + w, where x is the \hoffset and w is the \textwidth
+\setlength{\oddsidemargin}{0.2in}
+\setlength{\evensidemargin}{\oddsidemargin}
+\setlength{\textwidth}{6.5in}
+\setlength{\hoffset}{-.2in}
+\setlength{\voffset}{-.5in}
+\setlength{\topmargin}{.7in}
+\setlength{\headheight}{0in}
+\setlength{\headsep}{0in}
+\setlength{\textheight}{8.5in}
+\setlength{\marginparsep}{0in}
+\setlength{\marginparwidth}{0in}
+\setlength{\marginparpush}{0in}
+
+\setlength{\parindent}{.5cm}
+\setlength{\parskip}{.1cm}
+
+
+%Sets how deep the table of contents goes.  Setting to 3 goes all the way to displaying subsubsections, 2 stops at subsection, etc.
+
+\setcounter{tocdepth}{3}
+
+%Allow equations across pages
+\allowdisplaybreaks
+
+
+%Add option for line spacing pmatrices
+\makeatletter
+\renewcommand*\env@matrix[1][\arraystretch]{%
+  \edef\arraystretch{#1}%
+  \hskip -\arraycolsep
+  \let\@ifnextchar\new@ifnextchar
+  \array{*\c@MaxMatrixCols c}}
+\makeatother
