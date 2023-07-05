@@ -1,6 +1,6 @@
 \documentclass[11pt]{article}
 %Importing custom commands
-\usepackage{latex_goon}
+\usepackage{latex_goon/latex_goon}
 \title{Transformers}
 \author{Garrett Goon}
 \begin{document}
@@ -18,7 +18,7 @@
 
 \begin{abstract}
 
-Notes on various aspects of Transfomers.
+Notes on various aspects of Transfomers
 
 \end{abstract}
 
@@ -28,38 +28,42 @@ Notes on various aspects of Transfomers.
 \renewcommand*{\thefootnote}{\arabic{footnote}}
 \setcounter{footnote}{0}
 
-\section{To-Do List}
-
-\begin{itemize}
-\item
-\end{itemize}
 
 
-\section{Non-Equilibirium EFTs\label{sec:NonEqEFTs}}
+\section{The Architecture}
+
+The Transformers architecture \cite {vaswani2017attention}, which dominates Natural Language
+Processing (NLP) as of July 2023, is a relatively simple architecture. There are various flavors and
+variants of Tranformers, but we start by describing the decoder-only versions which underly the
+GPT-X models \cite {gpt2radford2019language, gpt3brown2020language, gpt4openai2023}.
 
 
 
 
-We review here the general formalism for studying non-equilibrium effective field theories (EFTs) in the manner proposed in \cite{Glorioso:2018wxw}.
 
 
-\subsection{Rough Outline\label{sec:Outline}}
+\section{Memory}
 
-A rough outline of the physical picture is as follows:
-\begin{itemize}
-\item In generic out-of-vacuum systems, things are messy.  In particular, fluctuations create and destroy quantities not protected by conservation laws.
-\item E.g., in a finite-$T$ bath there is a characteristic relaxation time $\tau$ (and length $\ell$) after which a generic fluctuation gets re-absorbed by the bath.
-\item At low energies, we only expect a handful of degrees of freedom to be relevant and long-lived (compared to $\tau$, e.g.), primarily (but not exclusively) those protected by conservation laws.
-\item Local fluctuations of fields related to conserved quantities (like charges) cannot be absorbed, but only transported.  For such quantities, the transport mechanism typically takes a time $t_{\lambda}\gg \tau$ to return the system to equilibrium for a fluctuation of wavelength $\lambda \gg \ell$ (this double limit is also the typical regime studied in hydro).  These fluctuations are the interesting ones and are called the \textit{slow variables.}
-\item In special situations, like near critical points, other \textit{slow variables} can also emerge, but these are non-generic.
-\end{itemize}
-In \cite{Glorioso:2018wxw}, our primary source, the EFT structure describing systems of the above type is explained.
+
 
 \begin{minted}{python}
   def hello_world(args):
     print("hello world this is a test")
 \end{minted}
 
-\bibliographystyle{utphys}
+
+\appendix
+
+
+\section{Conventions and Notation}\label{app:conventions}
+
+
+We loosely follow the conventions of \cite{korthikanti2022reducing} and denote the main Transformers
+parameters by:
+
+\section{To-Do}\label{app:todo}
+
+
+\bibliographystyle{latex_goon/utphys}
 \bibliography{bibliography}
 \end{document}

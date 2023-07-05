@@ -1,8 +1,18 @@
 \providecommand{\href}[2]{#2}\begingroup\raggedright\begin{thebibliography}{1}
 
-\bibitem{Glorioso:2018wxw}
-H.~Liu and P.~Glorioso, ``{Lectures on non-equilibrium effective field theories and fluctuating hydrodynamics},'' \href{http://dx.doi.org/10.22323/1.305.0008}{{\em PoS} {\bf TASI2017} (2018)  008},
-\href{http://arxiv.org/abs/1805.09331}{{\tt arXiv:1805.09331 [hep-th]}}.
-%%CITATION = ARXIV:1805.09331;%%.
+\bibitem{vaswani2017attention}
+A.~Vaswani, N.~Shazeer, N.~Parmar, J.~Uszkoreit, L.~Jones, A.~N. Gomez, L.~Kaiser, and I.~Polosukhin, ``Attention is all you need,'' \href{http://arxiv.org/abs/1706.03762}{{\tt arXiv:1706.03762 [cs.CL]}}.
+
+\bibitem{gpt2radford2019language}
+A.~Radford, J.~Wu, R.~Child, D.~Luan, D.~Amodei, I.~Sutskever, {\em et al.}, ``Language models are unsupervised multitask learners,'' {\em OpenAI blog} {\bf 1} (2019) no.~8, 9.
+
+\bibitem{gpt3brown2020language}
+T.~B. Brown, B.~Mann, N.~Ryder, M.~Subbiah, J.~Kaplan, P.~Dhariwal, A.~Neelakantan, P.~Shyam, G.~Sastry, A.~Askell, S.~Agarwal, A.~Herbert-Voss, G.~Krueger, T.~Henighan, R.~Child, A.~Ramesh, D.~M. Ziegler, J.~Wu, C.~Winter, C.~Hesse, M.~Chen, E.~Sigler, M.~Litwin, S.~Gray, B.~Chess, J.~Clark, C.~Berner, S.~McCandlish, A.~Radford, I.~Sutskever, and D.~Amodei, ``Language models are few-shot learners,'' \href{http://arxiv.org/abs/2005.14165}{{\tt arXiv:2005.14165 [cs.CL]}}.
+
+\bibitem{gpt4openai2023}
+OpenAI, ``Gpt-4 technical report,'' \href{http://arxiv.org/abs/2303.08774}{{\tt arXiv:2303.08774 [cs.CL]}}.
+
+\bibitem{korthikanti2022reducing}
+V.~Korthikanti, J.~Casper, S.~Lym, L.~McAfee, M.~Andersch, M.~Shoeybi, and B.~Catanzaro, ``Reducing activation recomputation in large transformer models,'' \href{http://arxiv.org/abs/2205.05198}{{\tt arXiv:2205.05198 [cs.LG]}}.
 
 \end{thebibliography}\endgroup
