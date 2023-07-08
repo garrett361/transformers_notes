@@ -2,17 +2,17 @@ import math
 
 import torch
 import torch.nn as nn
-from defaults import A, B, D, S
+from defaults import A, B, D, K, S
 
 # Apologies for the lack of type-hinting, but it makes the latex less readable.
 
 
-class Attention(nn.Module):
+class CausalAttention(nn.Module):
     def __init__(
         self,
         attn_heads=A,
         hidden_dim=D,
-        block_size=S,
+        block_size=K,
         dropout=0.1,
     ):
         super().__init__()
@@ -37,7 +37,7 @@ class Attention(nn.Module):
         values = [v(inputs) for v in self.V]
         return queries, keys, values
 
-    def get_attn_maps(self, queries, keys, values):
+    def get_attn_maps(self, queries, keys, values, seq_len):
         norm = math.sqrt(self.head_dim)
         non_causal_attn_scores = [(q @ k.transpose(-2, -1)) / norm for q, k in zip(queries, keys)]
         causal_attn_scores = [
@@ -48,18 +48,19 @@ class Attention(nn.Module):
         return attn_maps
 
     def forward(self, inputs):
+        S = inputs.shape[1]
         queries, keys, values = self.get_qkv(inputs)
-        attn_maps = self.get_attn_maps(queries, keys, values)
-        weighted_values = torch.concat(
+        attn_maps = self.get_attn_maps(queries, keys, values, S)
+        weighted_values = torch.concatenate(
             [self.attn_dropout(a) @ v for a, v in zip(attn_maps, values)], dim=-1
         )
-        outputs = self.final_dropout(self.O(weighted_values))
-        return outputs
+        z = self.final_dropout(self.O(weighted_values))
+        return z
 
 
 def test_attention():
     inputs = torch.randn(B, S, D)
-    a = Attention()
+    a = CausalAttention()
     outputs = a(inputs)
     assert outputs.shape == inputs.shape
 
@@ -67,9 +68,9 @@ def test_attention():
 def test_attention_map():
     """Test that all of the attention maps are causal"""
     inputs = torch.randn(B, S, D)
-    a = Attention()
+    a = CausalAttention()
     q, k, v = a.get_qkv(inputs)
-    attn_maps = a.get_attn_maps(q, k, v)
+    attn_maps = a.get_attn_maps(q, k, v, S)
     assert attn_maps
     for map in attn_maps:
         assert torch.allclose(map.sum(dim=-1), torch.ones(map.shape[:2]))
