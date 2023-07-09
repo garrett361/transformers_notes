@@ -34,9 +34,8 @@ Notes on various aspects of Decoder-Only Transformers.
 
 The Transformers architecture \cite {vaswani2017attention}, which dominates Natural Language
 Processing (NLP) as of July 2023, is a relatively simple architecture. There are various flavors and
-variants of Tranformers, but we start by describing the decoder-only versions which underly the
+variants of Tranformers, but focus here on the decoder-only versions which underlie the
 GPT models \cite {gpt2radford2019language, gpt3brown2020language, gpt4openai2023}.
-
 
 The full decoder-only architecture can be seen in Fig.~\ref{fig:transformers_architecture}. The
 parameters which define the network can be found in App.~\ref{app:conventions}.
@@ -133,33 +132,33 @@ Since there are two \pyinline{LayerNorm} instances in each transformer block, th
 $ 2D $ parameters per layer.
 
 
-\subsubsection{Attention \label{subsubsec:attn_layer} }
+\subsubsection{Causal Attention \label{subsubsec:attn_layer} }
 
-The \textbf{attention} layer is the most complex layer. It features $ A $  triplets\footnote{$ A $
+The \textbf{causal attention} layer is the most complex layer. It features $ H $  triplets\footnote{$ H $
 must divide the hidden dimension $ D $ evenly.} of weight matrices\footnote{There are also bias
 terms, but we will often neglect to write them explicitly or account for their (negligible)
-parameter count.}  $ Q ^{ a } _{ d f }, K ^{ a } _{ df }, V ^{ a } _{ df }  $
-where $ a \in \left \{ 0, \ldots, A-1 \right \} $ and $ f \in \left \{ 0, \ldots, D/A \right \} $.
+parameter count.}  $ Q ^{ h } _{ d f }, K ^{ h } _{ df }, V ^{ h } _{ df }  $
+where $ a \in \left \{ 0, \ldots, H-1 \right \} $ and $ f \in \left \{ 0, \ldots, D/H \right \} $.
 From these, we form three different vectors:
 \begin{align}
-  q ^{ a }_{ bsf } &= z _{ bsd } Q ^{ a }_{ df } \ , \quad
-  k ^{ a }_{ bsf } = z _{ bsd } K ^{ a }_{ df }  \ , \quad
-  v ^{ a }_{ bsf } = z _{ bsd } V ^{ a }_{ df }
+  q ^{ h }_{ bsf } &= z _{ bsd } Q ^{ h }_{ df } \ , \quad
+  k ^{ h }_{ bsf } = z _{ bsd } K ^{ h }_{ df }  \ , \quad
+  v ^{ h }_{ bsf } = z _{ bsd } V ^{ h }_{ df }
 \end{align}
 These are the \textbf{query, key, and value} tensors, respectively.
 
-Using the above tensors, we will then build up an \textbf{attention map}  $ w ^{ a }_{ bss' } $
+Using the above tensors, we will then build up an \textbf{attention map}  $ w ^{ h }_{ bss' } $
 which corresponds to how much attention the token at position $ s $ pays to the token at
 position $ s' $.  Because we have the goal of predicting the
 next token in the sequence, we need these weights to be causal: the final prediction $ y _{ bsv } $
 should only have access to information propagated from positions $ x _{ bs'v } $ with $ s' \le s $.
-This corresponds to the condition that $ w ^{ a }_{ bss' } = 0  $ if  $ s' > s  $.
+This corresponds to the condition that $ w ^{ h }_{ bss' } = 0  $ if  $ s' > s  $.
 
  These weights come from \pyinline{Softmax}-ed attention scores, which are just a normalized
  dot-product over the hidden dimension:
 \begin{align}
-    w ^{ a }_{ bss'd } &=\Sm _{ s' } \left (m _{ s s' }+\ q ^{ a }_{ bsf }k ^{ a }_{ bs'f } / \sqrt{D/A} \right
-        )\ ,  \quad {\rm s.t.} \quad \sum_{s'}w ^{ a }_{ bdss' } =1
+    w ^{ h }_{ bss'd } &=\Sm _{ s' } \left (m _{ s s' }+\ q ^{ h }_{ bsf }k ^{ h }_{ bs'f } / \sqrt{D/H} \right
+        )\ ,  \quad {\rm s.t.} \quad \sum_{s'}w ^{ h }_{ bdss' } =1
 \end{align}
 The tensor $ m _{  s s' } $ is the causal mask which zeroes out the relevant attention map
 components above
@@ -169,7 +168,7 @@ components above
             -\infty &= s > s'
         \end{cases}
 \end{align}
-The $ \sqrt{D/A} $ normalization is motivated by demanding
+The $ \sqrt{D/H} $ normalization is motivated by demanding
 that the variance of the \pyinline{Softmax} argument be 1 at initialization, assuming that other
 components have been configured so that that the query and key components are i.i.d. from a Gaussian
 normal distribution \footnote{However, in \cite{yang2022tensor} it is instead argued that no square
@@ -177,9 +176,9 @@ root should be taken in order to maximize the speed of learning via SGD.}.
 
 The weights above are then passed through a dropout layer and used to re-weigh the \textbf{value} vectors and form the tensors
 \begin{align}
-  t ^{ a }_{ bsf }&=\Dr  \left (w ^{ a }_{ bdss' } \right ) v ^{ a }_{ bs'f }
+  t ^{ h }_{ bsf }&=\Dr  \left (w ^{ h }_{ bdss' } \right ) v ^{ h }_{ bs'f }
 \end{align}
-and these $ A $ different \pyinline{(B, S, D/A)}-shaped tensors
+and these $ H $ different \pyinline{(B, S, D/H)}-shaped tensors
 are then concatenated along the $ f $-direction to re-form a \pyinline{(B, S, D)}-shaped
 tensor\footnote{It is hard to come up with good index-notation for concatenation.}
 \begin{align}
@@ -193,12 +192,12 @@ output
 
 For completeness, the entire operation in condensed notation with indices left implicit is:
 \begin{align}
-    z  &\leftarrow \Dr \left ({\rm Concat} \ \left ( \Dr \left (\Sm  \left ( \frac{ \left ( z \cdot Q ^{ a } \right )\cdot \left ( z \cdot K ^{ a } \right )}{ \sqrt{D/A} }
-            \right)\right )\cdot z \cdot V ^{ a } \right ) \cdot O \right )
+    z  &\leftarrow \Dr \left ({\rm Concat} \ \left ( \Dr \left (\Sm  \left ( \frac{ \left ( z \cdot Q ^{ h } \right )\cdot \left ( z \cdot K ^{ h } \right )}{ \sqrt{D/H} }
+            \right)\right )\cdot z \cdot V ^{ h } \right ) \cdot O \right )
 \end{align}
-where all of the dot-products are over feature dimensions (those of size $ D $ or $ D/A $).
-A nice\footnote{An example optimization: there is no need to form separate $ Q ^{ a },K ^{ a },V ^{
-a} $ \pyinline{Linear} layers, one large layer which is later chunked is more efficient}, but
+where all of the dot-products are over feature dimensions (those of size $ D $ or $ D/H $).
+H nice\footnote{An example optimization: there is no need to form separate $ Q ^{ h },K ^{ h },V ^{
+h} $ \pyinline{Linear} layers, one large layer which is later chunked is more efficient}, but
 hopefully pedagogically useful, implementation of the attention layer is below:
 \pyfile[firstline=10, lastline=57]{python/causal_attention.py}
 
@@ -237,10 +236,79 @@ transformer block like
 
 And then the entire architecture: \pyfile[firstline=9, lastline=51]{python/decoder_only.py}
 
-\subsection{Memory}
+\section{Memory and Activations }
+
+In this section we summarize the train-time memory costs of Transformers under various training
+strategies.  At a high level, the memory cost is much more than simply the cost of the model
+parameters. Significant factors include:
+\begin{itemize}
+\item Optimizer states, like those of \pyinline{Adam}
+\item Mixed precision training costs, due to keeping multiple model copies.
+\item Activation memory\footnote{Activations refers to any intermediate value which needs to be
+    cached in order to compute backpropagation. We will be conservative and assume that the inputs
+of all operations need to be stored, though in practice gradient checkpointing and recomputation
+allow one to trade caching for redundant compute. In particular, flash attention
+\cite{dao2022flashattention} makes use of this strategy.} , needed for backpropagation.
+\item Gradients
+\end{itemize}
 
 
-Understanding the memory cost of
+Activations require the most detailed analysis, so we start with their analysis.
+
+\subsection{No Sharding/Parallelism}
+
+Start with the simplest case where no parallelism are
+used.  The costs of training then come from the model parameters, the optimizer state, the
+gradients, and the activations. Every parameter is assumed to be stored in \pyinline{fp32}, i.e.
+four bytes per parameter \footnote{We will usually express memory in terms of GiB, where $ 1\ {\rm
+GiB}\equiv 2 ^{ 30 }\ {\rm bytes}  $.} .
+
+We will assume the use of \pyinline{Adam} throughout, for
+simplicity, which stores \href{https://pytorch.org/docs/stable/generated/torch.optim.Adam.html}{two
+different running averages} per-model parameter. Even in this vanilla scenario, the cost of the
+optimizer states is significant.
+
+Next, we eventually will get gradients out of back propagation, one-per parameter, and so the
+gradient cost is also equal to the model weight cost.
+
+
+Finally, activations, which require more analysis \cite{korthikanti2022reducing}. Unlike the above
+factors, the activation memory will depend on both the batch size and input sequence length, $ B $
+and $ S $, scaling linearly with both.
+
+\subsubsection{MLP Activations}
+
+We will count the number of elements which need to be cached.  First we cache the
+\pyinline{(B, S, D)}-shaped inputs into the first MLP layer. These turn into the
+\pyinline{(B, S, FD)} inputs of the non-linearity, which are then passed into the last
+\pyinline{Linear} layer. This sums to the following number of cached activations elements:
+\begin{align}
+N _{ \rm act  } ^\texttt{MLP} &= (2F+1)BS \ .
+\end{align}
+The
+\href{https://github.com/pytorch/pytorch/issues/41571}{surprisingly}
+
+
+
+
+
+
+
+
+\subsection{Optimizer States and Mixed Precision}
+
+From the previous section, the pure parameter-count of the decoder-only Transformers
+architecture is
+\begin{align}
+    N _{ \rm params } &\approx  (4 + 2F) L D ^{ 2 } + VD +  \Ocal( LD)
+\end{align}
+where the first term comes from the \pyinline{TransformerBlock} weight matrices, the next term is
+the embedding matrix, and the neglected terms come from biases, \pyinline{LayerNorm} instances, and
+other negligible factors. \footnote{For the usual $ F=4 $ case, the \pyinline{MLP} layers are twice as costly
+as the \pyinline{CausalAttention} layers.}
+
+The memory cost of the bare parameters are usually dwarfed
+
 
 
 
@@ -261,7 +329,7 @@ parameters by:
 \item $ V $: vocabulary size
 \item $ D $: the hidden dimension size
 \item $ L $: number of transformer layers
-\item $ A $: number of attention heads
+\item $ H $: number of attention heads
 \item $ P $: pipeline parallel size
 \item $ T $: tensor parallel size
 \item $ F $: expansion factor for MLP layer (usually $ F=4 $)
@@ -273,7 +341,7 @@ sequence length, and vocabulary size would be written as $ x _{ bsv } $, with $ 
     \ldots, V -1\right \}$ in math notation, or as \mintinline{python}{x[b, s, v]} in code.  Typical
     transformers belong to the regime
 \begin{gather}
-V \gg D, S \gg L, A \gg P, T \ .  \label{app:eq:transformers_approxs}
+V \gg D, S \gg L, H \gg P, T \ .  \label{app:eq:transformers_approxs}
 \end{gather}
 
 
