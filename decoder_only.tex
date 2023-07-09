@@ -30,7 +30,7 @@ Notes on various aspects of Decoder-Only Transformers.
 
 
 
-\section{Decoder-Only Fundamentals \label{sec:decoder_only} }
+\section{Decoder-Only Fundamentals \label{sec_decoder_only} }
 
 The Transformers architecture \cite {vaswani2017attention}, which dominates Natural Language
 Processing (NLP) as of July 2023, is a relatively simple architecture. There are various flavors and
@@ -38,7 +38,7 @@ variants of Tranformers, but focus here on the decoder-only versions which under
 GPT models \cite {gpt2radford2019language, gpt3brown2020language, gpt4openai2023}.
 
 The full decoder-only architecture can be seen in Fig.~\ref{fig:transformers_architecture}. The
-parameters which define the network can be found in App.~\ref{app:conventions}.
+parameters which define the network can be found in App.~\ref{app_conventions}.
 \begin{figure}[h]
     \centering
     \includegraphics[scale=0.28]{figures/transformer-general.jpg}
@@ -85,11 +85,11 @@ Each batch (the $ b $-index) is processed independently. We omitted \pyinline{La
 through the architecture in more detail.
 
 
-\subsection{Component Details \label{subsec:decoder_only_components} }
+\subsection{Component Details \label{subsec_decoder_only_components} }
 
 We break down the various components below.
 
-\subsubsection{Embedding Layer and Positional Encodings \label{subsubsec:embedding_and_pe} }
+\subsubsection{Embedding Layer and Positional Encodings \label{subsubsec_embedding_and_pe} }
 
 The \textbf{embedding} layer is just a simple look up table: each of the \pyinline{range(V)} indices
 in the vocabulary is mapped to a $ D $-dimensional vector via a large \pyinline{(V, D)}-shaped
@@ -111,7 +111,7 @@ The above components require $ (V+S)D \approx VD $ parameters per layer.
 
 
 
-\subsubsection{Layer Norm \label{subsubsec:layer_norm} }
+\subsubsection{Layer Norm \label{subsubsec_layer_norm} }
 
 The original transformers paper \cite{vaswani2017attention} put \pyinline{LayerNorm} instances after
 the \textbf{attention} and \textbf{MLP} blocks, but now it is common \cite{xiong2020layer} to put
@@ -132,7 +132,7 @@ Since there are two \pyinline{LayerNorm} instances in each transformer block, th
 $ 2D $ parameters per layer.
 
 
-\subsubsection{Causal Attention \label{subsubsec:attn_layer} }
+\subsubsection{Causal Attention \label{subsubsec_attn_layer} }
 
 The \textbf{causal attention} layer is the most complex layer. It features $ H $  triplets\footnote{$ H $
 must divide the hidden dimension $ D $ evenly.} of weight matrices\footnote{There are also bias
@@ -204,14 +204,14 @@ hopefully pedagogically useful, implementation of the attention layer is below:
 The parameter count is dominated by the weight matrices which carry $ 4 D ^{ 2 } $ total parameters per layer.
 
 
-\subsubsection{MLP \label{subsubsec:mlp} }
+\subsubsection{MLP \label{subsubsec_mlp} }
 
 The feed-forward network is straightforward and corresponds to
 \begin{align}
   z _{ bsd } &\leftarrow \phi \left ( z _{ bsd' }W ^{ 0 }_{ d'e } \right ) W ^{ 1 } _{ ed }
 \end{align}
 where $ W ^{ 0 } $ and $ W ^{ 1 } $ are \pyinline{(D, FD)}- and \pyinline{(FD, D)}-shaped matrices,
-respectively (see App.~\ref{app:conventions} for notation) and $ \phi $ is a
+respectively (see App.~\ref{app_conventions} for notation) and $ \phi $ is a
 non-linearity\footnote{The \pyinline{GeLU}
 \href{https://pytorch.org/docs/stable/generated/torch.nn.GELU.html}{non-linearity} is common.}. The
 implementation is straightforward: \pyfile[firstline=8, lastline=24]{python/mlp.py}
@@ -220,13 +220,13 @@ This bock requires $ 2 F D ^{ 2 } $ parameters per layer, only counting the cont
 weights.
 
 
-\subsubsection{Language Model Head \label{subsubsec:language_model_head} }
+\subsubsection{Language Model Head \label{subsubsec_language_model_head} }
 
 
 The layer which converts the \pyinline{(B, S, D)}-shaped outputs, $ z _{ bsd } $, to \pyinline{(B, S, V)}-shaped
 predictions over the vocabulary, $  y _{ bsv } $, is the \textbf{Language Model Head}. It
 is a linear layer, whose weights are usually tied to be exactly those of the initial embedding
-layer of Sec.~\ref{subsubsec:embedding_and_pe}.
+layer of Sec.~\ref{subsubsec_embedding_and_pe}.
 
 
 \subsubsection{All Together}
@@ -236,7 +236,7 @@ transformer block like
 
 And then the entire architecture: \pyfile[firstline=9, lastline=51]{python/decoder_only.py}
 
-\section{Memory and Activations }
+\section{Training Memory and Activations }
 
 In this section we summarize the train-time memory costs of Transformers under various training
 strategies.  At a high level, the memory cost is much more than simply the cost of the model
@@ -252,10 +252,62 @@ allow one to trade caching for redundant compute. In particular, flash attention
 \item Gradients
 \end{itemize}
 
+Use use the symbol $ p $ to denote the precision in bytes that any given element is stored in, so
+\pyinline{torch.float32} corresponds to $ p=4 $, for instance.
 
-Activations require the most detailed analysis, so we start with their analysis.
 
-\subsection{No Sharding/Parallelism}
+\subsection{Model Memory, Optimizer States, and Mixed Precision}
+
+We will assume the use of \pyinline{Adam} throughout, for
+simplicity, which stores \href{https://pytorch.org/docs/stable/generated/torch.optim.Adam.html}{two
+different running averages} per-model parameter. Without mixed precision, the total cost of the
+\pyinline{torch.float32} ($ p=4 $ bytes) model and optimizer states in bytes is then
+\begin{align}
+    M ^{ \rm model} &= 4 N _{ \rm params } \ , \quad M^{ \rm  optim } = 8 N _{ \rm params }
+    \quad ({\rm no \ mixed \ precision})
+    \label{eq_optimizer_states_no_mp}
+\end{align}
+where, from the previous section, the pure parameter-count of the decoder-only Transformers
+architecture is
+\begin{align}
+    N _{ \rm params } &\approx  (4 + 2F) L D ^{ 2 } + VD +  \Ocal( LD)\ .
+\end{align}
+The first term comes from the \pyinline{TransformerBlock} weight matrices, the next term is
+the embedding matrix, and the neglected terms come from biases, \pyinline{LayerNorm} instances, and
+other negligible factors. \footnote{For the usual $ F=4 $ case, the \pyinline{MLP} layers are twice as costly
+as the \pyinline{CausalAttention} layers.} The optimizer states cost double the model itself.
+
+
+The situation is more complicated when mixed-precision is used \cite{micikevicius2018mixed}.
+The pertinent components of mixed-precision:
+\begin{itemize}
+\item A half-precision ($ p=2 $ bytes) copy of the model is used to perform the forwards and
+    backwards passes
+\item A second, "master copy" of the model is also kept with weights in full $ p=4 $ precision
+\item The internal \pyinline{Adam} states are kept in full-precision
+\end{itemize}
+Confusingly, the master copy weights are usually accounted for as part of the optimizer state, in
+which case the above is altered to
+\begin{align}
+    M ^{ \rm model} &= 2 N _{ \rm params } \ , \quad M^{ \rm  optim } = 12 N _{ \rm params }
+    \quad ({\rm mixed \ precision}) .
+    \label{eq_optimizer_states_mp}
+\end{align}
+The optimizer state is now six times the cost of the actual model used to process data and the costs
+of \eqref{eq_optimizer_states_mp} are more than double those of \eqref{eq_optimizer_states_no_mp}.
+The point of mixed precision is speed, the ability to take advantage of specialized hardware, not
+memory savings.
+
+
+\subsection{Optimizer States and Mixed Precision}
+
+
+
+
+\subsection{Activations}
+
+
+\subsubsection{No Sharding/Parallelism}
 
 Start with the simplest case where no parallelism are
 used.  The costs of training then come from the model parameters, the optimizer state, the
@@ -263,10 +315,6 @@ gradients, and the activations. Every parameter is assumed to be stored in \pyin
 four bytes per parameter \footnote{We will usually express memory in terms of GiB, where $ 1\ {\rm
 GiB}\equiv 2 ^{ 30 }\ {\rm bytes}  $.} .
 
-We will assume the use of \pyinline{Adam} throughout, for
-simplicity, which stores \href{https://pytorch.org/docs/stable/generated/torch.optim.Adam.html}{two
-different running averages} per-model parameter. Even in this vanilla scenario, the cost of the
-optimizer states is significant.
 
 Next, we eventually will get gradients out of back propagation, one-per parameter, and so the
 gradient cost is also equal to the model weight cost.
@@ -295,28 +343,13 @@ The
 
 
 
-\subsection{Optimizer States and Mixed Precision}
-
-From the previous section, the pure parameter-count of the decoder-only Transformers
-architecture is
-\begin{align}
-    N _{ \rm params } &\approx  (4 + 2F) L D ^{ 2 } + VD +  \Ocal( LD)
-\end{align}
-where the first term comes from the \pyinline{TransformerBlock} weight matrices, the next term is
-the embedding matrix, and the neglected terms come from biases, \pyinline{LayerNorm} instances, and
-other negligible factors. \footnote{For the usual $ F=4 $ case, the \pyinline{MLP} layers are twice as costly
-as the \pyinline{CausalAttention} layers.}
-
-The memory cost of the bare parameters are usually dwarfed
-
-
 
 
 
 \appendix
 
 
-\section{Conventions and Notation}\label{app:conventions}
+\section{Conventions and Notation}\label{app_conventions}
 
 
 We loosely follow the conventions of \cite{korthikanti2022reducing} and denote the main Transformers
@@ -341,7 +374,7 @@ sequence length, and vocabulary size would be written as $ x _{ bsv } $, with $ 
     \ldots, V -1\right \}$ in math notation, or as \mintinline{python}{x[b, s, v]} in code.  Typical
     transformers belong to the regime
 \begin{gather}
-V \gg D, S \gg L, H \gg P, T \ .  \label{app:eq:transformers_approxs}
+V \gg D, S \gg L, H \gg P, T \ .  \label{app_eq_transformers_approxs}
 \end{gather}
 
 
@@ -358,7 +391,7 @@ summation notation in which index-sums are implied by the presence of repeated i
 symbols are entirely ommitted. For instance, the dot product between two vectors would be written as
 \begin{align}
     \vec{x} \cdot \vec{y} &= \sum _{ i } x _{ i } y _{ i } \equiv x _{ i } y _{  i }
-    \label{app:eq:einstein_sum}
+    \label{app_eq_einstein_sum}
 \end{align}
 We use similar notation which is further adapted to the common element-wise deep-learning
 operations.  The general rule is that if a repeated index appears on one side of an equation, but
@@ -375,7 +408,7 @@ element-wise operation. The Hadamard-product between two matrices $ A $ and $ B 
      s _{ bvd\ldots } &= \frac{ e^{ x _{ bv d\ldots}  } }{ \sum _{ v = 0 } ^{  v= V-1 } e^{ x _{
      bvd\ldots } } } \equiv
      \Sm _{ v } \ x _{ bvd\ldots }
-     \ , \label{app:eq:einstein_softmax}
+     \ , \label{app_eq_einstein_softmax}
  \end{align}
  indicating that the sum over the singled-out $ v $-index is gives unity.
 
