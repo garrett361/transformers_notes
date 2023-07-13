@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from defaults import B, D, F, S
+from defaults import B, D, E, S
 
 # Apologies for the lack of type-hinting, but it makes the latex less readable.
 
@@ -9,7 +9,7 @@ class MLP(nn.Module):
     def __init__(
         self,
         hidden_dim=D,
-        expansion_factor=F,
+        expansion_factor=E,
         dropout=0.1,
     ):
         super().__init__()

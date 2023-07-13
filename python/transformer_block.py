@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from causal_attention import CausalAttention
-from defaults import B, D, F, H, K, L, S, V
+from defaults import B, D, E, H, K, L, S, V
 from mlp import MLP
 
 # Apologies for the lack of type-hinting, but it makes the latex less readable.
@@ -13,7 +13,7 @@ class TransformerBlock(nn.Module):
         attn_heads=H,
         block_size=K,
         dropout=0.1,
-        expansion_factor=F,
+        expansion_factor=E,
         hidden_dim=D,
         layers=L,
         vocab_size=V,

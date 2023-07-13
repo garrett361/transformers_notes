@@ -41,17 +41,17 @@ class CausalAttention(nn.Module):
         norm = math.sqrt(self.head_dim)
         non_causal_attn_scores = [(q @ k.transpose(-2, -1)) / norm for q, k in zip(queries, keys)]
         causal_attn_scores = [
-            a.masked_fill(self.causal_mask[:, :S, :S] == 0, float("-inf"))
+            a.masked_fill(self.causal_mask[:, :seq_len, :seq_len] == 0, float("-inf"))
             for a in non_causal_attn_scores
         ]
         attn_maps = [a.softmax(dim=-1) for a in causal_attn_scores]
         return attn_maps
 
     def forward(self, inputs):
-        S = inputs.shape[1]
+        seq_len = inputs.shape[1]
         queries, keys, values = self.get_qkv(inputs)
-        attn_maps = self.get_attn_maps(queries, keys, values, S)
-        weighted_values = torch.concatenate(
+        attn_maps = self.get_attn_maps(queries, keys, values, seq_len)
+        weighted_values = torch.cat(
             [self.attn_dropout(a) @ v for a, v in zip(attn_maps, values)], dim=-1
         )
         z = self.final_dropout(self.O(weighted_values))
