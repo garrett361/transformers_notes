@@ -20,13 +20,21 @@ class TransformerBlock(nn.Module):
     ):
         super().__init__()
         self.attn_ln = nn.LayerNorm(hidden_dim)
-        self.mlp_ln = nn.LayerNorm(hidden_dim)
         self.attn = CausalAttention(attn_heads, hidden_dim, block_size, dropout)
-        self.mlp = MLP(hidden_dim, expansion_factor, dropout)
+        self.attn_drop = nn.Dropout(dropout)
+
+        self.mlp_ln = nn.LayerNorm(hidden_dim)
+        self.mlp = MLP(hidden_dim, expansion_factor)
+        self.mlp_drop = nn.Dropout(dropout)
 
     def forward(self, inputs):
-        z = self.attn(self.attn_ln(inputs)) + inputs
-        z = self.mlp(self.mlp_ln(z)) + z
+        z_attn = self.attn_ln(inputs)
+        z_attn = self.attn(z_attn)
+        z_attn = self.attn_drop(z_attn) + inputs
+
+        z_mlp = self.mlp_ln(z_attn)
+        z_mlp = self.mlp(z_mlp)
+        z = self.mlp_drop(z_mlp) + z_attn
         return z
 
 

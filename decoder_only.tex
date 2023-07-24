@@ -37,17 +37,18 @@ Processing (NLP) as of July 2023, is a relatively simple architecture. There are
 variants of Tranformers, but focus here on the decoder-only versions which underlie the
 GPT models \cite {gpt2radford2019language, gpt3brown2020language, gpt4openai2023}.
 
-The full decoder-only architecture can be seen in Fig.~\ref{fig:transformers_architecture}. The
+The full decoder-only architecture can be seen in Fig.~\ref{fig_transformers_architecture}. The
 parameters which define the network can be found in App.~\ref{app_conventions}.
 \begin{figure}[ht]
     \centering
     \includegraphics[scale=0.28]{figures/transformer-general.jpg}
     \caption{The full transformers architecture. Diagram taken from \cite{korthikanti2022reducing} }
-    \label{fig:transformers_architecture}
+    \label{fig_transformers_architecture}
 \end{figure}
 
 
-An outline of the mechanics:
+At a high level, decoder-only transformers take in a series of word-like objects, called tokens, and are trained
+to predict the next token in the sequence. An outline of the mechanics:
 \begin{enumerate}
     \item Raw text is \textbf{tokenized} and turned into a series of integers\footnote{There are
         about \href{https://github.com/ray-project/llm-numbers}{1.3 tokens per word}, on average.} whose values lie in \pyinline{range(V)}, with $ V $ the vocabulary
@@ -70,12 +71,12 @@ An outline of the mechanics:
         \end{enumerate}
         Importantly, there are \textbf{residual connections} around each of these\footnote{This
         gives rise to the concept of the \textbf{residual stream} which each transformer block reads
-        from and writes back to repeatedly.} (the arrows in Fig.~\ref{fig:transformers_architecture}).
+        from and writes back to repeatedly.} (the arrows in Fig.~\ref{fig_transformers_architecture}).
     \item Finally, we convert the \pyinline{(B, S, D)}-shaped
         tensors to \pyinline{(B, S, V)}-shaped ones, $ y _{ bsv } $. This is the role of
         the \textbf{language model head} (which is often just the embedding layer used in an inverse
         manner.)
-    \item  The $ y _{ bsv } $ predict what the next token will be, having seen the \textbf{context}
+    \item  The $ y _{ bsv } $ predict what the next token will be, i.e. $ x _{ bs+1 } $, having seen the \textbf{context}
         of the first $ s $ tokens in the sequence.
 \end{enumerate}
 
@@ -167,8 +168,11 @@ components above
     m _{ s s' } &= \begin{cases}
             0 & s \le s' \nn
             -\infty &= s > s'
-        \end{cases}
+        \end{cases}\ .
 \end{align}
+In other words, the causal mask ensures that a given tensor, say $ z _{ bsd } $, only has dependence on
+other tensors whose sequence index, say $ s' $, with $ s' \le s $.
+
 The $ \sqrt{D/H} $ normalization is motivated by demanding
 that the variance of the \pyinline{Softmax} argument be 1 at initialization, assuming that other
 components have been configured so that that the query and key components are i.i.d. from a Gaussian
@@ -198,10 +202,14 @@ For completeness, the entire operation in condensed notation with indices left i
             \right)\right )\cdot z \cdot V ^{ h } \right ) \cdot O \right ) \label{eq_causal_attn}
 \end{align}
 where all of the dot-products are over feature dimensions (those of size $ D $ or $ D/H $).
-H nice\footnote{An example optimization: there is no need to form separate $ Q ^{ h },K ^{ h },V ^{
-h} $ \pyinline{Linear} layers, one large layer which is later chunked is more efficient}, but
-hopefully pedagogically useful, implementation of the attention layer is below:
-\pyfile[firstline=10, lastline=57]{python/causal_attention.py}
+
+The final \pyinline{Dropout} layer is often included as part of the \pyinline{CausalAttention} block , as
+in the math above and in Fig.~\ref{fig_transformers_architecture}. Below is pedagogical\footnote{The
+code is written for clarity, not speed. An example optimization missing here: there is no need to
+form separate $ Q ^{ h },K ^{ h },V ^{ h} $ \pyinline{Linear} layers, one large layer which is later
+chunked is more efficient} sample code for a \pyinline{CausalAttention} layer which separates the
+last \pyinline{Dropout} layer out. This will be convenient when we talk about sequence parallelism below
+in Sec.~\ref{subsec_seq_parallelism}. \pyfile[firstline=10,lastline=57]{python/causal_attention.py}
 
 The parameter count is dominated by the weight matrices which carry $ 4 D ^{ 2 } $ total parameters per layer.
 
@@ -216,8 +224,9 @@ The feed-forward network is straightforward and corresponds to
 where $ W ^{ 0 } $ and $ W ^{ 1 } $ are \pyinline{(D, ED)}- and \pyinline{(ED, D)}-shaped matrices,
 respectively (see App.~\ref{app_conventions} for notation) and $ \phi $ is a
 non-linearity\footnote{The \pyinline{GeLU}
-\href{https://pytorch.org/docs/stable/generated/torch.nn.GELU.html}{non-linearity} is common.}. The
-implementation is straightforward: \pyfile[firstline=8, lastline=24]{python/mlp.py}
+\href{https://pytorch.org/docs/stable/generated/torch.nn.GELU.html}{non-linearity} is common.}.
+In code, where we again separate out the last \pyinline{Dropout} layer as we did in in
+Sec.~\ref{subsubsec_attn_layer}.  \pyfile[firstline=8, lastline=23]{python/mlp.py}
 
 This bock requires $ 2 E D ^{ 2 } $ parameters per layer, only counting the contribution from
 weights.
@@ -235,9 +244,15 @@ layer of Sec.~\ref{subsubsec_embedding_and_pe}.
 \subsection{All Together}
 It is then relatively straightforward to tie everything together.  In code, we can first create a
 transformer block like
-\pyfile[firstline=10, lastline=30]{python/transformer_block.py}
+\pyfile[firstline=10, lastline=32]{python/transformer_block.py}
+which corresponds to the schematic function
+\begin{align}
+  z &\leftarrow  z + \texttt{MLP}\left ( \LN \left ( z + \texttt{CausalAttention}\left ( \LN \left (
+  z\right ) \right )  \right ) \right )\ ,
+\end{align}
+indices suppressed.
 
-And then the entire architecture: \pyfile[firstline=9, lastline=51]{python/decoder_only.py}
+And then the entire architecture: \pyfile[firstline=9, lastline=50]{python/decoder_only.py}
 
 
 \subsection{The Loss Function}
@@ -269,12 +284,7 @@ code, the loss computation might look like the following:
 \section{Memory \label{sec_memory_training}}
 
 In this section we summarize the train-time memory costs of Transformers under various training
-strategies and the total number of floating point operations\footnote{The notation surrounding
-floating-point operations is very confusing because another quantity of interest is the number of
-floating-point operations a given implementation can use \textit{per-second}. Sometimes, people use
-FLOPs or FLOP/s to indicate the rate, rather than the gross-count, but there's little consistency in
-general.}  needed to process a given batch of
-data.
+strategies\footnote{A nice related blog post is \href{https://blog.eleuther.ai/transformer-math/}{here}.}.
 
 The memory cost is much more than simply the cost of the model
 parameters. Significant factors include:
@@ -308,19 +318,21 @@ Start with the simplest case where there is no sharding of the model states. Han
 parallelism strategies later will be relatively straightforward, as it involves inserting just a few
 factors here and there.
 
-\subsubsection{Parameters, Gradients, Optimizer States, and Mixed Precision}
+\subsubsection{Parameters, Gradients, Optimizer States, and Mixed Precision
+\label{sec_params_grads_optim_mem}}
 
 
 Memory from the bare parameter cost, gradients, and optimizer states are fixed costs independent of
-batch size and sequence-length (unlike activation memory), so we discuss them all together here.
-The parameter and optimizer costs are also sensitive to whether or not mixed-precision is used,
-hence we also address that topic, briefly.  We will assume the use of \pyinline{Adam}\footnote{Which stores \href{https://pytorch.org/docs/stable/generated/torch.optim.Adam.html}{two
-different running averages} per-model parameter.} throughout, for simplicity and concreteness. It
-will sometimes be useful below to let $ p $ to denote the precision in bytes that any given element
-is stored in, so \pyinline{torch.float32} corresponds to $ p=4 $, for instance. Ultimately, we
-primarily consider vanilla training in $ p=4 $ precision and mixed-precision; generalizations to
-other training formats should be straightforward.
-
+batch size and sequence-length (unlike activation memory), so we discuss them all together here. The
+parameter and optimizer costs are also sensitive to whether or not mixed-precision is used, hence we
+also address that topic, briefly.  We will assume the use of \pyinline{Adam}\footnote{Which stores
+    \href{https://pytorch.org/docs/stable/generated/torch.optim.Adam.html}{two different running
+averages} per-model parameter.} throughout, for simplicity and concreteness. It will sometimes be
+useful below to let $ p $ to denote the precision in bytes that any given element is stored in, so
+\pyinline{torch.float32} corresponds to $ p=4 $, for instance. Ultimately, we primarily consider
+vanilla training in $ p=4 $ precision and \pyinline{torch.float32}/\pyinline{torch.float16} ($ p=4
+$/ $ p=2 $)  mixed-precision, other, increasingly popular variants to exist, so we keep the
+precision variable where we can.
 
 
 Without mixed precision, the total cost of the
@@ -333,12 +345,14 @@ Without mixed precision, the total cost of the
 here, from the previous section, the pure parameter-count of the decoder-only Transformers
 architecture is
 \begin{align}
-    N _{ \rm params } &\approx  (4 + 2E) L D ^{ 2 } + VD +  \Ocal( LD)\ . \label{eq_approx_params}
+    N _{ \rm params } &\approx  (4 + 2E) L D ^{ 2 } \times \left ( 1 + \Ocal \left( \frac{ V }{ DL }
+    \right) + \Ocal \left( \frac{ 1 }{ D } \right)  \right ) \ . \label{eq_approx_params_no_sharding}
 \end{align}
-The first term comes from the \pyinline{TransformerBlock} weight matrices, the next term is
-the embedding matrix, and the neglected terms come from biases, \pyinline{LayerNorm} instances, and
-other negligible factors. \footnote{For the usual $ E=4 $ case, the \pyinline{MLP} layers are twice as costly
-as the \pyinline{CausalAttention} layers.} The optimizer states cost double the model itself.
+where the first term comes from the \pyinline{TransformerBlock} weight matrices, the first omitted
+subleading correction term is the embedding matrix, and the last comes from biases,
+\pyinline{LayerNorm} instances, and other negligible factors. \footnote{For the usual $ E=4 $ case,
+    the \pyinline{MLP} layers are twice as costly as the \pyinline{CausalAttention} layers.} The
+    optimizer states cost double the model itself.
 
 
 The situation is more complicated when mixed-precision is used \cite{micikevicius2018mixed}.
@@ -357,9 +371,10 @@ which case the above is altered to
     \label{eq_optimizer_states_mem_mp}
 \end{align}
 The optimizer state is now six times the cost of the actual model used to process data and the costs
-of \eqref{eq_optimizer_states_mem_mp} are more than double those of \eqref{eq_optimizer_states_mem_no_mp}.
-The point of mixed precision is speed, the ability to take advantage of specialized hardware, not
-memory savings. The above also demonstrates why training is so much more expensive than inference.
+of \eqref{eq_optimizer_states_mem_mp} are more than those of \eqref{eq_optimizer_states_mem_no_mp}.
+However, as we will see, the reduced cost of activation memory can offset these increased costs, and
+we get the added benefit of increased speed due to specialized hardware. The above also demonstrates
+why training is so much more expensive than inference.
 
 
 \subsubsection{Gradients}
@@ -400,7 +415,8 @@ memory per element, rather than one bit \footnote{As you can verify
 via \pyinline{4 * torch.tensor([True]).element_size() == torch.tensor([1.]).element_size().}}.
 Given this, the total memory cost from activations per attention layer is
 \begin{align}
-M _{ \rm act  } ^\texttt{Attention} &= BS \left ( (5p+1)D + (2p+1)HS  \right )
+M _{ \rm act  } ^\texttt{Attention} &= BS \left ( (5p+1)D + (2p+1)HS  \right ) \ .
+\label{eq_att_actmem_vanilla}
 \end{align}
 
 
@@ -415,19 +431,21 @@ M _{ \rm act  } ^\texttt{Attention} &= BS \left ( (5p+1)D + (2p+1)HS  \right )
 mask, the total memory requirement is
 \begin{align}
 M _{ \rm act  } ^\texttt{MLP} &= (2Ep+p+1)BSD\ .
+\label{eq_mlp_actmem_vanilla}
 \end{align}
 
 
-\paragraph{LayerNorm, Residual Connections, and LM Head}
+\paragraph{LayerNorm, Residual Connections, and Other Contributions}
 
 Then the last remaining components. The \pyinline{LayerNorm} instances each have $ BSD $ inputs and
 there are two per transformer block, so $ M _{ {\rm  act}  } ^\texttt{LayerNorm} = 2pBSD $ for each
 layer, and there is an additional instance at the end of the architecture. There are two residual
-connections per block \footnote{These do not appear to be accounted for in
-\cite{korthikanti2022reducing}}, and we have already cached one of the two inputs, so the per-block
-cost is $ M _{ {\rm act}  } ^{ {\rm residual}  } = 2p BSD $. Finally, the inputs to the
-language-model head are also \pyinline{(B, S, D)}-shaped, so $ M _{ {\rm act}  } ^{ {\rm LM \ head}
-} = pBSD $.
+connections per block, but their inputs do not require caching (since they're just additions whose
+derivatives are independent of inputs). Then, there are additional contributions from pushing the
+last layer's outputs through the language-model head and computing the loss function, but these do
+no scale with $ L $ and are ultimately $ \sim \Ocal \left( \frac{ V }{ DL } \right)  $ suppressed,
+so we neglect them.
+
 
 
 
@@ -435,26 +453,38 @@ language-model head are also \pyinline{(B, S, D)}-shaped, so $ M _{ {\rm act}  }
 \paragraph{Total Activation Memory}
 
 
-Summing up the contributions above, the total activation memory cost is
+Summing up the contributions above, the total activation memory cost per-layer is
 \begin{align}
-    M _{ {\rm act}  } ^{ {\rm  total}  } &= BSD \left ( L \left ( 2p(E+5) + 2 \right ) + 2p \right )
-    + LHBS ^{ 2 } \left ( 2p+1\right )
+    M _{ {\rm act}  } ^{ {\rm  total}  } & \approx  2BDLS   \left ( p(E+4) + 1 + \Ocal \left( \frac{
+    V}{ DL } \right)  \right )
+    + BHLS ^{ 2 } \left ( 2p+1\right ) \label{eq_act_mem_total_no_sharding}\ .
 \end{align}
 Evaluating in common limits, we have:
-
 \begin{align}
-    M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=4 } &=BS \left ( \left ( 74L+8 \right )D
-    +9HLS \right ) \nn
-    M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=2 } &=BS \left ( \left ( 38L+4 \right )D
-    +5HLS \right )
+    M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=4 } &=BLS \left ( 66 D+15HS  \right ) \nn
+    M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=2 } &=BLS \left ( 34 D+5HS  \right )
 \end{align}
 
 
-\subsection{Model/Tensor Parallelism}
+\paragraph{When does mixed-precision reduce memory?} (Answer: usually.) We saw in Sec.~\ref{sec_params_grads_optim_mem}
+that mixed precision \textit{increases} the fixed costs of non-activation memory, but from the above
+we also see that it also \textit{reduces} the activation memory and the saving increase with larger
+batch sizes and sequence lengths. It is straightforward to find where the tipping point is and for
+the simplified $ E=4$, vanilla mixed-precision case with no parallelism the minimum batch size which
+leads to memory savings is
+\begin{align}
+  B _{ {\rm min}  } &= \frac{ 6 D ^{ 2 } }{ 8 DS + H S ^{ 2 } }\label{eq_min_mp_batch_size}\ .
+\end{align}
+For typical architectures and training sequence lengths, the two terms in the denominator are about
+equal and so we can approximate the above as $ B _{ {\rm min}  } \sim \frac{ D }{ S }  \sim \Ocal
+\left( 5 \right) $ for typical mid-to-large models in Summer 2023. The constant factors are
+important, but they turn out to help us: for GPT-2 and GPT-3
+
+\subsection{Tensor Parallelism \label{subsec_tensor_parallelism} }
 
 
-In \textbf{Model Parallelism} or \textbf{Tensor Parallelism}, individual weight matrices are split
-across devices \cite{shoeybi2020megatronlm}. We consider the \pyinline{MLP} and
+In \textbf{Tensor Parallelism}, sometimes also called \textbf{Model Parallelism}, individual weight
+matrices are split across devices \cite{shoeybi2020megatronlm}. We consider the \pyinline{MLP} and
 \pyinline{CausalAttention} layers in turn. Assume $ T $-way parallelism such that we split some
 hidden dimension into $ T $-equal parts. The total number of workers is some $ N \ge T $ which is
 evenly divisible by $ T $. With $ N >T $ workers, the workers are partitioned into $ N/T $ groups
@@ -531,43 +561,158 @@ case above.
      \centering
      \includegraphics[scale=.3]{figures/attention_mp_2.png}
      \caption{Tensor parallelism for the \pyinline{CausalAttention} layers. Graphic from
-     \cite{shoeybi2020megatronlm}. }
+     \cite{shoeybi2020megatronlm}. The $ f/g $ operators play the same role as in
+ Fig.~\ref{fig_mlp_tensor_parallel}.}
      \label{fig_attn_tensor_parallel}
  \end{figure}
 
+ \paragraph{Embedding and LM Head} Last, we can apply tensor parallelism to the language model head,
+ which will also necessitate sharding the embedding layer, if the two share weights, as typical.
 
- \paragraph{Effects on Memory} The per-worker memory savings come from the sharding of
+For the LM head, we shard the output dimension as should be now familiar, ending up with $ T $
+different \pyinline{(B, S, V/T)}-shaped tensors, one per group member. Rather than communicating
+these large tensors around and then computing the cross-entropy loss, it is more efficient to have
+each worker compute their own loss where possible and then communicate the scalar losses
+around\footnote{In more detail, given the gold-answers $ y _{ bs } $ for the next-token-targets, a
+given worker can compute their contribution to the loss whenever their \pyinline{(B, S, V/T)}-shaped
+output $ z _{ bsv' } $ contains the vocabulary dimension $ v _{ * } $ specified by $ y _{ bs } $,
+otherwise those tensor components are ignored.}.
 
-\subsection{Pipeline Parallelism}
+For a weight-tied embedding layer, the former construction requires \pyinline{AllReduce} in order
+for every worker to get the full continuous representation of the input.
+
+\paragraph{LayerNorm and Dropout} \pyinline{LayerNorm} instances are not sharded in pure tensor
+parallelism both because there is less gain in sharding them parameter-wise, but also sharding
+\pyinline{LayerNorm} in particular would require additional cross-worker communication, which we
+wish to reduce as much as possible. \pyinline{Dropout} layers are also not sharded in  where
+possible in pure tensor parallelism, but sharding the post-attention \pyinline{Dropout} layer is
+unavoidable. It is the goal of sequence parallelism is to shard these layers efficiently; see
+Sec.~\ref{subsec_seq_parallelism}.
 
 
-\subsection{Sequence Parallelism}
+
+ \paragraph{Effects on Memory} The per-worker memory savings come from the sharding of the weights
+ and the reduced activation memory from sharded intermediate representations.
+
+ The gradient and optimizer state memory cost is proportional to the number of parameters local to
+ each worker (later we will also consider sharding these components to reduce redundantly-held
+ information). The number of parameters per worker is reduced to
+\begin{align}
+    N _{ \rm params } &\approx  (4 + 2E) \frac{ L D ^{ 2 } }{ T }\ ,
+    \label{eq_approx_params_tensor_parallel}
+\end{align}
+counting only the dominant contribution from weights which scale with $ L $, since every weight is
+sharded. Since all non-activation contributions to training memory scale with $ N _{ {\rm params}  }
+$, this is a pure $ 1/T $ improvement.
+
+ The per-layer activation memory costs \eqref{eq_att_actmem_vanilla} and
+ \eqref{eq_mlp_actmem_vanilla} are altered to:
+\begin{align}
+M _{ \rm act  } ^\texttt{Attention} &= BS \left ( \left (p + \frac{ 4p }{ T }+1 \right )D + \left
+(\frac{ 2p+1 }{ T } \right )HS  \right ) \nn
+M _{ \rm act  } ^\texttt{MLP} &= \left (\frac{ 2Ep }{ T }+p+1 \right )BSD\ .
+\label{eq_act_mem_attn_mlp}
+\end{align}
+The derivation is similar to before. Adding in the (unchanged) contributions from
+\pyinline{LayerNorm} instances, the total, leading order activation memory sums to
+\begin{align}
+    M _{ {\rm act}  } ^{ {\rm  total}  } & \approx  2BDLS   \left ( p \left (2+ \frac{ E+2 }{ T }\right ) + 1   \right )
+    + BHLS ^{ 2 } \left ( \frac{ 2p+1 }{ T }\right ) \label{eq_act_mem_total_tensor_parallel}\ .
+\end{align}
+Again, the terms which did not receive the $ 1/T $ enhancement correspond to activations from
+unsharded \pyinline{LayerNorm} and \pyinline{Dropout} instances and the $ 1/T $'s improvements can
+be enacted by layering sequence parallelism on top (Sec.~\ref{subsec_seq_parallelism}).
+
+
+\subsection{Sequence Parallelism \label{subsec_seq_parallelism}}
+
+In \eqref{eq_act_mem_total_tensor_parallel}, not every factor is reduced by $ T $.
+\textbf{Sequence Parallelism} fixes that by noting that the remaining contributions, which
+essentially come from \pyinline{Dropout} and \pyinline{LayerNorm}, can be parallelized in the sequence dimension (as can
+the residual connections).
+
+The collective communications change a bit. If we shard the tensors across the sequence dimension
+before the first \pyinline{LayerNorm}, then we want the following:
+\begin{enumerate}
+\item The sequence dimension must be restored for the \pyinline{CausalAttention} layer
+\item The sequence should be re-split along the sequence dimension for the next \pyinline{LayerNorm} instance
+\item The sequence dimension should be restored for the \pyinline{MLP} layer \footnote{This doesn't
+    seem like a hard-requirement, but it's what is done in \cite{korthikanti2022reducing}.}
+\end{enumerate}
+
+The easiest way to achieve the above is the following.
+\begin{enumerate}
+    \item If the tensor parallelization degree is $ T $, we also use sequence parallelization degree $ T
+        $.
+    \item The outputs of the first \pyinline{LayerNorm} are \pyinline{AllGather}-ed to form the full-dimension
+        inputs to the \pyinline{CausalAttention}  layer
+    \item The tensor-parallel \pyinline{CausalAttention} layer functions much like in
+        Fig.~\ref{fig_attn_tensor_parallel} \textit{except} that we do not re-form the outputs to
+        full-dimensionality.  Instead, before the \pyinline{Dropout} layer, we \pyinline{ReduceScatter} them
+        from being hidden-sharded to sequence-sharded and pass them through the subsequent
+        \pyinline{Dropout}/\pyinline{LayerNorm} combination, similar to the first step
+    \item The now-sequence-sharded tensors are reformed with another \pyinline{AllGather} to be the full-dimensionality inputs to the
+        \pyinline{MLP} layer whose final outputs are similarly \pyinline{ReduceScatter}-ed to be
+        sequence-sharded and are recombined with the residual stream
+\end{enumerate}
+The above allows the \pyinline{Dropout} mask and \pyinline{LayerNorm} weights to be sharded $ T
+$-ways, but if we save the full inputs to the \pyinline{CausalAttention} and \pyinline{MLP}  layers
+for the backwards pass, their contributions to the activation memory are not reduced (the $ p
+$-dependent terms in \eqref{eq_act_mem_attn_mlp}). In \cite{korthikanti2022reducing}, they solve
+this by only saving a $ 1/T $ shard of these inputs on each device during the forward pass and then
+performing an extra \pyinline{AllGather} when needed during the backwards pass. Schematics can be
+sen in Fig.~\ref{fig_tensor_seq_parallel} and Fig.~\ref{fig_tensor_seq_parallel_detail} below.
+
+\begin{figure}[ht]
+ \centering
+ \includegraphics[scale=.25]{figures/transformer-tensor-sequence-parallel.jpg}
+ \caption{Interleaved sequence and tensor parallel sections. Graphic from
+ \cite{shoeybi2020megatronlm}. }
+ \label{fig_tensor_seq_parallel}
+\end{figure}
+
+\begin{figure}[ht]
+ \centering
+ \includegraphics[scale=.25]{figures/mlp-tensor-sequence-parallel.jpg}
+ \caption{Detail of the sequence-tensor parallel transition for the \pyinline{MLP} . Graphic from
+ \cite{shoeybi2020megatronlm}. }
+ \label{fig_tensor_seq_parallel_detail}
+\end{figure}
+
+
+\subsection{Pipeline Parallelism \label{subsec_pipe_parallelism}}
+
+
+
+
+
 
 \subsection{Case Study: Mixed-Precision GPT3 \label{subsec_gpt_mem_study} }
+
 Let's run through the numbers for mixed-precision GPT3 with
 \href{https://bmk.sh/2020/05/29/GPT-3-A-Brief-Summary/}{parameters}:
 \begin{align}
-L &= 96 \ ,
-D = 12288 \ ,
-H = 96\ , V = 50257\ .
+L &= 96 \ , \quad
+D = 12288 \ ,\quad
+H = 96\ , \quad V = 50257\ .
  \label{eq_gpt_num}
 \end{align}
 We are leaving the sequence-length unspecified, but the block-size (maximum sequence-length) is $
-K=2048 $
+K=2048 $.
 
 
-Start by assuming no parallelism at all. The total non-activation memory is
+Start by assuming no parallelism at all. The total (not per-layer!) non-activation memory is
 \begin{align}
-  M _{ {\rm non-act}  } ^ \texttt{GPT-3} & \approx 730\ {\rm TiB}
+  M _{ {\rm non-act}  } ^ \texttt{GPT-3} & \approx 1463\ {\rm TiB}
 \end{align}
 which can be broken down further as
 \begin{align}
-  M _{ {\rm params}  } ^ \texttt{GPT-3} & \approx 80\ {\rm TiB} \ ,
- M _{ {\rm grads}  } ^ \texttt{GPT-3}  \approx 160\ {\rm TiB}\ ,
-  M _{ {\rm optim}  } ^ \texttt{GPT-3}  \approx 490\ {\rm TiB}\ .
+  M _{ {\rm params}  } ^ \texttt{GPT-3} & \approx 162\ {\rm TiB} \ , \quad
+ M _{ {\rm grads}  } ^ \texttt{GPT-3}  \approx 325\ {\rm TiB}\ , \quad
+  M _{ {\rm optim}  } ^ \texttt{GPT-3}  \approx 975\ {\rm TiB}\ .
 \end{align}
-The vocabulary only makes up $ \approx .3\% $ of the total number of parameters, so the $ \Ocal
-\left( VD \right)  $ term in \eqref{eq_approx_params} is negligible.
+The embedding matrix only makes up $ \approx .3\% $ of the total number of parameters, justifying our
+neglect of its contribution in preceding expressions.
 
 
 The activation memory is
@@ -575,7 +720,7 @@ The activation memory is
   M _{ {\rm act}  } ^ \texttt{GPT-3} & \approx 3 \times 10 ^{ -2 }BS\times  \left (  1  + \frac{ S
   }{ 10 ^{ 3 } } \right ) \ {\rm TiB} \ .
 \end{align}
-Note attention matrices, which are responsible for $ \Ocal \left( S ^{ 2 } \right)  $ term, will
+Note that the attention matrices, which are responsible for $ \Ocal \left( S ^{ 2 } \right)  $ term, will
 provide the dominant contribution to activation memory in the usual $ S \gtrsim 10 ^{ 3 } $ regime.
 
 In the limit where we process the max block size ($ S=K=2048 $), the ratio of activation to
@@ -587,10 +732,116 @@ non-activation memory is
 So, the activation memory is very significant for such models.
 
 
+Using tensor parallelism into the above with the maximal $ T=8 $ which can be practically used, the
+savings are significant. The total memory is now
+\begin{align}
+  M _{ {\rm total}  } ^{ \texttt{GPT-3}  } & \approx 187\ {\rm TiB} + 10 ^{ -2 }BS + 5 \times 10 ^{
+  -6} BS ^{ 2 }\ .
+\end{align}
 
-\section{FLOPS}
 
 
+
+\section{Training FLOPs \label{sec_flops} }
+
+The total number of floating point operations (FLOPs)\footnote{The notation surrounding
+floating-point operations is very confusing because another quantity of interest is the number
+of floating-point operations a given implementation can use \textit{per-second}. Sometimes,
+people use FLOPS or FLOP/s to indicate the rate, rather than the gross-count which has the lower
+case ``s", FLOPs, but there's little consistency in general.}  needed to process a given batch of
+data is effectively determined by the number of matrix multiplies needed.
+
+Recall that a dot-product of the form $ v \cdot M $  with $ v \in \mathbb{R}^{ m } $ and $ M \in
+\mathbb{R} ^{ m, n }$ requires $ m\times \left (2 n-1 \right ) \approx 2mn$ FLOPs.  For large
+language models, $ m,n \sim \Ocal \left( 10 ^{ 3 } \right)  $, meaning that even expensive
+element-wise operations like \pyinline{GeLU} acting on the same vector $ v $ pale in comparison by
+FLOPs count \footnote{Since their FLOPs counts only scales as $ \sim \Ocal \left( n\right )  $ where
+the omitted constant may be relatively large, but is still not $ \Ocal \left( n \right)  $.}. It is
+then a straightforward exercise in counting to estimate the FLOPs for a given architecture. The input tensor
+is of shape \pyinline{(B, S, D)} throughout.
+
+
+
+\subsection{No Recomputation}
+
+Start with the case where there is no recomputation activations.  These are the \textbf{model FLOPs} of
+\cite{korthikanti2022reducing}, as compared to the \textbf{hardware FLOPs} which account for gradient
+checkpointing.
+
+
+\paragraph{\pyinline{CausalAttention}: Forwards }
+
+The FLOPs costs:
+\begin{itemize}
+    \item  Generating the query, key, and value vectors: $ 6BSD ^{ 2 } $
+    \item Attention scores:  $2BDS ^{ 2 }$
+    \item Re-weighting values:  $2BDS ^{ 2 }$
+    \item Final projection: $ 2BSD ^{ 2 } $
+\end{itemize}
+
+\paragraph{\pyinline{MLP}: Forwards}
+Passing a  through the \pyinline{MLP} layer, the FLOPs due to the
+first and second matrix-multiplies are equal, with total matrix-multiply requires $ 4BSED ^{ 2 } $.
+
+\paragraph{Backwards Pass}
+
+We estimate the backwards pass as costing twice the flops as the forwards pass. This estimate comes
+from just counting the number of $ \Ocal \left( n ^{ 2 } \right)  $ operations, (i.e.
+matrix-multiplies and outer-products) which dominate the FLOPs computation.  The argument is the
+standard one: in the backwards pass we are given the upstream derivative $ \partial _{ z '  } \Lcal
+$ where $ z' = \phi \left ( W \cdot z \right ) $ for some non-linearity $ \phi $, where the
+weight-matrix multiply is the costly operation whose FLOPs we have accounted for in the forward
+pass. Here, $ z $ is a tensor of some arbitrary shape and the matrix multiply is over one of its
+dimensions, in the usual way. Without loss of generality, let's be more specific and let $ z $ be
+\pyinline{(d0, ... , dn, D)}-shaped with $N= \prod _{ i } d_{i  } $ total elements let $ W $ be
+\pyinline{(D, E)}-shaped such that it acts on the last index of $ z $, making $ z' $
+\pyinline{(d0, ... , dn, E)}-shaped. The forward-FLOPs cost of this operation is therefore $ 2NE $.
+
+In order to complete backpropagation, we need both to compute $ \partial  _{ W }\Lcal  $ to update $
+W $ and also $ \partial  _{ z } \Lcal  $ to continue backpropagation to the next layer down. Each of
+these computations will be about as costly as the forward computation, hence the claim.
+
+Schematically, the \pyinline{(D, E)}-shaped weight derivative is
+\begin{align}
+    \partial  _{ W }\Lcal  &= \partial _{ z '  } \Lcal \cdot \phi' \left ( W \cdot z \right ) \cdot
+z\ .
+\end{align}
+On the right size, $ z $ and $ W \cdot  z $ are cached and the element-wise computation of $ \phi'
+\left ( W \cdot z \right ) $ is negligible, as discussed above. The bulk of the computation then comes from
+taking the three factors, which are \pyinline{(d0, ... , dn, E)}-shaped,
+\pyinline{(d0, ... , dn, D,  E)}-shaped, and \pyinline{(d0, ... , dn, D)}-shaped, respectively,
+multiplying and summing over all dimensions other than the \pyinline{D}-  and \pyinline{E}-shaped
+ones. This also requires $ \sim 2ND' $ FLOPs, the same as the forward pass.
+
+
+And similarly, the \pyinline{(d0, ... , dn, D)}-shaped activation derivative is
+\begin{align}
+    \partial  _{ z }\Lcal  &= \partial _{ z '  } \Lcal \cdot \phi' \left ( W \cdot z \right )  \cdot  W
+\end{align}
+and a nearly identical argument to the above gives a second $ \sim  2ND'  $ contribution to the
+backwards FLOPs count.
+
+Hence, the number of matrix-multiply-like operations in the backwards pass is approximately double that
+of the forward pass, justifying the argument.
+
+
+
+
+
+\paragraph{Total Model Flops}
+
+
+The grand sum is then\footnote{With a large vocabulary, the cost of the final language model head
+matrix multiply can also be significant, but we have omitted its $ L $-independent,  $ 2BSDV $
+contribution here. }:
+\begin{align}
+F _{ {\rm total}  } ^{ {\rm  model}  } &\approx 12 BDLS \left ( S + \left ( 2+E \right )D \right ) \label{eq_model_flops}\ .
+\end{align}
+We can also phrase the flops in terms of the number of parameters as
+\begin{align}
+ F _{ {\rm total}  } ^{ {\rm  model}  } \big| _{ T=1 }  &= 6BS N _{ {\rm  params}  }\times \left ( 1 + \Ocal \left( S/D\right)  \right )
+\end{align}
+where we took the $ T=1, D \gg S $ limit for simplicity.
 
 
 \part{Inference}
@@ -631,6 +882,8 @@ sequence length, and vocabulary size would be written as $ x _{ bsv } $, with $ 
 \begin{gather}
 V \gg D, S \gg L, H \gg P, T \ .  \label{app_eq_transformers_approxs}
 \end{gather}
+For instance, GPT-2 and GPT-3 \cite{gpt2radford2019language, gpt3brown2020language} have $ V \sim \Ocal \left( 10 ^{ 4 } \right)  $,
+$ S, L \sim \Ocal \left( 10 ^{ 3 } \right)  $, $ L, H \sim \Ocal \left( 10 ^{ 2 } \right)  $.
 
 
 As indicated above,  we use zero-indexing. We also use \pyinline{python} code
@@ -689,10 +942,18 @@ n=0 $ worker is arbitrarily denoted the \textit{chief}.  Then, the primitive ope
     \item \pyinline{AllReduce}: generalization of \pyinline{Reduce} where all
         workers receive the same tensor $ x' $ produced by operating on the $ x ^{ (n) } $.
         Equivalent to a \pyinline{Reduce} followed by \pyinline{Broadcast}, or a
-        \pyinline{ReduceScatter} followed by a \pyinline{AllGather} (the more efficient choice).
+        \pyinline{ReduceScatter} followed by a \pyinline{AllGather} (the more efficient
+        choice\footnote{The former strategy scales linearly with the number of worker, while the
+            latter strategy underlies ``ring" \pyinline{AllReduce} which is (nearly) independent of
+            the number of workers.
+            \href{https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/}{See this blog
+                post for a nice visualization} or \cite{bandwidthOptimalAllReduce2009} for a
+            relevant paper.\label{foot_all_reduce}}).
     \item \pyinline{ReduceScatter}: a reducing operation is applied to the $ x ^{ (n) } $ to produce
         a $ x' $ of the same shape, but each worker only receives a slice $ 1/N $ of the result.
 \end{itemize}
+
+
 
  \section{TODO}
 

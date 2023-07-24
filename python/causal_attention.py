@@ -25,7 +25,6 @@ class CausalAttention(nn.Module):
         self.O = nn.Linear(hidden_dim, hidden_dim)
 
         self.attn_dropout = nn.Dropout(dropout)
-        self.final_dropout = nn.Dropout(dropout)
         self.register_buffer(
             "causal_mask",
             torch.tril(torch.ones(block_size, block_size)[None]),
@@ -54,7 +53,7 @@ class CausalAttention(nn.Module):
         weighted_values = torch.cat(
             [self.attn_dropout(a) @ v for a, v in zip(attn_maps, values)], dim=-1
         )
-        z = self.final_dropout(self.O(weighted_values))
+        z = self.O(weighted_values)
         return z
 
 
