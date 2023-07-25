@@ -168,10 +168,12 @@ components above
     m _{ s s' } &= \begin{cases}
             0 & s \le s' \nn
             -\infty &= s > s'
-        \end{cases}\ .
+        \end{cases}\ ,
 \end{align}
-In other words, the causal mask ensures that a given tensor, say $ z _{ bsd } $, only has dependence on
-other tensors whose sequence index, say $ s' $, with $ s' \le s $.
+forcing $ w ^{ a  } _{ bss'd } =0$ for $ s> s' $. In other words, the causal mask ensures that a
+given tensor, say $ z _{ bsd } $, only has dependence on other tensors whose sequence index, say $
+s' $, obeys $ s' \le s $.  This is crucial for inference-time optimizations, in particular the use
+of the \textbf{kv-cache} in which key-value pairs do not need to be re-computed.
 
 The $ \sqrt{D/A} $ normalization is motivated by demanding
 that the variance of the \pyinline{Softmax} argument be 1 at initialization, assuming that other
@@ -742,7 +744,7 @@ savings are significant. The total memory is now
 
 
 
-\section{Training FLOPs \label{sec_flops} }
+\section{Training FLOPs \label{sec_flops_training} }
 
 The total number of floating point operations (FLOPs)\footnote{The notation surrounding
 floating-point operations is very confusing because another quantity of interest is the number
@@ -756,7 +758,7 @@ Recall that a dot-product of the form $ v \cdot M $  with $ v \in \mathbb{R}^{ m
 language models, $ m,n \sim \Ocal \left( 10 ^{ 3 } \right)  $, meaning that even expensive
 element-wise operations like \pyinline{GeLU} acting on the same vector $ v $ pale in comparison by
 FLOPs count \footnote{Since their FLOPs counts only scales as $ \sim \Ocal \left( n\right )  $ where
-the omitted constant may be relatively large, but is still not $ \Ocal \left( n \right)  $.}. It is
+the omitted constant may be relatively large, but still negligible when all dimensions are big.}. It is
 then a straightforward exercise in counting to estimate the FLOPs for a given architecture. The input tensor
 is of shape \pyinline{(B, S, D)} throughout.
 
@@ -783,47 +785,55 @@ The FLOPs costs:
 Passing a  through the \pyinline{MLP} layer, the FLOPs due to the
 first and second matrix-multiplies are equal, with total matrix-multiply requires $ 4BSED ^{ 2 } $.
 
-\paragraph{Backwards Pass}
+\paragraph{Backwards Pass: Approximate}
 
-We estimate the backwards pass as costing twice the flops as the forwards pass. This estimate comes
-from just counting the number of $ \Ocal \left( n ^{ 2 } \right)  $ operations, (i.e.
-matrix-multiplies and outer-products) which dominate the FLOPs computation.  The argument is the
-standard one: in the backwards pass we are given the upstream derivative $ \partial _{ z '  } \Lcal
-$ where $ z' = \phi \left ( W \cdot z \right ) $ for some non-linearity $ \phi $, where the
-weight-matrix multiply is the costly operation whose FLOPs we have accounted for in the forward
-pass. Here, $ z $ is a tensor of some arbitrary shape and the matrix multiply is over one of its
-dimensions, in the usual way. Without loss of generality, let's be more specific and let $ z $ be
-\pyinline{(d0, ... , dn, I)}-shaped with $N= \prod _{ i } d_{i  } $ total elements let $ W $ be
-\pyinline{(D, E)}-shaped such that it acts on the last index of $ z $, making $ z' $
-\pyinline{(d0, ... , dn, J)}-shaped. The forward-FLOPs cost of this operation is therefore $ 2NJ $.
 
-In order to complete backpropagation, we need both to compute $ \partial  _{ W }\Lcal  $ to update $
-W $ and also $ \partial  _{ z } \Lcal  $ to continue backpropagation to the next layer down. Each of
-these computations will be about as costly as the forward computation, hence the claim.
+The usual rule of thumb is to estimate the backwards pass as costing twice the flops as the forwards
+pass. This estimate comes from just counting the number of $ \Ocal \left( n ^{ 2 } \right)$
+matrix-multiply-like operations and seeing that for every one matrix multiplication that was needed
+in the forward pass, we have roughly twice as many similar operations in the backwards pass.
 
-Adding indices, the \pyinline{(D, E)}-shaped weight derivative is
+
+The argument: consider a typical sub-computation in a neural network which is of the form $ z' =
+\phi \left ( W \cdot z \right ) $ where $ z', a $ are intermediate representations $ z, z' $, $ \phi
+$ is some non-linearity, and where the matrix multiply inside the activation function dominates the
+forwards-pass FLOPs count, as above.  Then, in the backwards pass for this sub-computation, imagine
+we are handed the upstream derivative $ \partial _{ z '  } \Lcal $. In order to complete
+backpropagation, we need both to compute $ \partial  _{ W }\Lcal  $ to update $ W $ and also $
+\partial  _{ z } \Lcal  $ to continue backpropagation to the next layer down. Each of these operations
+ will cost about as many FLOPs as the forwards-pass, hence the estimated factor of two (but, as
+ we will see, this is a very rough estimate).
+
+ Being more precise, let $ z $ be \pyinline{(D0, ... , Dn, I)}-shaped and let $ W $ be
+ \pyinline{(I, J)}-shaped such that it acts on the last index of $ z $, making $ z' $
+\pyinline{(D0, ... , Dn, J)}-shaped. Denoting $D=\prod _{ i } D _{ i } $ be the number of elements
+along the $ D _{ i } $ directions for brevity, the forward-FLOPs cost of the sub-computation is
+therefore $ 2DIJ$.
+
+
+Adding indices, the two derivatives we need are
 \begin{align}
-    \partial  _{ W }\Lcal  &= \partial _{ z '  } \Lcal \cdot \phi' \left ( W \cdot z \right ) \cdot
-z\ .
+    \frac{ \partial \Lcal  }{ \partial W _{ ij } }&= \frac{ \partial \Lcal  }{ \partial z '_{ d _{ 0 } \ldots  d _{ n }j } }\phi' \left (\left (  W \cdot z \right ) _{  d _{ 0 }\ldots d _{ n }i } \right )
+z _{ d _{ 0 }\ldots  d _{ n } i } \nn
+   \frac{  \partial \Lcal  }{\partial  z _{ d _{ 0 }\ldots d _{ n }i } } &= \frac{ \partial \Lcal
+   }{ \partial z '_{ d _{ 0 } \ldots  d _{ n }j } }\phi' \left (\left (  W \cdot z \right ) _{  d _{
+   0 }\ldots d _{ n }i } \right ) W _{ ij }\ ,
 \end{align}
-On the right size, $ z $ and $ W \cdot  z $ are cached and the element-wise computation of $ \phi'
-\left ( W \cdot z \right ) $ is negligible, as discussed above. The bulk of the computation then comes from
-taking the three factors, which are \pyinline{(d0, ... , dn, E)}-shaped,
-\pyinline{(d0, ... , dn, D,  E)}-shaped, and \pyinline{(d0, ... , dn, D)}-shaped, respectively,
-multiplying and summing over all dimensions other than the \pyinline{D}-  and \pyinline{E}-shaped
-ones. This also requires $ \sim 2ND' $ FLOPs, the same as the forward pass.
+which have shapes \pyinline{(I, J)} and \pyinline{(D0, ..., Dn, I)}, respectively. On the right
+side, $ z $ and $ W \cdot  z $ are cached and the element-wise computation of $ \phi' \left ( W
+\cdot z \right ) $ has negligible FLOPs count, as discussed above. The FLOPs count is instead
+dominated by the broadcast-multiplies, sums, and matrix-products.
+
+Multiplying out the first two factors which are common to each derivative involves a broadcasted
+multiply of a \pyinline{(D0, ... , Dn, J)}-shaped and a \pyinline{(D0, ... , Dn, I, J)}-shaped tensor
+to produce another \pyinline{(D0, ... , Dn, I, J)}-shaped result, which requires $ DIJ $ FLOPs.
+The process of multiplying this factor with either $ z _{ d _{ 0 } \ldots d _{ n }i } $ or $ W _{ ij } $
+and summing over the appropriate indices requires $ 2DIJ $ FLOPs for either operation, bringing the
+total FLOPs to $ 5DIJ$, which is (slightly more than) double the FLOPs for this same
+sub-computation in the forward-direction, hence the rough rule of thumb.
 
 
-And similarly, the \pyinline{(d0, ... , dn, D)}-shaped activation derivative is
-\begin{align}
-    \partial  _{ z }\Lcal  &= \partial _{ z '  } \Lcal \cdot \phi' \left ( W \cdot z \right )  \cdot  W
-\end{align}
-and a nearly identical argument to the above gives a second $ \sim  2ND'  $ contribution to the
-backwards FLOPs count.
-
-Hence, the number of matrix-multiply-like operations in the backwards pass is approximately double that
-of the forward pass, justifying the argument.
-
+\paragraph{Backwards Pass: More Precise} \textbf{TODO}
 
 \paragraph{Total Model FLOPs}
 
@@ -864,12 +874,78 @@ where $ \tau $ is the throughput rate in terms of tokens/second.
 \part{Inference}
 
 
+\section{Basics and Problems}
 
 
+The essentials of decoder-only inference is that a given input sequence $ x _{ bs } $ is turned into
+a probability distribution $ p _{ bsv } $ over the vocabulary for what the next token might be.  Text
+is then generated by sampling from $ p _{ bsv } $ in some way, appending that value to $ x _{ bs } $
+to create a one-token-longer sequence, and then repeating until desired.
+
+There are various problems that naive implementations of the above face:
+\begin{itemize}
+    \item Repeated computation from processing the same tokens in the same order repeatedly, at least for
+        some sub-slice of $ x _{ bs } $.
+    \item Inherently sequential computation, rather than parallel
+    \item Sub-optimal sampling strategies. Just choosing the most-probably token at each new step, does
+    not guarantee the most-probable overall sequence, for instance.
+\end{itemize}
+
+\section{The Minimum Needed and the kv-Cache }
+
+
+There are two separate stages during generation. First, an original, to-be-continued series of prompts
+$ x _{ bs }  $ can be processed in parallel to both generate the first prediction and populate any
+intermediate values we may want to cache for later. We follow \cite{pope2022efficiently} and call this the
+\textbf{prefill} stage. For this procedure, we require the entire $ x _{ bs } $ tensor.
+
+In the second, iterative part of generation (the \textbf{decode} stage) we have now appended
+one-or-more tokens to the sequence and we again want the next prediction, i.e. \pyinline{z[:, -1, :]}
+for the last-layer outputs $ z _{ bsd } $. In this stage, we can avoid re-processing the entire $ x
+_{ bs } $ tensor and get away with only processing the final, newly added token, \textit{if} we are
+clever and cache old results.
+
+The important pieces occur in the \pyinline{CausalAttention} layer, as that's the only location in
+which the sequence index is not completely parallelized across operations. Referring back to
+Sec.~\ref{subsubsec_attn_layer}, given the input $ z _{ bsd } $ of the \pyinline{CausalAttention}
+layer, the re-weighted value vectors\footnote{Summed over $ s' $, but concatenating the different $
+a $ values over the $ f $ dimension.} $ w ^{ a }_{ bss'd } v ^{ a } _{ bs'f } $ are the key objects
+which determine the next-token-prediction, which only depends on the $ s=-1 $ index values.
+Therefore, we can cut out many steps and minimum requirements are:
+\begin{itemize}
+    \item Only the attention weights $ w ^{ a }_{ bss'd }$ with $ s=-1 $ are needed
+    \item The only query values $ q ^{ a }_{ bsd } $ needed to get the above are those with $ s=-1 $
+    \item Every component of the key and value vectors $k ^{ a }_{ bsd }, v ^{ a }_{ bsd } $ is
+        needed, but because of the causal mask, all components except for the last in the sequence
+        dimension ($ s\neq -1 $) are the same as they were in the last iteration, up to a shift
+        by one position\footnote{That is, if we add a label $ t $ which indexes the iteration of generation
+        we are on, then $ z ^{ (t+1) } _{ bsd } = z ^{ (t)} _{ b (s-1)d } $ for every tensor in the network, as long as $ s $ isn't the final index.}
+\end{itemize}
+
+So, we are led to the concept of the \textbf{kv-cache} in which we cache old key and query vectors for generation.
+The cache represents a tradeoff: fewer FLOPs are needed for inference, but the memory costs are potentially
+enormous, since the size of the cache grows with batch size and sequence length:
+\begin{align}
+    M _{ {\rm kv-cache}  } &= 2pBSD \ . \label{eq_kv_cache_memory}
+\end{align}
+This can easily be larger than the memory costs of the model parameter: $ M _{ {\rm params}  } ^{
+{\rm  inference}  } \sim p N _{ {\rm params}  } \sim p LD ^{ 2 }  $ (dropping $ \Ocal \left( 1
+\right)  $ factors), so that the cache takes up more memory when $ BS \gtrsim LD $.
+
+
+
+
+
+\section{Memory and FLOPs}
+
+The analysis of the memory and FLOPs for inference is much simpler than its corresponding training
+counterparts (Sec.~\ref{sec_flops_training} and Sec.~\ref{sec_memory_training}  ), since there is no
+optimizer state and activations can be thrown away immediately after use (neglecting the kv-cache).
 
 
 
 \appendix
+
 
 
 \section{Conventions and Notation}\label{app_conventions}
@@ -890,6 +966,7 @@ parameters by:
 \item $ T $: tensor parallel size
 \item $ E $: expansion factor for MLP layer (usually $ E=4 $)
 \item $ \tau $: throughput rate in tokens/second
+\item $ p $: the precision of the elements of a tensor in bytes
 \end{itemize}
 Where it makes sense, we try to use the lower-case versions of these characters to denote the
 corresponding indices on various tensors. For instance, an input tensor with the above batch size,
@@ -971,6 +1048,25 @@ n=0 $ worker is arbitrarily denoted the \textit{chief}.  Then, the primitive ope
         a $ x' $ of the same shape, but each worker only receives a slice $ 1/N $ of the result.
 \end{itemize}
 
+\section{Hardware}
+
+Basic information about relevant hardware considerations.
+
+
+\subsection{NVIDIA GPU Stats}
+
+
+The most important statistics for GPUs are their memory capacity, their maximum (theoretical) FLOP/s
+rate, their memory bandwidth, and their \textit{math bandwidth}
+(\href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch}{which
+is the ratio of the last two quantities}):
+
+\begin{center}
+\begin{tabular}{| c |c| c |c |c| }\hline
+    GPU & Memory & FLOP/s  & Memory Bandwidth (B/s)  & Math Bandwidth (FLOPs/B)\\ \hline
+    A100 & 40GiB/80GiB & $ 312 \times 10 ^{ 12 } $ & $  1.5 \times 10 ^{  12 }   $ & 208 \\ \hline
+\end{tabular}
+\end{center}
 
 
  \section{TODO}
