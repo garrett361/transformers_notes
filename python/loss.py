@@ -1,14 +1,14 @@
 import torch
 import torch.nn.functional as F
 from decoder_only import DecoderOnly
-from defaults import B, D, E, H, K, L, V
+from defaults import A, B, D, E, K, L, V
 
 # Apologies for the lack of type-hinting, but it makes the latex less readable.
 
 
 def test_loss():
     model = DecoderOnly(
-        attn_heads=H,
+        attn_heads=A,
         block_size=K,
         dropout=0.1,
         expansion_factor=E,

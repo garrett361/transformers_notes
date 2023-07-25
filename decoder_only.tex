@@ -133,34 +133,34 @@ $ 2D $ parameters per layer.
 
 \subsection{Causal Attention \label{subsubsec_attn_layer} }
 
-The \textbf{causal attention} layer is the most complex layer. It features $ H $  triplets\footnote{$ H $
+The \textbf{causal attention} layer is the most complex layer. It features $ A $  triplets\footnote{$ A $
 must divide the hidden dimension $ D $ evenly.} of weight matrices\footnote{There are also bias
 terms, but we will often neglect to write them explicitly or account for their (negligible)
-parameter count.}  $ Q ^{ h } _{ d f }, K ^{ h } _{ df }, V ^{ h } _{ df }  $
-where $ a \in \left \{ 0, \ldots, H-1 \right \} $ and $ f \in \left \{ 0, \ldots, D/H \right \} $.
+parameter count.}  $ Q ^{ a } _{ d f }, K ^{ a } _{ df }, V ^{ a } _{ df }  $
+where $ a \in \left \{ 0, \ldots, H-1 \right \} $ and $ f \in \left \{ 0, \ldots, D/A \right \} $.
 From these, we form three different vectors:
 \begin{align}
-  q ^{ h }_{ bsf } &= z _{ bsd } Q ^{ h }_{ df } \ , \quad
-  k ^{ h }_{ bsf } = z _{ bsd } K ^{ h }_{ df }  \ , \quad
-  v ^{ h }_{ bsf } = z _{ bsd } V ^{ h }_{ df }
+  q ^{ a }_{ bsf } &= z _{ bsd } Q ^{ a }_{ df } \ , \quad
+  k ^{ a }_{ bsf } = z _{ bsd } K ^{ a }_{ df }  \ , \quad
+  v ^{ a }_{ bsf } = z _{ bsd } V ^{ a }_{ df }
 \end{align}
 These are the \textbf{query, key, and value} tensors, respectively \footnote{There are of course
 many variants of the architecture and one variant which is popular in Summer 2023 is multi-query
 attention \cite{shazeer2019fast} in which all heads share \textit{the same} key and value vectors
 and only the query changes across heads, as this greatly reduces inference costs.}.
 
-Using the above tensors, we will then build up an \textbf{attention map}  $ w ^{ h }_{ bss' } $
+Using the above tensors, we will then build up an \textbf{attention map}  $ w ^{ a }_{ bss' } $
 which corresponds to how much attention the token at position $ s $ pays to the token at
 position $ s' $.  Because we have the goal of predicting the
 next token in the sequence, we need these weights to be causal: the final prediction $ y _{ bsv } $
 should only have access to information propagated from positions $ x _{ bs'v } $ with $ s' \le s $.
-This corresponds to the condition that $ w ^{ h }_{ bss' } = 0  $ if  $ s' > s  $.
+This corresponds to the condition that $ w ^{ a }_{ bss' } = 0  $ if  $ s' > s  $.
 
  These weights come from \pyinline{Softmax}-ed attention scores, which are just a normalized
  dot-product over the hidden dimension:
 \begin{align}
-    w ^{ h }_{ bss'd } &=\Sm _{ s' } \left (m _{ s s' }+\ q ^{ h }_{ bsf }k ^{ h }_{ bs'f } / \sqrt{D/H} \right
-        )\ ,  \quad {\rm s.t.} \quad \sum_{s'}w ^{ h }_{ bdss' } =1
+    w ^{ a }_{ bss'd } &=\Sm _{ s' } \left (m _{ s s' }+\ q ^{ a }_{ bsf }k ^{ a }_{ bs'f } / \sqrt{D/A} \right
+        )\ ,  \quad {\rm s.t.} \quad \sum_{s'}w ^{ a }_{ bdss' } =1
 \end{align}
 The tensor $ m _{  s s' } $ is the causal mask which zeroes out the relevant attention map
 components above
@@ -173,7 +173,7 @@ components above
 In other words, the causal mask ensures that a given tensor, say $ z _{ bsd } $, only has dependence on
 other tensors whose sequence index, say $ s' $, with $ s' \le s $.
 
-The $ \sqrt{D/H} $ normalization is motivated by demanding
+The $ \sqrt{D/A} $ normalization is motivated by demanding
 that the variance of the \pyinline{Softmax} argument be 1 at initialization, assuming that other
 components have been configured so that that the query and key components are i.i.d. from a Gaussian
 normal distribution \footnote{However, in \cite{yang2022tensor} it is instead argued that no square
@@ -181,10 +181,10 @@ root should be taken in order to maximize the speed of learning via SGD.}.
 
 The weights above are then passed through a dropout layer and used to re-weigh the \textbf{value} vectors and form the tensors
 \begin{align}
-  t ^{ h }_{ bsf }&=\Dr  \left (w ^{ h }_{ bdss' } \right ) v ^{ h }_{ bs'f }
+  t ^{ a }_{ bsf }&=\Dr  \left (w ^{ a }_{ bdss' } \right ) v ^{ a }_{ bs'f }
   \label{eq_reweighted_values}
 \end{align}
-and these $ H $ different \pyinline{(B, S, D/H)}-shaped tensors
+and these $ A $ different \pyinline{(B, S, D/A)}-shaped tensors
 are then concatenated along the $ f $-direction to re-form a \pyinline{(B, S, D)}-shaped
 tensor\footnote{It is hard to come up with good index-notation for concatenation.}
 \begin{align}
@@ -198,15 +198,15 @@ output
 
 For completeness, the entire operation in condensed notation with indices left implicit is:
 \begin{align}
-    z  &\leftarrow \Dr \left ({\rm Concat} \ \left ( \Dr \left (\Sm  \left ( \frac{ \left ( z \cdot Q ^{ h } \right )\cdot \left ( z \cdot K ^{ h } \right )}{ \sqrt{D/H} }
-            \right)\right )\cdot z \cdot V ^{ h } \right ) \cdot O \right ) \label{eq_causal_attn}
+    z  &\leftarrow \Dr \left ({\rm Concat} \ \left ( \Dr \left (\Sm  \left ( \frac{ \left ( z \cdot Q ^{ a } \right )\cdot \left ( z \cdot K ^{ a } \right )}{ \sqrt{D/A} }
+            \right)\right )\cdot z \cdot V ^{ a } \right ) \cdot O \right ) \label{eq_causal_attn}
 \end{align}
-where all of the dot-products are over feature dimensions (those of size $ D $ or $ D/H $).
+where all of the dot-products are over feature dimensions (those of size $ D $ or $ D/A $).
 
 The final \pyinline{Dropout} layer is often included as part of the \pyinline{CausalAttention} block , as
 in the math above and in Fig.~\ref{fig_transformers_architecture}. Below is pedagogical\footnote{The
 code is written for clarity, not speed. An example optimization missing here: there is no need to
-form separate $ Q ^{ h },K ^{ h },V ^{ h} $ \pyinline{Linear} layers, one large layer which is later
+form separate $ Q ^{ a },K ^{ a },V ^{ a} $ \pyinline{Linear} layers, one large layer which is later
 chunked is more efficient} sample code for a \pyinline{CausalAttention} layer which separates the
 last \pyinline{Dropout} layer out. This will be convenient when we talk about sequence parallelism below
 in Sec.~\ref{subsec_seq_parallelism}. \pyfile[firstline=10,lastline=57]{python/causal_attention.py}
@@ -284,7 +284,7 @@ code, the loss computation might look like the following:
 \section{Memory \label{sec_memory_training}}
 
 In this section we summarize the train-time memory costs of Transformers under various training
-strategies\footnote{A nice related blog post is \href{https://blog.eleuther.ai/transformer-math/}{here}.}.
+strategies\footnote{A nice related blog post is \href{https://blog.eleuther.ai/transformer-math/}{here}. \label{foot_eleuther_math_101} }.
 
 The memory cost is much more than simply the cost of the model
 parameters. Significant factors include:
@@ -473,7 +473,7 @@ batch sizes and sequence lengths. It is straightforward to find where the tippin
 the simplified $ E=4$, vanilla mixed-precision case with no parallelism the minimum batch size which
 leads to memory savings is
 \begin{align}
-  B _{ {\rm min}  } &= \frac{ 6 D ^{ 2 } }{ 8 DS + H S ^{ 2 } }\label{eq_min_mp_batch_size}\ .
+  B _{ {\rm min}  } &= \frac{ 6 D ^{ 2 } }{ 8 DS + A S ^{ 2 } }\label{eq_min_mp_batch_size}\ .
 \end{align}
 For typical architectures and training sequence lengths, the two terms in the denominator are about
 equal and so we can approximate the above as $ B _{ {\rm min}  } \sim \frac{ D }{ S }  \sim \Ocal
@@ -516,7 +516,7 @@ workers.
 
 
 Let the partial outputs from the previous step again be $ z _{ e } ^{ (t) } $, which are
-\pyinline{(B, S, E*H/T)}-shaped. The non-linearity $ \phi $ acts element wise, and using the subsequent
+\pyinline{(B, S, E*A/T)}-shaped. The non-linearity $ \phi $ acts element wise, and using the subsequent
 $ z _{ e } ^{ (t) }  $ to compute the second matrix multiply requires a splitting the weights as in $ W ^{ 1 }
 _{ e d } \longrightarrow W ^{ 1(t) } _{  e d}$, such that the desired output is computed as in
 \begin{align}
@@ -539,17 +539,17 @@ operations in the backwards pass.}
 \end{figure}
 
 
- \paragraph{Attention} The computations for each the $ H $ individual attention heads, which result
- in the various re-weighted values $ t ^{ h }_{ bsf } $ \eqref{eq_reweighted_values}, can be
+ \paragraph{Attention} The computations for each the $ A $ individual attention heads, which result
+ in the various re-weighted values $ t ^{ a }_{ bsf } $ \eqref{eq_reweighted_values}, can be
  partitioned arbitrarily across workers without incurring any collective communications costs.  Each
- worker then holds some subset of these $ h \in \left \{ 0, \ldots , H-1 \right \} $ activations and
+ worker then holds some subset of these $ a \in \left \{ 0, \ldots , H-1 \right \} $ activations and
  the final output matrix multiply can be schematically broken up as in \begin{align} &{\rm Concat}
      \left ( \left [ t ^{ 0 }, \ldots , t ^{ H-1 } \right ] \right ) \cdot O \nn &= {\rm Concat}
-     \left ( \left [ {\rm Concat}\left ( \left [ t ^{ 0 }, \ldots , t ^{ \frac{ H }{ T }-1 } \right
-     ] \right ) \cdot O ^{ (0) }, \ldots ,{\rm Concat}\left ( \left [ t ^{ H-\frac{ H }{ T } },
-\ldots , t ^{ H} \right ] \right ) \cdot O ^{ (T-1) } \right ] \right ) \ , \end{align} where matrix
+     \left ( \left [ {\rm Concat}\left ( \left [ t ^{ 0 }, \ldots , t ^{ \frac{ A }{ T }-1 } \right
+     ] \right ) \cdot O ^{ (0) }, \ldots ,{\rm Concat}\left ( \left [ t ^{ H-\frac{ A }{ T } },
+\ldots , t ^{ A} \right ] \right ) \cdot O ^{ (T-1) } \right ] \right ) \ , \end{align} where matrix
 products and concatenation both occur along the hidden dimension. That is, each worker in a group
-has $ H/T $ different \pyinline{(B, S, D/H)}-shaped activations $ t ^{ h } $, which can be
+has $ A/T $ different \pyinline{(B, S, D/A)}-shaped activations $ t ^{ a } $, which can be
 concatenated into a \pyinline{(B, S, D/T)}-shaped tensor and multiplied into the
 \pyinline{(D/T, D)}-shaped shard of $ O $ whose dimensions correspond to those in the just-concatenated tensor.
 Concatenating together each such result from every worker (via an \pyinline{AllReduce}) gives the
@@ -694,7 +694,7 @@ Let's run through the numbers for mixed-precision GPT3 with
 \begin{align}
 L &= 96 \ , \quad
 D = 12288 \ ,\quad
-H = 96\ , \quad V = 50257\ .
+A = 96\ , \quad V = 50257\ .
  \label{eq_gpt_num}
 \end{align}
 We are leaving the sequence-length unspecified, but the block-size (maximum sequence-length) is $
@@ -748,7 +748,7 @@ The total number of floating point operations (FLOPs)\footnote{The notation surr
 floating-point operations is very confusing because another quantity of interest is the number
 of floating-point operations a given implementation can use \textit{per-second}. Sometimes,
 people use FLOPS or FLOP/s to indicate the rate, rather than the gross-count which has the lower
-case ``s", FLOPs, but there's little consistency in general.}  needed to process a given batch of
+case ``s", FLOPs, but there's little consistency in general. We will use FLOPs and FLOP/s.}  needed to process a given batch of
 data is effectively determined by the number of matrix multiplies needed.
 
 Recall that a dot-product of the form $ v \cdot M $  with $ v \in \mathbb{R}^{ m } $ and $ M \in
@@ -793,15 +793,15 @@ $ where $ z' = \phi \left ( W \cdot z \right ) $ for some non-linearity $ \phi $
 weight-matrix multiply is the costly operation whose FLOPs we have accounted for in the forward
 pass. Here, $ z $ is a tensor of some arbitrary shape and the matrix multiply is over one of its
 dimensions, in the usual way. Without loss of generality, let's be more specific and let $ z $ be
-\pyinline{(d0, ... , dn, D)}-shaped with $N= \prod _{ i } d_{i  } $ total elements let $ W $ be
+\pyinline{(d0, ... , dn, I)}-shaped with $N= \prod _{ i } d_{i  } $ total elements let $ W $ be
 \pyinline{(D, E)}-shaped such that it acts on the last index of $ z $, making $ z' $
-\pyinline{(d0, ... , dn, E)}-shaped. The forward-FLOPs cost of this operation is therefore $ 2NE $.
+\pyinline{(d0, ... , dn, J)}-shaped. The forward-FLOPs cost of this operation is therefore $ 2NJ $.
 
 In order to complete backpropagation, we need both to compute $ \partial  _{ W }\Lcal  $ to update $
 W $ and also $ \partial  _{ z } \Lcal  $ to continue backpropagation to the next layer down. Each of
 these computations will be about as costly as the forward computation, hence the claim.
 
-Schematically, the \pyinline{(D, E)}-shaped weight derivative is
+Adding indices, the \pyinline{(D, E)}-shaped weight derivative is
 \begin{align}
     \partial  _{ W }\Lcal  &= \partial _{ z '  } \Lcal \cdot \phi' \left ( W \cdot z \right ) \cdot
 z\ .
@@ -825,10 +825,7 @@ Hence, the number of matrix-multiply-like operations in the backwards pass is ap
 of the forward pass, justifying the argument.
 
 
-
-
-
-\paragraph{Total Model Flops}
+\paragraph{Total Model FLOPs}
 
 
 The grand sum is then\footnote{With a large vocabulary, the cost of the final language model head
@@ -837,12 +834,32 @@ contribution here. }:
 \begin{align}
 F _{ {\rm total}  } ^{ {\rm  model}  } &\approx 12 BDLS \left ( S + \left ( 2+E \right )D \right ) \label{eq_model_flops}\ .
 \end{align}
-We can also phrase the flops in terms of the number of parameters as
+We can also phrase the FLOPs in terms of the number of parameters as
 \begin{align}
  F _{ {\rm total}  } ^{ {\rm  model}  } \big| _{ T=1 }  &= 6BS N _{ {\rm  params}  }\times \left ( 1 + \Ocal \left( S/D\right)  \right )
 \end{align}
-where we took the $ T=1, D \gg S $ limit for simplicity.
+where we took the $ T=1, D \gg S $ limit for simplicity and we note that $ BS $  is the number of
+total tokens in the processed batches.
 
+Based on the above, it is common to write down the rule of
+thumb\footnote{See
+\href{https://medium.com/@dzmitrybahdanau/the-flops-calculus-of-language-model-training-3b19c1f025e4}{this
+blog post} or the link in Foot.~\ref{foot_eleuther_math_101}.}
+\begin{align}
+  \left ( {\rm Achievable \ FLOPs/sec}  \right ) \times \left ( {\rm  Training \ time}  \right )
+  &\approx 6 N _{ {\rm params}  } \times \left ( {\rm Total \ tokens} \right ) \ . \label{eq_training_rule_of_thumb}
+\end{align}
+The above is the total compute needed to train a model with the above data.
+
+
+Lastly, the \textbf{model FLOPs utilization} (MFU) is an often-quoted quantity, which is just ratio
+of actually achieved FLOP/s (the rate, not the gross sum) to the maximum possible given the hardware
+\begin{align}
+  {\rm MFU}  &= \frac{ F _{ {\rm total}  } ^{ {\rm  model}  } \times \tau }{ \left ( {\rm Num. \ GPUs}  \right ) \times \left ( {\rm Max. \ FLOP/s/GPU}  \right ) }
+\end{align}
+where $ \tau $ is the throughput rate in terms of tokens/second.
+
+\section{Scaling Laws}
 
 \part{Inference}
 
@@ -868,10 +885,11 @@ parameters by:
 \item $ V $: vocabulary size
 \item $ D $: the hidden dimension size
 \item $ L $: number of transformer layers
-\item $ H $: number of attention heads
+\item $ A $: number of attention heads
 \item $ P $: pipeline parallel size
 \item $ T $: tensor parallel size
 \item $ E $: expansion factor for MLP layer (usually $ E=4 $)
+\item $ \tau $: throughput rate in tokens/second
 \end{itemize}
 Where it makes sense, we try to use the lower-case versions of these characters to denote the
 corresponding indices on various tensors. For instance, an input tensor with the above batch size,
@@ -880,10 +898,10 @@ sequence length, and vocabulary size would be written as $ x _{ bsv } $, with $ 
     \ldots, V -1\right \}$ in math notation, or as \mintinline{python}{x[b, s, v]} in code.  Typical
     transformers belong to the regime
 \begin{gather}
-V \gg D, S \gg L, H \gg P, T \ .  \label{app_eq_transformers_approxs}
+V \gg D, S \gg L, A \gg P, T \ .  \label{app_eq_transformers_approxs}
 \end{gather}
 For instance, GPT-2 and GPT-3 \cite{gpt2radford2019language, gpt3brown2020language} have $ V \sim \Ocal \left( 10 ^{ 4 } \right)  $,
-$ S, L \sim \Ocal \left( 10 ^{ 3 } \right)  $, $ L, H \sim \Ocal \left( 10 ^{ 2 } \right)  $.
+$ S, L \sim \Ocal \left( 10 ^{ 3 } \right)  $, $ L, A \sim \Ocal \left( 10 ^{ 2 } \right)  $.
 
 
 As indicated above,  we use zero-indexing. We also use \pyinline{python} code

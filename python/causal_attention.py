@@ -2,7 +2,7 @@ import math
 
 import torch
 import torch.nn as nn
-from defaults import B, D, H, K, S
+from defaults import A, B, D, K, S
 
 # Apologies for the lack of type-hinting, but it makes the latex less readable.
 
@@ -10,7 +10,7 @@ from defaults import B, D, H, K, S
 class CausalAttention(nn.Module):
     def __init__(
         self,
-        attn_heads=H,
+        attn_heads=A,
         hidden_dim=D,
         block_size=K,
         dropout=0.1,

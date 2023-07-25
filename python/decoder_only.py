@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from defaults import B, D, E, H, K, L, S, V
+from defaults import A, B, D, E, K, L, S, V
 from transformer_block import TransformerBlock
 
 # Apologies for the lack of type-hinting, but it makes the latex less readable.
@@ -9,7 +9,7 @@ from transformer_block import TransformerBlock
 class DecoderOnly(nn.Module):
     def __init__(
         self,
-        attn_heads=H,
+        attn_heads=A,
         block_size=K,
         dropout=0.1,
         expansion_factor=E,
