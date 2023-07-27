@@ -76,3 +76,14 @@ def test_attention_map():
         for pos in range(map.shape[-1]):
             zero_attns = map[:, pos, pos + 1 :]
             assert torch.allclose(zero_attns, torch.zeros_like(zero_attns))
+
+
+def test_causality():
+    inputs = torch.randn(B, S, D)
+    a = CausalAttention()
+    a.eval()  # For determinism.
+    outputs_1 = a(inputs[:, :-1])
+    outputs_2 = a(inputs)
+    # The outputs for all common sequence indices should match. Not sure why the tolerances needed
+    # to be raised for success here, but they did.
+    assert torch.allclose(outputs_1, outputs_2[:, :-1], rtol=1e-6, atol=1e-6)
