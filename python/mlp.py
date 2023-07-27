@@ -27,3 +27,7 @@ def test_mlp():
     m = MLP()
     outputs = m(inputs)
     assert outputs.shape == inputs.shape
+
+
+if __name__ == "__main__":
+    test_mlp()

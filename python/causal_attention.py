@@ -87,3 +87,9 @@ def test_causality():
     # The outputs for all common sequence indices should match. Not sure why the tolerances needed
     # to be raised for success here, but they did.
     assert torch.allclose(outputs_1, outputs_2[:, :-1], rtol=1e-6, atol=1e-6)
+
+
+if __name__ == "__main__":
+    test_attention()
+    test_attention_map()
+    test_causality()

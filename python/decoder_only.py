@@ -55,3 +55,7 @@ def test_decoder():
     d = DecoderOnly()
     outputs = d(inputs)
     assert outputs.shape == torch.Size([B, S, V])
+
+
+if __name__ == "__main__":
+    test_decoder()

@@ -43,3 +43,7 @@ def test_transformer_block():
     t = TransformerBlock()
     outputs = t(inputs)
     assert outputs.shape == inputs.shape
+
+
+if __name__ == "__main__":
+    test_transformer_block()

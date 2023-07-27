@@ -22,3 +22,7 @@ def test_loss():
     outputs_flat, targets_flat = outputs.reshape(-1, outputs.shape[-1]), targets.reshape(-1)
     loss = F.cross_entropy(outputs_flat, targets_flat)
     assert loss
+
+
+if __name__ == "__main__":
+    test_loss()
