@@ -81,12 +81,16 @@ def test_attention_map():
 def test_causality():
     inputs = torch.randn(B, S, D)
     a = CausalAttention()
-    a.eval()  # For determinism.
-    outputs_1 = a(inputs[:, :-1])
-    outputs_2 = a(inputs)
-    # The outputs for all common sequence indices should match. Not sure why the tolerances needed
-    # to be raised for success here, but they did.
-    assert torch.allclose(outputs_1, outputs_2[:, :-1], rtol=1e-6, atol=1e-6)
+    a.eval()  # Make dropout deterministic.
+    # Passing in two sequences of different lengths whose common elements match should result in
+    # outputs whose common elements also match
+    for short_seq_len in range(1, S):
+        for long_seq_len in range(short_seq_len, S + 1):
+            short_inputs, long_inputs = inputs[:, :short_seq_len], inputs[:, :long_seq_len]
+            # Only take the common positions in the outputs:
+            short_outputs, long_outputs = a(short_inputs), a(long_inputs)[:, :short_seq_len]
+            #  Not sure why the tolerances needed to be raised for success here, but they did.
+            assert torch.allclose(short_outputs, long_outputs, rtol=1e-6, atol=1e-6)
 
 
 if __name__ == "__main__":
