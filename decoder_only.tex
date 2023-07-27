@@ -32,10 +32,10 @@ Notes on various aspects of Decoder-Only Transformers.
 
 \section{Decoder-Only Fundamentals \label{sec_decoder_only} }
 
-The Transformers architecture \cite {vaswani2017attention}, which dominates Natural Language
+The Transformers architecture \cite{vaswani2017attention}, which dominates Natural Language
 Processing (NLP) as of July 2023, is a relatively simple architecture. There are various flavors and
 variants of Tranformers, but focus here on the decoder-only versions which underlie the
-GPT models \cite {gpt2radford2019language, gpt3brown2020language, gpt4openai2023}.
+GPT models \cite{gpt2radford2019language, gpt3brown2020language, gpt4openai2023}.
 
 The full decoder-only architecture can be seen in Fig.~\ref{fig_transformers_architecture}. The
 parameters which define the network can be found in App.~\ref{app_conventions}.
@@ -278,7 +278,7 @@ and so the model is trained using the usual cross-entropy/maximum-likelihood los
 Note that the losses for all possible context lengths are included in the sum.
 
 In \pyinline{torch}
-code, the loss computation might look like the following:
+code, the loss computation might look like the following (using fake data):
 \pyfile[firstline=10, lastline=23]{python/loss.py}
 
 \part{Training}
@@ -308,8 +308,8 @@ Memory costs count the elements of all tensors in some fashion, both from model 
 intermediate representations. The gradient and optimizer state costs scale with the former quantity:
 $ \Ocal \left ( N _{ {\rm params}  } \right ) \sim \Ocal \left ( L D ^{ 2 } \right )$, only counting
 the dominant contributions from weight matrices. Activation memory scales with the latter,
-which for a \pyinline{(B, S, D)}-shaped input gives $ \Ocal \left ( LBSD  \right ) $ contributions
-from tensors which preserve the input shape, as well as $ \Ocal \left( LBHS ^{ 2 } \right)  $
+which for a \pyinline{(B, S, D)}-shaped input gives $ \Ocal \left ( BDLS  \right ) $ contributions
+from tensors which preserve the input shape, as well as $ \Ocal \left( BHLS ^{ 2 } \right)  $
 factors from attention matrices.
 \end{nicebox}
 
@@ -404,10 +404,10 @@ and $ S $, scaling linearly with both.
 \paragraph{Attention Activations}
 
 We will count the number of input elements which need to be cached. Our \pyinline{(B, S, D)}-shaped inputs
-to the attention layer with $ BSD $ elements are first converted to $ 3BSD $ total query, key, value
-elements, and the query-key dot products produce $ HBS ^{ 2 } $ more, which are softmaxed into $ HBS
-^{ 2 } $ normalized scores. The re-weighted inputs to the final linear layer also have $ BSD $
-elements, bringing the running sum to $ BS \left ( 5D + 2HS  \right ) $
+to the attention layer with $ BDS $ elements are first converted to $ 3BDS $ total query, key, value
+elements, and the query-key dot products produce $ ABS ^{ 2 } $ more, which are softmaxed into $ ABS
+^{ 2 } $ normalized scores. The re-weighted inputs to the final linear layer also have $ BDS $
+elements, bringing the running sum to $ BS \left ( 5D + 2AS  \right ) $
 
 Finally, there are also the dropout layers applied to the normalized attention scores and the final
 output whose masks must be cached in order to
@@ -415,9 +415,9 @@ backpropagate. In torch, the mask is a \pyinline{torch.bool} tensor, but
 \href{https://github.com/pytorch/pytorch/issues/41571}{surprisingly} these use one \textit{byte} of
 memory per element, rather than one bit \footnote{As you can verify
 via \pyinline{4 * torch.tensor([True]).element_size() == torch.tensor([1.]).element_size().}}.
-Given this, the total memory cost from activations per attention layer is
+Given this, the total memory cost from activations is
 \begin{align}
-M _{ \rm act  } ^\texttt{Attention} &= BS \left ( (5p+1)D + (2p+1)HS  \right ) \ .
+M _{ \rm act  } ^\texttt{Attention} &= BLS \left ( (5p+1)D + (2p+1)AS  \right ) \ .
 \label{eq_att_actmem_vanilla}
 \end{align}
 
@@ -429,24 +429,23 @@ M _{ \rm act  } ^\texttt{Attention} &= BS \left ( (5p+1)D + (2p+1)HS  \right ) \
   Eirst we cache the
 \pyinline{(B, S, D)}-shaped inputs into the first MLP layer. These turn into the
 \pyinline{(B, S, ED)} inputs of the non-linearity, which are then passed into the last
-\pyinline{Linear} layer, summing to $ (2E+1)BSD $ total elements thus far. Adding in the dropout
-mask, the total memory requirement is
+\pyinline{Linear} layer, summing to $ (2E+1)BDS $ total elements thus far. Adding in the dropout
+mask, the total memory requirement across all \pyinline{MLP} layers is:
 \begin{align}
-M _{ \rm act  } ^\texttt{MLP} &= (2Ep+p+1)BSD\ .
+M _{ \rm act  } ^\texttt{MLP} &= (2Ep+p+1)BDLS\ .
 \label{eq_mlp_actmem_vanilla}
 \end{align}
 
 
 \paragraph{LayerNorm, Residual Connections, and Other Contributions}
 
-Then the last remaining components. The \pyinline{LayerNorm} instances each have $ BSD $ inputs and
-there are two per transformer block, so $ M _{ {\rm  act}  } ^\texttt{LayerNorm} = 2pBSD $ for each
-layer, and there is an additional instance at the end of the architecture. There are two residual
-connections per block, but their inputs do not require caching (since they're just additions whose
-derivatives are independent of inputs). Then, there are additional contributions from pushing the
-last layer's outputs through the language-model head and computing the loss function, but these do
-no scale with $ L $ and are ultimately $ \sim \Ocal \left( \frac{ V }{ DL } \right)  $ suppressed,
-so we neglect them.
+Then the last remaining components. The \pyinline{LayerNorm} instances each have $ BDS $ inputs and
+there are two per transformer block, so $ M _{ {\rm  act}  } ^\texttt{LayerNorm} = 2pBDLS $, and
+there is an additional instance at the end of the architecture. There are two residual connections
+per block, but their inputs do not require caching (since their derivatives are independent of
+inputs). Then, there are additional contributions from pushing the last layer's outputs through the
+language-model head and computing the loss function, but these do no scale with $ L $ and are
+ultimately $ \sim \Ocal \left( \frac{ V }{ DL } \right)  $ suppressed, so we neglect them.
 
 
 
@@ -459,28 +458,30 @@ Summing up the contributions above, the total activation memory cost per-layer i
 \begin{align}
     M _{ {\rm act}  } ^{ {\rm  total}  } & \approx  2BDLS   \left ( p(E+4) + 1 + \Ocal \left( \frac{
     V}{ DL } \right)  \right )
-    + BHLS ^{ 2 } \left ( 2p+1\right ) \label{eq_act_mem_total_no_sharding}\ .
+    + ABLS ^{ 2 } \left ( 2p+1\right ) \label{eq_act_mem_total_no_sharding}\ .
 \end{align}
 Evaluating in common limits, we have:
 \begin{align}
-    M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=4 } &=BLS \left ( 66 D+15HS  \right ) \nn
-    M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=2 } &=BLS \left ( 34 D+5HS  \right )
+    M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=4 } &=BLS \left ( 66 D+15AS  \right ) \nn
+    M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=2 } &=BLS \left ( 34 D+5AS  \right )
 \end{align}
 
 
 \paragraph{When does mixed-precision reduce memory?} (Answer: usually.) We saw in Sec.~\ref{sec_params_grads_optim_mem}
 that mixed precision \textit{increases} the fixed costs of non-activation memory, but from the above
 we also see that it also \textit{reduces} the activation memory and the saving increase with larger
-batch sizes and sequence lengths. It is straightforward to find where the tipping point is and for
-the simplified $ E=4$, vanilla mixed-precision case with no parallelism the minimum batch size which
-leads to memory savings is
+batch sizes and sequence lengths. It is straightforward to find where the tipping point is.
+Specializing to the case $E=4$, vanilla mixed-precision case with no parallelism\footnote{With both
+tensor- and sequence-parallelism, the parallelism degree $ T $ actually drops out in the comparison
+(since both form of memory are decrease by $ 1/T $, so this restriction  can be lifted.}, the
+minimum batch size which leads to memory savings is
 \begin{align}
   B _{ {\rm min}  } &= \frac{ 6 D ^{ 2 } }{ 8 DS + A S ^{ 2 } }\label{eq_min_mp_batch_size}\ .
 \end{align}
-For typical architectures and training sequence lengths, the two terms in the denominator are about
-equal and so we can approximate the above as $ B _{ {\rm min}  } \sim \frac{ D }{ S }  \sim \Ocal
-\left( 5 \right) $ for typical mid-to-large models in Summer 2023. The constant factors are
-important, but they turn out to help us: for GPT-2 and GPT-3
+Plugging in numbers for the typical $ \Ocal \left( 40 \ {\rm GiB} \right)$ model in the Summer of
+2023 gives $ B _{ {\rm min} } \sim \Ocal \left( 1\right)  $, so mixed-precision is indeed an overall
+savings at such typical scales.
+
 
 \subsection{Tensor Parallelism \label{subsec_tensor_parallelism} }
 
@@ -532,7 +533,7 @@ backwards pass, however.
 
 \begin{figure}[ht]
  \centering
- \includegraphics[scale=.3]{figures/mlp_mp_2.png}
+ \includegraphics[scale=.33]{figures/mlp_mp_2.png}
  \caption{Tensor parallelism for the \pyinline{MLP} layers. Graphic from
  \cite{shoeybi2020megatronlm}. The $ f/g $ operations are the collective
 identity/\pyinline{AllReduce} operations in the forwards pass and the \pyinline{AllReduce}/identity
@@ -561,7 +562,7 @@ case above.
 
  \begin{figure}[ht]
      \centering
-     \includegraphics[scale=.3]{figures/attention_mp_2.png}
+     \includegraphics[scale=.45]{figures/attention_mp_2.png}
      \caption{Tensor parallelism for the \pyinline{CausalAttention} layers. Graphic from
      \cite{shoeybi2020megatronlm}. The $ f/g $ operators play the same role as in
  Fig.~\ref{fig_mlp_tensor_parallel}.}
@@ -611,15 +612,15 @@ $, this is a pure $ 1/T $ improvement.
  \eqref{eq_mlp_actmem_vanilla} are altered to:
 \begin{align}
 M _{ \rm act  } ^\texttt{Attention} &= BS \left ( \left (p + \frac{ 4p }{ T }+1 \right )D + \left
-(\frac{ 2p+1 }{ T } \right )HS  \right ) \nn
-M _{ \rm act  } ^\texttt{MLP} &= \left (\frac{ 2Ep }{ T }+p+1 \right )BSD\ .
+(\frac{ 2p+1 }{ T } \right )AS  \right ) \nn
+M _{ \rm act  } ^\texttt{MLP} &= \left (\frac{ 2Ep }{ T }+p+1 \right )BDS\ .
 \label{eq_act_mem_attn_mlp}
 \end{align}
 The derivation is similar to before. Adding in the (unchanged) contributions from
 \pyinline{LayerNorm} instances, the total, leading order activation memory sums to
 \begin{align}
     M _{ {\rm act}  } ^{ {\rm  total}  } & \approx  2BDLS   \left ( p \left (2+ \frac{ E+2 }{ T }\right ) + 1   \right )
-    + BHLS ^{ 2 } \left ( \frac{ 2p+1 }{ T }\right ) \label{eq_act_mem_total_tensor_parallel}\ .
+    + ABLS ^{ 2 } \left ( \frac{ 2p+1 }{ T }\right ) \label{eq_act_mem_total_tensor_parallel}\ .
 \end{align}
 Again, the terms which did not receive the $ 1/T $ enhancement correspond to activations from
 unsharded \pyinline{LayerNorm} and \pyinline{Dropout} instances and the $ 1/T $'s improvements can
@@ -684,10 +685,14 @@ sen in Fig.~\ref{fig_tensor_seq_parallel} and Fig.~\ref{fig_tensor_seq_parallel_
 
 \subsection{Pipeline Parallelism \label{subsec_pipe_parallelism}}
 
+TODO
 
 
 
 
+
+
+\subsection{Latency \label{sec_latency_train} }
 
 \subsection{Case Study: Mixed-Precision GPT3 \label{subsec_gpt_mem_study} }
 
@@ -754,13 +759,30 @@ case ``s", FLOPs, but there's little consistency in general. We will use FLOPs a
 data is effectively determined by the number of matrix multiplies needed.
 
 Recall that a dot-product of the form $ v \cdot M $  with $ v \in \mathbb{R}^{ m } $ and $ M \in
-\mathbb{R} ^{ m, n }$ requires $ m\times \left (2 n-1 \right ) \approx 2mn$ FLOPs.  For large
-language models, $ m,n \sim \Ocal \left( 10 ^{ 3 } \right)  $, meaning that even expensive
+\mathbb{R} ^{ m, n }$ requires $ \left (2 m-1 \right )\times n \approx 2mn$ FLOPs .
+For large language models, $ m,n \sim \Ocal \left( 10 ^{ 3 } \right)  $, meaning that even expensive
 element-wise operations like \pyinline{GeLU} acting on the same vector $ v $ pale in comparison by
 FLOPs count \footnote{Since their FLOPs counts only scales as $ \sim \Ocal \left( n\right )  $ where
-the omitted constant may be relatively large, but still negligible when all dimensions are big.}. It is
-then a straightforward exercise in counting to estimate the FLOPs for a given architecture. The input tensor
-is of shape \pyinline{(B, S, D)} throughout.
+the omitted constant may be relatively large, but still negligible when all dimensions are big.}. It
+is then a straightforward exercise in counting to estimate the FLOPs for a given architecture. The
+input tensor is of shape \pyinline{(B, S, D)} throughout.
+
+\begin{nicebox}{Essentials}
+    The number of FLOPs to push a batch of $ B $ of sequence-length $ S $ examples through the forwards-pass
+    of a decoder-only transformer is approximately $ 2BS N _{ {\rm params}  } $ where the number of
+    parameters accounts for any reductions due to tensor- and sequence-parallelism\footnote{A quick argument: a
+computation of the form $T _{ a _{ 0 }\ldots  a _{ n }j } =V _{ a _{ 0 }\ldots a _{ A
+}i }M _{ ij } $ requires $ 2A _{ 0 }\ldots A _{ n }IJ $ FLOPs where the capital letters
+represent the size of their similarly-index dimensions. Thus, the FLOPs
+essentially count the size of the matrix $ M $ (that is, $ IJ $), up to a factor of 2 times all of the
+dimensions in $ V $ which weren't summed over. Therefore, passing a
+\pyinline{(B, S, D)}-shaped tensor through the Transformer architecture would give $ \sim 2BS\times
+$(sum of sizes of all weight-matrices) FLOPs, and that this last factor is also approximately the number of
+parameters in the model (since that count is dominated by weights). Thus, FLOPs $ \approx 2BSN _{
+{\rm params}  } $. This is the correct as long as the self-attention FLOPs with $ \Ocal \left( S ^{ 2 } \right)$-dependence which we
+didn't account for here are actually negligible (true for $ S \lesssim D $.}. The backwards-pass
+    costs about twice as much as the forwards-pass. This is true as long as $ S \lesssim D $).
+\end{nicebox}
 
 
 
@@ -844,7 +866,7 @@ contribution here. }:
 \begin{align}
 F _{ {\rm total}  } ^{ {\rm  model}  } &\approx 12 BDLS \left ( S + \left ( 2+E \right )D \right ) \label{eq_model_flops}\ .
 \end{align}
-We can also phrase the FLOPs in terms of the number of parameters as
+We can also phrase the FLOPs in terms of the number of parameters \eqref{eq_approx_params_tensor_parallel} as
 \begin{align}
  F _{ {\rm total}  } ^{ {\rm  model}  } \big| _{ T=1 }  &= 6BS N _{ {\rm  params}  }\times \left ( 1 + \Ocal \left( S/D\right)  \right )
 \end{align}
@@ -891,7 +913,7 @@ There are various problems that naive implementations of the above face:
     not guarantee the most-probable overall sequence, for instance.
 \end{itemize}
 
-\section{The Minimum Needed and the kv-Cache }
+\section{The Bare Minimum and the kv-Cache \label{sec_kv_cache}}
 
 
 There are two separate stages during generation. First, an original, to-be-continued series of prompts
@@ -919,28 +941,77 @@ Therefore, we can cut out many steps and minimum requirements are:
         needed, but because of the causal mask, all components except for the last in the sequence
         dimension ($ s\neq -1 $) are the same as they were in the last iteration, up to a shift
         by one position\footnote{That is, if we add a label $ t $ which indexes the iteration of generation
-        we are on, then $ z ^{ (t+1) } _{ bsd } = z ^{ (t)} _{ b (s-1)d } $ for every tensor in the network, as long as $ s $ isn't the final index.}
+        we are on, then $ z ^{ (t+1) } _{ bsd } = z ^{ (t)} _{ b (s-1)d } $ for every tensor in the network, except for when $ s=-1 $, the last position.}
 \end{itemize}
 
 So, we are led to the concept of the \textbf{kv-cache} in which we cache old key and query vectors for generation.
 The cache represents a tradeoff: fewer FLOPs are needed for inference, but the memory costs are potentially
 enormous, since the size of the cache grows with batch size and sequence length:
 \begin{align}
-    M _{ {\rm kv-cache}  } &= 2pBSD \ . \label{eq_kv_cache_memory}
+    M _{ {\rm kv-cache}  } &= 2pBSDL /T\ ,  \label{eq_kv_cache_memory}
 \end{align}
-This can easily be larger than the memory costs of the model parameter: $ M _{ {\rm params}  } ^{
-{\rm  inference}  } \sim p N _{ {\rm params}  } \sim p LD ^{ 2 }  $ (dropping $ \Ocal \left( 1
-\right)  $ factors), so that the cache takes up more memory when $ BS \gtrsim LD $.
+in the general case with tensor-parallelism. This can easily be larger than the memory costs of the
+model parameter: $ M _{ {\rm params}  } ^{ {\rm  inference}  } \sim p N _{ {\rm params}  } \sim p LD
+^{ 2 }  $ (dropping $ \Ocal \left( 1 \right)  $ factors), so that the cache takes up more memory
+when $ BS \gtrsim D $. Also, re-processing an entire input sequence every time also exhibits the
+usual $\sim S ^{ 2 }  $ FLOPs dependence, but this is reduced to being \textit{linear} in $ S $
+when the kv-cache is used.
 
 
 
-
-
-\section{Memory and FLOPs}
+\section{Basic Memory, FLOPs, and Latency}
 
 The analysis of the memory and FLOPs for inference is much simpler than its corresponding training
 counterparts (Sec.~\ref{sec_flops_training} and Sec.~\ref{sec_memory_training}  ), since there is no
 optimizer state and activations can be thrown away immediately after use (neglecting the kv-cache).
+We cover naive inference without a kv-cache first, then repeat the analysis with the cache. Much of
+this is based on \cite{kipply_inference_math}.
+
+\paragraph{Naive Inference} Processing a single \pyinline{(B, S, D)}-shaped tensor to generate a single
+next input costs the $ 2BSN _{ {\rm params}  } $ FLOPs we found for the forwards-pass in
+Sec.~\ref{sec_flops_training}. Memory costs just come from the parameters themselves: $ M _{ {\rm
+infer.}  }^{ {\rm naive}  }=pN _{ {\rm params}  } $. Per the analysis of App.~\ref{app_flops_mem_bound},
+naive inference is compute-bound and so the per-token-latency is approximately\footnote{Assuming we
+do the naive thing here and generate the next token in a similarly naive way, shifting over the
+context window.}  $  2BSN _{ {\rm params}  }/ \lambda _{ {\rm FLOPs}  } $ where the FLOPs bandwidth
+in the denominator is again defined in App.~\ref{app_flops_mem_bound}.
+
+\paragraph{kv-Cache Inference}
+The FLOPs requirements for the hidden-dimension matrix multiplies during generation are $2BN _{ {\rm params}  } $,
+since we are only processing a single token, per previous results.   This is in addition to the up-front cost of $ 2BSN _{
+{\rm params}} $ for the prefill. But, the memory requirements are raised to \begin{align} M _{ {\rm
+infer.}  }^{ {\rm kv-cache}  } &=pN _{ {\rm params}  } + 2pBSDL/T\ . \end{align} The computation is
+now compute bound (again, see App.~\ref{app_flops_mem_bound}) and has per-token-latency of
+approximately $ M _{ {\rm infer.} }/ \lambda _{ {\rm mem.} }$, unless the batch-size is very large.
+
+
+
+\section{Case Study: \href{https://huggingface.co/tiiuae/falcon-40b-instruct?_sm_vck=j230jZ2ssDkkPfJTfRt6tjQNTQZJ65N7VDWmj5Ff6f3jZ3mhh2Pq}{Falcon-40B}}
+
+Let's work through the details of the kv-cache for Falcon-40B\footnote{Falcon actually uses
+multi-query attention, which changes the computations here, but we will pretend it does not in this
+section for simplicity.} with $ D=8192 $, $ L=60 $, $ S=2048 $.  In half, $ p=2 $ precision, the model weights just about fit on an
+80GiB A100, but this leaves no room for the cache, so we parallelize $ T $ ways across $ T $ GPUs,
+assumed to be on the same node. The total memory costs are then
+\begin{align}
+    M _{ {\rm  total} } &\approx  \frac{ {\rm 80GiB} + {\rm 4GiB}\times B }{ T } \ .
+\end{align}
+This means that in order to hit the compute-bound threshold of $ B \sim 200 $ (see
+App.~\ref{app_flops_mem_bound}) we need at least $ T=4 $ way parallelism.  Taking $ T=4 $, and running
+at capacity with $ B \sim 200$ so that we are compute-bound, the per-token-per-batch latency from computation alone
+is approximately $ \frac{ pN _{ {\rm params} } }{ \lambda _{ {\rm FLOPs} } T} \sim $13ms. While the
+memory-bandwidth time $ M _{ {\rm total} } / \lambda _{ {\rm mem} } $ is of a comparable size, we assume
+that the computations are immediately starting as the data is streamed from memory, such that these
+costs are not additive.
+
+
+
+
+
+
+
+
+
 
 
 
@@ -948,25 +1019,27 @@ optimizer state and activations can be thrown away immediately after use (neglec
 
 
 
-\section{Conventions and Notation}\label{app_conventions}
+\section{Conventions and Notation\label{app_conventions}}
 
 
 We loosely follow the conventions of \cite{korthikanti2022reducing} and denote the main Transformers
 parameters by:
 \begin{itemize}
-\item $ B $: microbatch size
-\item $ K $: the block size (maximum sequence length\footnote{In the absence of methods such as
-    ALiBi \cite{ALiBi}  can be used to extend the sequence length at inference time.})
-\item $ S $: input sequence length
-\item $ V $: vocabulary size
-\item $ D $: the hidden dimension size
-\item $ L $: number of transformer layers
-\item $ A $: number of attention heads
-\item $ P $: pipeline parallel size
-\item $ T $: tensor parallel size
-\item $ E $: expansion factor for MLP layer (usually $ E=4 $)
-\item $ \tau $: throughput rate in tokens/second
-\item $ p $: the precision of the elements of a tensor in bytes
+    \item $ A $: number of attention heads
+    \item $ B $: microbatch size
+    \item $ D $: the hidden dimension size
+    \item $ E $: expansion factor for MLP layer (usually $ E=4 $)
+    \item $ F $: FLOPs
+    \item $ K $: the block size (maximum sequence length\footnote{In the absence of methods such as         ALiBi \cite{ALiBi}  can be used to extend the sequence length at inference time.})
+    \item $ L $: number of transformer layers
+    \item $ N _{ {\rm params}  } $: number of model parameters held by a given device
+    \item $ P $: pipeline parallel size
+    \item $ S $: input sequence length
+    \item $ T $: tensor parallel size
+    \item $ V $: vocabulary size
+    \item $ \tau $: throughput rate in tokens/second
+    \item $ p $: the precision of the elements of a tensor in bytes
+    \item $ \lambda  $: used for various rates, e.g. $ \lambda _{ {\rm mem}  } $ is memory bandwidth
 \end{itemize}
 Where it makes sense, we try to use the lower-case versions of these characters to denote the
 corresponding indices on various tensors. For instance, an input tensor with the above batch size,
@@ -978,12 +1051,15 @@ sequence length, and vocabulary size would be written as $ x _{ bsv } $, with $ 
 V \gg D, S \gg L, A \gg P, T \ .  \label{app_eq_transformers_approxs}
 \end{gather}
 For instance, GPT-2 and GPT-3 \cite{gpt2radford2019language, gpt3brown2020language} have $ V \sim \Ocal \left( 10 ^{ 4 } \right)  $,
-$ S, L \sim \Ocal \left( 10 ^{ 3 } \right)  $, $ L, A \sim \Ocal \left( 10 ^{ 2 } \right)  $.
-
+$ S, L \sim \Ocal \left( 10 ^{ 3 } \right)  $, $ L, A \sim \Ocal \left( 10 ^{ 2 } \right)  $. We
+will often assume that\footnote{This condition ensures that the $ \Ocal \left( S ^{ 2 } \right)  $
+    FLOPs cost from self-attention is negligible compared to $ \Ocal \left( D ^{ 2 } \right)  $
+    contributions from other matrix multiplies.  It should be noted that in Summer 2023 we are
+steadily pushing into the regime where this condition does \textit{not}  hold.} $ S \lesssim D $.
 
 As indicated above,  we use zero-indexing. We also use \pyinline{python} code
-throughout\footnote{Written in a style conducive to latex, e.g. no type-hints and pegagogy
-prioritized.}  and
+throughout\footnote{Written in a style conducive to latex, e.g. no type-hints and clarity
+prioritized over optimization.}  and
 write all ML code using standard \pyinline{torch} syntax. To avoid needing to come up with new
 symbols in math expressions we will often use expressions like $ x \leftarrow f(x) $ to refer to performing
 a computation on some argument ($ x $) and assigning the result right back to the variable $ x $
@@ -1048,26 +1124,83 @@ n=0 $ worker is arbitrarily denoted the \textit{chief}.  Then, the primitive ope
         a $ x' $ of the same shape, but each worker only receives a slice $ 1/N $ of the result.
 \end{itemize}
 
+
+
 \section{Hardware}
 
 Basic information about relevant hardware considerations.
 
 
-\subsection{NVIDIA GPU Stats}
+\subsection{NVIDIA GPU Stats \label{app_gpu_stats}}
 
 
-The most important statistics for GPUs are their memory capacity, their maximum (theoretical) FLOP/s
-rate, their memory bandwidth, and their \textit{math bandwidth}
-(\href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch}{which
-is the ratio of the last two quantities}):
-
+Summary of relevant NVIDIA GPU statistics:
 \begin{center}
-\begin{tabular}{| c |c| c |c |c| }\hline
-    GPU & Memory & FLOP/s  & Memory Bandwidth (B/s)  & Math Bandwidth (FLOPs/B)\\ \hline
-    A100 & 40GiB/80GiB & $ 312 \times 10 ^{ 12 } $ & $  1.5 \times 10 ^{  12 }   $ & 208 \\ \hline
+\begin{tabular}{| c |c| c |c |c| c| }\hline
+    GPU & Memory & $ \lambda _{ {\rm FLOP/s }  } $& $ \lambda _{ {\rm mem}  } $  & $ \lambda _{ {\rm math}  } $  & $ \lambda _{ {\rm comms}  } $\\ \hline
+    \href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf}{A100}& 40GiB&  312  TFLOP/s &   1.6 TiB/s  & 195 FLOPS/B & 300 GiB/s \\ \hline
+    \href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf}{A100} & 80GiB&  312  TFLOP/s &   2.0 TiB/s  & 156 FLOPS/B & 300 GiB/s \\ \hline
+    \href{https://images.nvidia.com/content/technologies/volta/pdf/volta-v100-datasheet-update-us-1165301-r5.pdf}{V100} & 32GiB&  130  TFLOP/s &   1.1 TiB/s  & 118  FLOPS/B & 16 GiB/s \\ \hline
 \end{tabular}
 \end{center}
+where
+\begin{itemize}
+    \item $ \lambda _{ {\rm  FLOP/s}  } $ is flops bandwidth (for \pyinline{float16/bfloat16}  multiply-accumulate ops)
+    \item $ \lambda _{ {\rm  mem}  } $ is memory bandwidth
+    \item $ \lambda _{ {\rm  math}  } = \frac{  \lambda _{ {\rm FLOP/s}  } }{ \lambda _{ {\rm mem} } } $ is \href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch}{math bandwidth}
+    \item $ \lambda _{ {\rm  comms}  } $ is one-way communication bandwidth
+\end{itemize}
 
+
+
+
+\section{Compute-bound vs Memory-bound \label{app_flops_mem_bound} }
+
+If your matrix-multiplies are not sufficiently large on,
+you are wasting resources \cite{he2022brrrrfromfirstprinciples}. The relevant parameters which
+determine sufficiency are $ \lambda _{ {\rm FLOP/s}  } $ and $ \lambda _{ {\rm mem}  } $, the FLOPs
+and memory bandwidth, respectively. The ratio $  \lambda _{ {\rm math}  } \equiv \frac{  \lambda _{ {\rm FLOP/s}  } }{ \lambda _{ {\rm mem}  } }   $
+determines how many FLOPS you must perform for each byte loaded from memory; see App.~\ref{app_gpu_stats}.
+If your computations have a FLOPs/B ratio which is larger than  $ \lambda _{ {\rm math}  } $, then
+you are compute-bound (which is good, as you're maximizing compute), and otherwise you are
+memory(-bandwidth)-bound (which is bad, since your compute capabilities are idling). The FLOPs/B
+ratio of your computation is sometimes called the \textbf{compute intensity} or \textbf{arithmetic
+intensity}. When compute bound, a process takes time $ \sim F/\lambda _{ {\rm FLOPs} } $, while
+memory-bound processes take time\footnote{Note that the time is not additive, e.g. compute-bound tasks do
+not take time $ \sim F/\lambda _{ {\rm FLOPs} } +M/\lambda _{ {\rm mem} }$ because they are not sequential: compute and memory-communications can be concurrent.} $ \sim M/\lambda _{ {\rm mem} } $.
+
+
+For instance, to multiply a \pyinline{(B, S, D)}-shaped tensor $ z _{ bsd } $ by a \pyinline{(D, D)}-shaped
+weight-matrix $ W _{ d d' } $, $ p \left ( BSD +D ^{ 2 } \right ) $ bytes must be transferred from
+DRAM to SRAM at a rate $ \lambda _{ {\rm  mem}  } $, after which we perform $ 2BSD ^{ 2 } $ FLOPs,
+and write the \pyinline{(B, S, D)}-shaped  result back to DRAM again, for a ratio of
+\begin{align}
+    \frac{ 1 }{ p } \frac{ BSD }{ 2BS + D } \ \left ( {\rm FLOPs/B} \right )  \ .
+\end{align}
+We want to compare this against $ \lambda _{ {\rm math}  } $, which from
+App.~\ref{app_gpu_stats} we take to be $ \Ocal \left( 100\  {\rm FLOPs/B} \right)  $, and plugging
+in any realistic numbers, shows that such matrix-multiplies are essentially always compute-bound.
+Compare this to the case of some element-wise operation applied to the same $ z _{ bsd } $ tensor
+whose FLOPs requirements are $ \sim C\times BSD $ for some constant-factor $ C \ll S, D $.  Then,
+then FLOPS-to-bytes ratio is $ \sim \frac{ C }{ p } $, which is \textit{always} memory-bound for
+realistic values of $ C $. The moral is to try and maximize the number of matrix-multiplies and
+remove as many element-wise operations that you can get away with.
+
+
+Finally, we note that the above has implications for the Transformers architecture as a whole, and
+in particular it highlights the difficulties in efficient inference. Under the assumptions of
+Sec.~\ref{sec_flops_training}, $ \sim \Ocal \left( BSN _{ {\rm params}  }  \right)  $
+total FLOPs needed during training, while the number of bytes loaded from and written to memory are
+$ \Ocal \left( BSDL + N _{ {\rm params}  } \right)  \sim \Ocal \left( \frac{ BS N _{ {\rm params}  } }{ D}+ N _{ {\rm params}  } \right)  $
+which is $ \Ocal \left( N _{ {\rm  parama}  } \right)  $ for not-super-long sequence lengths.  The
+arithmetic intensity is therefore $ \Ocal \left( BS \right)  $ and so training is compute-bound in any
+usual scenario, as long as individual operations in the network don't suffer from outlandish
+memory-boundedness. The problem during inference is that (if using the kv-cache; see
+Sec.~\ref{sec_kv_cache}) we only need to process a \textit{single} token at a time and so $ S
+\longrightarrow 1 $ in the preceding and the arithmetic intensity drops to $ \Ocal \left( B \right)
+$. On our favorite 80GiB A100s, we then need to be able to process batch sizes $ B \sim \Ocal \left(
+200 \right)  $ in order to saturate our compute. This is hard, which is why efficient inference is
+hard \cite{kipply_inference_math} .
 
  \section{TODO}
 
@@ -1080,6 +1213,7 @@ is the ratio of the last two quantities}):
  \item BERT family
  \item Residual stream
  \item Scaling laws
+ \item Cheat sheet
  \end{itemize}
 
 \bibliographystyle{latex_goon/utphys}
