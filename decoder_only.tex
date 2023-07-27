@@ -205,13 +205,13 @@ For completeness, the entire operation in condensed notation with indices left i
 \end{align}
 where all of the dot-products are over feature dimensions (those of size $ D $ or $ D/A $).
 
-The final \pyinline{Dropout} layer is often included as part of the \pyinline{CausalAttention} block , as
-in the math above and in Fig.~\ref{fig_transformers_architecture}. Below is pedagogical\footnote{The
+Below is pedagogical\footnote{The
 code is written for clarity, not speed. An example optimization missing here: there is no need to
 form separate $ Q ^{ a },K ^{ a },V ^{ a} $ \pyinline{Linear} layers, one large layer which is later
-chunked is more efficient} sample code for a \pyinline{CausalAttention} layer which separates the
-last \pyinline{Dropout} layer out. This will be convenient when we talk about sequence parallelism below
-in Sec.~\ref{subsec_seq_parallelism}. \pyfile[firstline=10,lastline=57]{python/causal_attention.py}
+chunked is more efficient} sample code for such a  \pyinline{CausalAttention} layer\footnote{When
+using sequence-parallelism, it will be more natural to separate out the final \pyinline{Dropout} layer
+and combine it with the subsequent \pyinline{LayerNorm}, as they are sharded together; see
+Sec.~\ref{subsec_seq_parallelism}.}:\pyfile[firstline=10,lastline=58]{python/causal_attention.py}
 
 The parameter count is dominated by the weight matrices which carry $ 4 D ^{ 2 } $ total parameters per layer.
 
@@ -246,7 +246,7 @@ layer of Sec.~\ref{subsubsec_embedding_and_pe}.
 \subsection{All Together}
 It is then relatively straightforward to tie everything together.  In code, we can first create a
 transformer block like
-\pyfile[firstline=10, lastline=32]{python/transformer_block.py}
+\pyfile[firstline=10, lastline=38]{python/transformer_block.py}
 which corresponds to the schematic function
 \begin{align}
   z &\leftarrow  z + \texttt{MLP}\left ( \LN \left ( z + \texttt{CausalAttention}\left ( \LN \left (

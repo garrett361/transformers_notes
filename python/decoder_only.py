@@ -57,5 +57,20 @@ def test_decoder():
     assert outputs.shape == torch.Size([B, S, V])
 
 
+def test_causality():
+    inputs = torch.randint(high=V, size=(B, S))
+    d = DecoderOnly()
+    d.eval()  # Make dropout deterministic.
+    # Passing in two sequences of different lengths whose common elements match should result in
+    # outputs whose common elements also match
+    for short_seq_len in range(1, S):
+        for long_seq_len in range(short_seq_len, S + 1):
+            short_inputs, long_inputs = inputs[:, :short_seq_len], inputs[:, :long_seq_len]
+            # Only take the common positions in the outputs:
+            short_outputs, long_outputs = d(short_inputs), d(long_inputs)[:, :short_seq_len]
+            #  Not sure why the tolerances needed to be raised for success here, but they did.
+            assert torch.allclose(short_outputs, long_outputs, rtol=1e-5, atol=1e-5)
+
+
 if __name__ == "__main__":
     test_decoder()
