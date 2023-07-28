@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from causal_attention import CausalAttention
-from defaults import A, B, D, E, K, L, S, V
+from defaults import A, B, D, E, K, L, V
 from mlp import MLP
 
 # Apologies for the lack of type-hinting, but it makes the latex less readable.
@@ -35,7 +35,7 @@ class TransformerBlock(nn.Module):
 
 
 def test_transformer_block():
-    inputs = torch.randn(B, S, D)
+    inputs = torch.randn(B, K, D)
     t = TransformerBlock()
     outputs = t(inputs)
     assert outputs.shape == inputs.shape

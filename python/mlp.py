@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from defaults import B, D, E, S
+from defaults import B, D, E, K
 
 # Apologies for the lack of type-hinting, but it makes the latex less readable.
 
@@ -26,7 +26,7 @@ class MLP(nn.Module):
 
 
 def test_mlp():
-    inputs = torch.randn(B, S, D)
+    inputs = torch.randn(B, K, D)
     m = MLP()
     outputs = m(inputs)
     assert outputs.shape == inputs.shape

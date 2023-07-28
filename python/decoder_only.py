@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from defaults import A, B, D, E, K, L, S, V
+from defaults import A, B, D, E, K, L, V
 from transformer_block import TransformerBlock
 
 # Apologies for the lack of type-hinting, but it makes the latex less readable.
@@ -51,20 +51,20 @@ class DecoderOnly(nn.Module):
 
 
 def test_decoder():
-    inputs = torch.randint(high=V, size=(B, S))
+    inputs = torch.randint(high=V, size=(B, K))
     d = DecoderOnly()
     outputs = d(inputs)
-    assert outputs.shape == torch.Size([B, S, V])
+    assert outputs.shape == torch.Kize([B, K, V])
 
 
 def test_causality():
-    inputs = torch.randint(high=V, size=(B, S))
+    inputs = torch.randint(high=V, size=(B, K))
     d = DecoderOnly()
     d.eval()  # Make dropout deterministic.
     # Passing in two sequences of different lengths whose common elements match should result in
     # outputs whose common elements also match
-    for short_seq_len in range(1, S):
-        for long_seq_len in range(short_seq_len, S + 1):
+    for short_seq_len in range(1, K):
+        for long_seq_len in range(short_seq_len, K + 1):
             short_inputs, long_inputs = inputs[:, :short_seq_len], inputs[:, :long_seq_len]
             # Only take the common positions in the outputs:
             short_outputs, long_outputs = d(short_inputs), d(long_inputs)[:, :short_seq_len]
