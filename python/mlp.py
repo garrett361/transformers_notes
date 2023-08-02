@@ -28,8 +28,8 @@ class MLP(nn.Module):
 
 
 def test_mlp():
-    inputs = torch.randn(B, K, D)
     m = MLP()
+    inputs = torch.randn(B, K, m.hidden_dim)
     outputs = m(inputs)
     assert outputs.shape == inputs.shape
 

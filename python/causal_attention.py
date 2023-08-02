@@ -69,18 +69,18 @@ class CausalAttention(nn.Module):
 
 
 def test_attention():
-    inputs = torch.randn(B, K, D)
-    a = CausalAttention()
-    outputs = a(inputs)
+    model = CausalAttention()
+    inputs = torch.randn(B, model.block_size, model.hidden_dim)
+    outputs = model(inputs)
     assert outputs.shape == inputs.shape
 
 
 def test_attention_map():
     """Test that all of the attention maps are causal"""
-    inputs = torch.randn(B, K, D)
-    a = CausalAttention()
-    q, k, v = a.get_qkv(inputs)
-    attn_maps = a.get_attn_maps(q, k, v, K)
+    model = CausalAttention()
+    inputs = torch.randn(B, model.block_size, model.hidden_dim)
+    q, k, v = model.get_qkv(inputs)
+    attn_maps = model.get_attn_maps(q, k, v, model.block_size)
     assert attn_maps
     for map in attn_maps:
         assert torch.allclose(map.sum(dim=-1), torch.ones(map.shape[:2]))
@@ -90,16 +90,16 @@ def test_attention_map():
 
 
 def test_causality():
-    inputs = torch.randn(B, K, D)
-    a = CausalAttention()
-    a.eval()  # Make dropout deterministic.
+    model = CausalAttention()
+    inputs = torch.randn(B, model.block_size, model.hidden_dim)
+    model.eval()  # Make dropout deterministic.
     # Passing in two sequences of different lengths whose common elements match should result in
     # outputs whose common elements also match
-    for short_seq_len in range(1, K):
-        for long_seq_len in range(short_seq_len, K + 1):
+    for short_seq_len in range(1, model.block_size):
+        for long_seq_len in range(short_seq_len, model.block_size + 1):
             short_inputs, long_inputs = inputs[:, :short_seq_len], inputs[:, :long_seq_len]
             # Only take the common positions in the outputs:
-            short_outputs, long_outputs = a(short_inputs), a(long_inputs)[:, :short_seq_len]
+            short_outputs, long_outputs = model(short_inputs), model(long_inputs)[:, :short_seq_len]
             #  Not sure why the tolerances needed to be raised for success here, but they did.
             assert torch.allclose(short_outputs, long_outputs, rtol=1e-6, atol=1e-6)
 

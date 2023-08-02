@@ -11,10 +11,10 @@ def test_loss():
         dropout=0.1,
         expansion_factor=E,
         hidden_dim=D,
-        layers=L,
+        num_layers=L,
         vocab_size=V,
     )
-    tokens = torch.randint(V, size=(B, K + 1))
+    tokens = torch.randint(model.vocab_size, size=(B, model.block_size + 1))
     inputs, targets = tokens[:, :-1], tokens[:, 1:]
     outputs = model(inputs)
     outputs_flat, targets_flat = outputs.reshape(-1, outputs.shape[-1]), targets.reshape(-1)

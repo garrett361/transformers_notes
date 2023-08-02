@@ -46,8 +46,8 @@ class TransformerBlock(nn.Module):
 
 
 def test_transformer_block():
-    inputs = torch.randn(B, K, D)
     t = TransformerBlock()
+    inputs = torch.randn(B, t.block_size, t.hidden_dim)
     outputs = t(inputs)
     assert outputs.shape == inputs.shape
 
