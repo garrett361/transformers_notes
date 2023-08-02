@@ -7,30 +7,38 @@ from transformer_block import TransformerBlock
 class DecoderOnly(nn.Module):
     def __init__(
         self,
-        attn_heads=A,
         block_size=K,
         dropout=0.1,
         expansion_factor=E,
         hidden_dim=D,
-        layers=L,
+        num_attn_heads=A,
+        num_layers=L,
         vocab_size=V,
     ):
         super().__init__()
+        self.block_size = block_size
+        self.dropout = dropout
+        self.expansion_factor = expansion_factor
+        self.hidden_dim = hidden_dim
+        self.num_attn_heads = num_attn_heads
+        self.num_layers = num_layers
+        self.vocab_size = vocab_size
+
         self.embedding = nn.Embedding(vocab_size, hidden_dim)
         self.pos_encoding = nn.Parameter(torch.randn(1, block_size, hidden_dim))
         self.drop = nn.Dropout(dropout)
         self.trans_blocks = nn.ModuleList(
             [
                 TransformerBlock(
-                    attn_heads,
+                    num_attn_heads,
                     block_size,
                     dropout,
                     expansion_factor,
                     hidden_dim,
-                    layers,
+                    num_layers,
                     vocab_size,
                 )
-                for _ in range(layers)
+                for _ in range(num_layers)
             ]
         )
         self.final_ln = nn.LayerNorm(hidden_dim)

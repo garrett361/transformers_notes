@@ -11,14 +11,18 @@ class MLP(nn.Module):
         dropout=0.1,
     ):
         super().__init__()
+        self.hidden_dim = hidden_dim
+        self.expansion_factor = expansion_factor
+        self.dropout = dropout
+
         linear_1 = nn.Linear(hidden_dim, expansion_factor * hidden_dim)
         linear_2 = nn.Linear(expansion_factor * hidden_dim, hidden_dim)
         gelu = nn.GELU()
-        self.layers = nn.Sequential(linear_1, gelu, linear_2)
+        self.num_layers = nn.Sequential(linear_1, gelu, linear_2)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, inputs):
-        z = self.layers(inputs)
+        z = self.num_layers(inputs)
         z = self.dropout(z)
         return z
 

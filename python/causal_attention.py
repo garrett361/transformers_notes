@@ -8,18 +8,29 @@ from defaults import A, B, D, K
 class CausalAttention(nn.Module):
     def __init__(
         self,
-        attn_heads=A,
-        hidden_dim=D,
         block_size=K,
         dropout=0.1,
+        hidden_dim=D,
+        num_attn_heads=A,
     ):
         super().__init__()
-        self.head_dim, remainder = divmod(hidden_dim, attn_heads)
-        assert not remainder, "attn_heads must divide hidden_dim evenly"
+        self.block_size = block_size
+        self.dropout = dropout
+        self.hidden_dim = hidden_dim
+        self.num_attn_heads = num_attn_heads
 
-        self.Q = nn.ModuleList([nn.Linear(hidden_dim, self.head_dim) for _ in range(attn_heads)])
-        self.K = nn.ModuleList([nn.Linear(hidden_dim, self.head_dim) for _ in range(attn_heads)])
-        self.V = nn.ModuleList([nn.Linear(hidden_dim, self.head_dim) for _ in range(attn_heads)])
+        self.head_dim, remainder = divmod(hidden_dim, num_attn_heads)
+        assert not remainder, "num_attn_heads must divide hidden_dim evenly"
+
+        self.Q = nn.ModuleList(
+            [nn.Linear(hidden_dim, self.head_dim) for _ in range(num_attn_heads)]
+        )
+        self.K = nn.ModuleList(
+            [nn.Linear(hidden_dim, self.head_dim) for _ in range(num_attn_heads)]
+        )
+        self.V = nn.ModuleList(
+            [nn.Linear(hidden_dim, self.head_dim) for _ in range(num_attn_heads)]
+        )
         self.O = nn.Linear(hidden_dim, hidden_dim)
 
         self.attn_dropout = nn.Dropout(dropout)

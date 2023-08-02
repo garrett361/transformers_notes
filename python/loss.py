@@ -6,7 +6,7 @@ from defaults import A, B, D, E, K, L, V
 
 def test_loss():
     model = DecoderOnly(
-        attn_heads=A,
+        num_attn_heads=A,
         block_size=K,
         dropout=0.1,
         expansion_factor=E,
