@@ -30,13 +30,13 @@ class DecoderOnly(nn.Module):
         self.trans_blocks = nn.ModuleList(
             [
                 TransformerBlock(
-                    num_attn_heads,
-                    block_size,
-                    dropout,
-                    expansion_factor,
-                    hidden_dim,
-                    num_layers,
-                    vocab_size,
+                    block_size=block_size,
+                    dropout=dropout,
+                    expansion_factor=expansion_factor,
+                    hidden_dim=hidden_dim,
+                    num_attn_heads=num_attn_heads,
+                    num_layers=num_layers,
+                    vocab_size=vocab_size,
                 )
                 for _ in range(num_layers)
             ]
@@ -60,7 +60,7 @@ def test_decoder():
     inputs = torch.randint(high=V, size=(B, K))
     d = DecoderOnly()
     outputs = d(inputs)
-    assert outputs.shape == torch.Kize([B, K, V])
+    assert outputs.shape == torch.Size([B, K, V])
 
 
 def test_causality():

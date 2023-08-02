@@ -26,7 +26,12 @@ class TransformerBlock(nn.Module):
         self.vocab_size = vocab_size
 
         self.attn_ln = nn.LayerNorm(hidden_dim)
-        self.attn = CausalAttention(num_attn_heads, hidden_dim, block_size, dropout)
+        self.attn = CausalAttention(
+            block_size=block_size,
+            dropout=dropout,
+            hidden_dim=hidden_dim,
+            num_attn_heads=num_attn_heads,
+        )
 
         self.mlp_ln = nn.LayerNorm(hidden_dim)
         self.mlp = MLP(hidden_dim, expansion_factor, dropout)
