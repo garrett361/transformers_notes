@@ -1,9 +1,6 @@
-import math
-
 import torch
-import torch.nn as nn
 from causal_attention import CausalAttention
-from defaults import A, B, D, K
+from defaults import B
 
 
 class CausalAttentionWithCache(CausalAttention):
@@ -11,19 +8,13 @@ class CausalAttentionWithCache(CausalAttention):
         super().__init__(*args, **kwargs)
         self.cached_keys = self.cached_values = None
 
-    def get_qkv(self, inputs):
-        queries = [q(inputs) for q in self.Q]
-        keys = [k(inputs) for k in self.K]
-        values = [v(inputs) for v in self.V]
-        return queries, keys, values
-
     def forward(self, inputs, use_cache=True):
         """Forward method with optional cache. When use_cache == True, the output will have a
         sequence length of one."""
         if not use_cache:
             return super().forward(inputs)
-        # Get all q, k, v values if the cache is not initialized.
         if self.cached_keys is None:
+            # If the cache is not yet initialized, we need all q, k, v values.
             assert (
                 self.cached_values is None
             ), "If cached_keys is None, cached_values should be None, too"
@@ -33,7 +24,7 @@ class CausalAttentionWithCache(CausalAttention):
             queries, new_keys, new_values = self.get_qkv(inputs[:, [-1]])
             keys = [torch.cat([ck, nk], dim=1) for ck, nk in zip(self.cached_keys, new_keys)]
             values = [torch.cat([cv, nv], dim=1) for cv, nv in zip(self.cached_values, new_values)]
-        # Update/initialize the cache.
+        # Update or initialize the cache.
         self.cached_keys = [k[:, -self.block_size + 1 :] for k in keys]
         self.cached_values = [v[:, -self.block_size + 1 :] for v in values]
         last_queries = [q[:, [-1]] for q in queries]

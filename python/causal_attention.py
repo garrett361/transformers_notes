@@ -46,20 +46,20 @@ class CausalAttention(nn.Module):
         values = [v(inputs) for v in self.V]
         return queries, keys, values
 
-    def get_attn_maps(self, queries, keys, values, seq_len):
+    def get_attn_maps(self, queries, keys):
+        S = queries[0].shape[1]
         norm = math.sqrt(self.head_dim)
         non_causal_attn_scores = [(q @ k.transpose(-2, -1)) / norm for q, k in zip(queries, keys)]
         causal_attn_scores = [
-            a.masked_fill(self.causal_mask[:, :seq_len, :seq_len] == 0, float("-inf"))
+            a.masked_fill(self.causal_mask[:, :S, :S] == 0, float("-inf"))
             for a in non_causal_attn_scores
         ]
         attn_maps = [a.softmax(dim=-1) for a in causal_attn_scores]
         return attn_maps
 
     def forward(self, inputs):
-        S = inputs.shape[1]
         queries, keys, values = self.get_qkv(inputs)
-        attn_maps = self.get_attn_maps(queries, keys, values, S)
+        attn_maps = self.get_attn_maps(queries, keys)
         weighted_values = torch.cat(
             [self.attn_dropout(a) @ v for a, v in zip(attn_maps, values)], dim=-1
         )
@@ -69,18 +69,18 @@ class CausalAttention(nn.Module):
 
 
 def test_attention():
-    model = CausalAttention()
-    inputs = torch.randn(B, model.block_size, model.hidden_dim)
-    outputs = model(inputs)
+    c = CausalAttention()
+    inputs = torch.randn(B, c.block_size, c.hidden_dim)
+    outputs = c(inputs)
     assert outputs.shape == inputs.shape
 
 
 def test_attention_map():
     """Test that all of the attention maps are causal"""
-    model = CausalAttention()
-    inputs = torch.randn(B, model.block_size, model.hidden_dim)
-    q, k, v = model.get_qkv(inputs)
-    attn_maps = model.get_attn_maps(q, k, v, model.block_size)
+    c = CausalAttention()
+    inputs = torch.randn(B, c.block_size, c.hidden_dim)
+    q, k, v = c.get_qkv(inputs)
+    attn_maps = c.get_attn_maps(q, k)
     assert attn_maps
     for map in attn_maps:
         assert torch.allclose(map.sum(dim=-1), torch.ones(map.shape[:2]))
@@ -90,16 +90,16 @@ def test_attention_map():
 
 
 def test_causality():
-    model = CausalAttention()
-    inputs = torch.randn(B, model.block_size, model.hidden_dim)
-    model.eval()  # Make dropout deterministic.
+    c = CausalAttention()
+    inputs = torch.randn(B, c.block_size, c.hidden_dim)
+    c.eval()  # Make dropout deterministic.
     # Passing in two sequences of different lengths whose common elements match should result in
     # outputs whose common elements also match
-    for short_seq_len in range(1, model.block_size):
-        for long_seq_len in range(short_seq_len, model.block_size + 1):
+    for short_seq_len in range(1, c.block_size):
+        for long_seq_len in range(short_seq_len, c.block_size + 1):
             short_inputs, long_inputs = inputs[:, :short_seq_len], inputs[:, :long_seq_len]
             # Only take the common positions in the outputs:
-            short_outputs, long_outputs = model(short_inputs), model(long_inputs)[:, :short_seq_len]
+            short_outputs, long_outputs = c(short_inputs), c(long_inputs)[:, :short_seq_len]
             #  Not sure why the tolerances needed to be raised for success here, but they did.
             assert torch.allclose(short_outputs, long_outputs, rtol=1e-6, atol=1e-6)
 
