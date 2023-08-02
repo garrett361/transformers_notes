@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 from defaults import B, D, E, K
 
-# Apologies for the lack of type-hinting, but it makes the latex less readable.
-
 
 class MLP(nn.Module):
     def __init__(

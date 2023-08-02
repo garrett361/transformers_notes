@@ -4,8 +4,6 @@ import torch
 import torch.nn as nn
 from defaults import A, B, D, K
 
-# Apologies for the lack of type-hinting, but it makes the latex less readable.
-
 
 class CausalAttention(nn.Module):
     def __init__(

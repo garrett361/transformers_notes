@@ -3,8 +3,6 @@ import torch.nn.functional as F
 from decoder_only import DecoderOnly
 from defaults import A, B, D, E, K, L, V
 
-# Apologies for the lack of type-hinting, but it makes the latex less readable.
-
 
 def test_loss():
     model = DecoderOnly(

@@ -4,8 +4,6 @@ from causal_attention import CausalAttention
 from defaults import A, B, D, E, K, L, V
 from mlp import MLP
 
-# Apologies for the lack of type-hinting, but it makes the latex less readable.
-
 
 class TransformerBlock(nn.Module):
     def __init__(

@@ -3,8 +3,6 @@ import torch.nn as nn
 from defaults import A, B, D, E, K, L, V
 from transformer_block import TransformerBlock
 
-# Apologies for the lack of type-hinting, but it makes the latex less readable.
-
 
 class DecoderOnly(nn.Module):
     def __init__(
