@@ -134,7 +134,13 @@ We will continue discussing \pyinline{LayerNorm} instances in what follows in or
 usual construction and to discuss methods like sequence-parallelism in their original form (see
 Sec.~\ref{subsec_seq_parallelism}), but note: the  $ \gamma _{ d }, \beta _{ d } $ parameters are
 \textit{totally redundant} if \pyinline{LayerNorm} is immediately followed by a \pyinline{Linear}
-layer, as it is in the standard transformers architecture. The scaling the biases performed by these
+layer, as it is in the standard transformers architecture. Explicitly, we have the equivalence:
+\begin{align}
+ \left (     x _{ bsd } \gamma _{ d } + \beta _{ d } \right )  W _{d d'}    + b _{ d' }&= x _{ bsd }
+ W' _{ d d' } + b' _{ d' } \ , \quad W' _{ d d' } \equiv  \gamma _{  d} W _{ d d' } \ , \quad b' _{
+ d' } \equiv b _{ d' } + \beta _{ d }W _{ d d' } \ .
+\end{align}
+The scaling the biases performed by these
 parameters can be equivalently performed by the weight matrix and bias (if included) in
 \pyinline{Linear} layer.
 
@@ -564,7 +570,7 @@ suppress all indices apart from those of the hidden dimension for clarity.
 The first matrix multiply $ z _{ d }W ^{ 0 } _{ d e } $ is naturally partitioned across the output
 index, which spans the expanded hidden dimension $ e\in \left \{ 0, \ldots , EH-1 \right \} $. This
 functions by splitting the weight matrix across its output indices across $ T $ devices:  $ W ^{ 0 }
-_{ d e } \longrightarrow W ^{ 0(t) } _{ d e }$, where in the split weights $ t\in \left \{ 0,
+_{ d e } \longrightarrow W ^{ 0t } _{ d e }$, where in the split weights $ t\in \left \{ 0,
     \ldots , T-1  \right \} $, and $ e \in \left \{ t\frac{  EH}{ T } ,
 \ldots ,\left ( t+1 \right ) \frac{ EH }{ T } \right \} $. Note that each worker will have to store
 all components of the input $ z $ for their backward pass, and an \pyinline{AllReduce} operation
@@ -572,15 +578,16 @@ all components of the input $ z $ for their backward pass, and an \pyinline{AllR
 workers.
 
 
-Let the partial outputs from the previous step again be $ z _{ e } ^{ (t) } $, which are
+Let the partial outputs from the previous step again be $ z _{ e } ^{ t } $, which are
 \pyinline{(B, S, E*A/T)}-shaped. The non-linearity $ \phi $ acts element wise, and using the subsequent
-$ z _{ e } ^{ (t) }  $ to compute the second matrix multiply requires a splitting the weights as in $ W ^{ 1 }
-_{ e d } \longrightarrow W ^{ 1(t) } _{  e d}$, such that the desired output is computed as in
+$ z _{ e } ^{ t }  $ to compute the second matrix multiply requires a splitting the weights as in $ W ^{ 1 }
+_{ e d } \longrightarrow W ^{ 1t } _{  e d}$ (dividing up the $ e $ dimension), such that the desired output is computed as in
 \begin{align}
-     z _{ e }\cdot W ^{ 1 }_{ ed }&=z _{ e }^{ (t) }\cdot W ^{ 1(t) }_{ ed } \ ,
+     z _{ e }\cdot W ^{ 1 }_{ ed }&=z _{ e }^{ t }\cdot W ^{ 1t }_{ ed } \ ,
 \end{align}
-sum over $ t $ implied, with each device computing one term in the sum.  The sum is implemented by
-an \pyinline{AllReduce} operation in practice. Note that no \pyinline{AllReduce} is needed for the
+sum over $ t $ implied, with each device computing one term in the sum over $ t $. Every device is thus
+left holding a \pyinline{(B, S, D)}-shaped tensor which must be \pyinline{AllReduce}-d over the
+\pyinline{D}-dimension. Note that no \pyinline{AllReduce} is needed for the
 backwards pass, however.
 
 
@@ -608,9 +615,10 @@ operations in the backwards pass.}
 products and concatenation both occur along the hidden dimension. That is, each worker in a group
 has $ A/T $ different \pyinline{(B, S, D/A)}-shaped activations $ t ^{ a } $, which can be
 concatenated into a \pyinline{(B, S, D/T)}-shaped tensor and multiplied into the
-\pyinline{(D/T, D)}-shaped shard of $ O $ whose dimensions correspond to those in the just-concatenated tensor.
-Concatenating together each such result from every worker (via an \pyinline{AllReduce}) gives the
-desired output. The backwards pass requires similar collective communications to the \pyinline{MLP}
+\pyinline{(D/T, D)}-shaped shard of $ O $, such that every worker is again left with a
+\pyinline{(B, S, D)}-shaped shard which much be \pyinline{AllReduce}-d, exactly as in the
+\pyinline{MLP} case above, to get the final result.  Hence, the collective communication costs for both layers are the same.
+ The backwards pass requires similar collective communications to the \pyinline{MLP}
 case above.
 
 
@@ -974,14 +982,51 @@ For any given operation in the model, the data needs to be first loaded in from 
 the processor's SRAM, after which the computation begins. When training, the latter part is the limiting
 factor (see App.~\ref{app_compute_mem_bound}), in which case the time per iteration is about
 \begin{align}
-    t _{FLOPs} &=  \frac{ F _{ {\rm total}  } ^{ {\rm  model}  }  }{ \lambda _{ {\rm FLOP/s} } } \approx \frac{ 2 BSN _{ {\rm params} } }{ \lambda _{ {\rm FLOP/s} } }\ .
+    t _{{\rm FLOP/s}} &=  \frac{ F _{ {\rm total}  } ^{ {\rm  model}  }  }{ \lambda _{ {\rm FLOP/s} } } \approx \frac{ 2 BSN _{ {\rm params} } }{ \lambda _{ {\rm FLOP/s} } }\ .
 \end{align}
 
 
 \section{Scaling Laws}
 
 
+Empirically-discovered scaling laws have driven the race towards larger and larger models.
+\begin{nicebox}{Essentials}
+Decoder-only model performance improves predictably as a function of the model size, dataset size,
+and the total amount of compute. As of Summer 2023, there is little sign of hitting any kind of wall
+with respect to such scaling improvements.
+\end{nicebox}
 
+
+The central parameters are:
+\begin{itemize}
+    \item $ N _{ {\rm params} } $: the number of model parameters\footnote{Sometimes this omits the
+        parameters in the embedding and language-model head layers \cite{kaplan2020scaling}.}
+    \item $ C $: total compute, often in units like PFLOP/s-days $ \sim 10 ^{ 20 } $ FLOPs
+    \item $ N _{ {\rm tokens} } $: dataset-size in tokens
+    \item $\Lcal$: cross-entropy loss in nats
+\end{itemize}
+
+
+
+\subsection{Original Scaling Laws}
+
+
+The first scaling-laws were reported in \cite{kaplan2020scaling}.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[scale=.5]{figures/SimplePowerLaws.pdf}
+    \caption{Original scaling laws from \cite{kaplan2020scaling}.}
+    \label{fig_scaling_laws_original_1}
+\end{figure}
+
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[scale=.5]{figures/EfficiencyIllustration.pdf}
+    \caption{Original scaling laws from \cite{kaplan2020scaling}.}
+    \label{fig_scaling_laws_original_2}
+\end{figure}
 
 
 
@@ -1143,12 +1188,23 @@ since we are only processing a single token, per previous results.   This is in 
 \end{align}
 Inference now has a computational-intensity of
 \begin{align}
-    \frac{ F _{ {\rm infer} } ^{ {\rm kv-cache} } }{ M _{ {\rm infer}  }^{ {\rm kv-cache}  } } & \sim
+    \frac{ F _{ {\rm infer} } ^{ {\rm kv-cache} } }{ M _{ {\rm infer}  }^{ {\rm kv-cache}  } } & \sim \frac{ BD }{ S } \ ,
 \end{align}
+dropping $ \Ocal \left( 1 \right)  $ factors, is now memory-bound (again, see
+App.~\ref{app_compute_mem_bound}), and has per-token-latency of approximately $ M _{ {\rm infer} }/
+\lambda _{ {\rm mem} }$, unless the batch-size is very large.
 
-now memory-bound (again, see App.~\ref{app_compute_mem_bound}) and has per-token-latency of
-approximately $ M _{ {\rm infer} }/ \lambda _{ {\rm mem} }$, unless the batch-size is very large.
 
+\paragraph{Intra-Node Communication} For $ T $-way tensor parallelism, two \pyinline{AllReduce}s are
+needed, one for each \pyinline{MLP} and each \pyinline{CausalAttention} layer, where each
+accelerator is sending $ pBDS  $ bytes of data (see Sec.~\ref{subsec_tensor_parallelism}). This
+requires a total of $ 4\left ( T-1 \right ) pBDS/T \approx 4pBDS $ bytes to be transferred between
+workers in the tensor-parallel group (see Foot.~\ref{foot_all_reduce}), taking a total of $ \sim  4pBDLS/
+\lambda _{ {\rm comms} }  $ time for the model as a whole. For an A100 80GiB, \pyinline{torch.float16} setup, this is $ \sim
+BDS \times  10 ^{ -11 } \ {\rm sec} $
+
+
+\paragraph{Latency}
 
 
 
@@ -1191,12 +1247,13 @@ We loosely follow the conventions of \cite{korthikanti2022reducing}.  Common par
 \begin{itemize}
     \item $ A $: number of attention heads
     \item $ B $: microbatch size
+    \item $ C $: compute
     \item $ D $: the hidden dimension size
     \item $ E $: expansion factor for MLP layer (usually $ E=4 $)
     \item $ F $: FLOPs
     \item $ K $: the block size (maximum sequence length\footnote{In the absence of methods such as         ALiBi \cite{ALiBi}  can be used to extend the sequence length at inference time.})
     \item $ L $: number of transformer layers
-    \item $ N _{ {\rm params}  } $: number of model parameters held by a given device
+    \item $ N _{ {\rm params}  } $: total number of model parameters
     \item $ P $: pipeline parallel size
     \item $ S $: input sequence length
     \item $ T $: tensor parallel size
@@ -1283,8 +1340,9 @@ n=0 $ worker is arbitrarily denoted the \textit{chief}.  Then, the primitive ope
         \pyinline{ReduceScatter} followed by a \pyinline{AllGather} (the more efficient
         choice\footnote{The former strategy scales linearly with the number of worker, while the
             latter strategy underlies ``ring" \pyinline{AllReduce} which is (nearly) independent of
-            the number of workers.
-            \href{https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/}{See this blog
+            the number of workers: if each worker carries data of size $ D $ which is to be
+            \pyinline{AllReduce}-d, a total of $ \frac{ 2 \left ( N-1 \right )D }{ N } $ elements need to be passed around.
+           \href{https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/}{See this blog
                 post for a nice visualization} or \cite{bandwidthOptimalAllReduce2009} for a
             relevant paper.\label{foot_all_reduce}}).
     \item \pyinline{ReduceScatter}: a reducing operation is applied to the $ x ^{ (n) } $ to produce
@@ -1295,7 +1353,29 @@ n=0 $ worker is arbitrarily denoted the \textit{chief}.  Then, the primitive ope
 
 \section{Hardware}
 
-Basic information about relevant hardware considerations.
+Basic information about relevant hardware considerations. Much of the following is from the
+\href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html}{NVIDIA
+docs}.
+
+
+
+\subsection{NVIDIA GPU Architecture}
+
+NVIDIA GPUs consist of some amount of relatively-slow off-chip DRAM memory\footnote{This is the number usually reported when
+discussing a given GPU, e.g. 32GiB for the top-of-the-line A100}, relatively-fast on-chip SRAM, and
+a number of \textbf{streaming multiprocessors} (SMs) which perform the parallel computations.  Inside
+more-recent GPUs, the SMs carry both ``CUDA cores" and "Tensor cores", where the latter are used for matrix-mulitiplies
+and the former for everything else.
+
+
+A few numbers of primary importance:
+\begin{itemize}
+    \item The rate at which data can be transferred from DRAM to SRAM ($ \lambda _{ {\rm mem} } $)
+    \item The number of FLOP/s, which is more fundamentally computed by multiplying the number of
+    SMs by the FLOPS/cycle of each SM for the specific operation under consideration (see the NVIDIA
+    docs) by the clock rate: $ N _{ {\rm SM} }\cdot  \lambda _{ {\rm FLOPs/cycle} }\cdot  \lambda _{
+    {\rm clock} } $
+\end{itemize}
 
 
 \subsection{NVIDIA GPU Stats \label{app_gpu_stats}}
@@ -1305,8 +1385,8 @@ Summary of some relevant NVIDIA GPU statistics:
 \begin{center}
 \begin{tabular}{| c |c| c |c |c| c| }\hline
     GPU & Memory & $ \lambda _{ {\rm FLOP/s }  } $& $ \lambda _{ {\rm mem}  } $  & $ \lambda _{ {\rm math}  } $  & $ \lambda _{ {\rm comms}  } $\\ \hline
-    \href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf}{A100}& 40GiB&  312  TFLOP/s &   1.6 TiB/s  & 195 FLOPS/B & 300 GiB/s \\ \hline
     \href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf}{A100} & 80GiB&  312  TFLOP/s &   2.0 TiB/s  & 156 FLOPS/B & 300 GiB/s \\ \hline
+    \href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf}{A100}& 40GiB&  312  TFLOP/s &   1.6 TiB/s  & 195 FLOPS/B & 300 GiB/s \\ \hline
     \href{https://images.nvidia.com/content/technologies/volta/pdf/volta-v100-datasheet-update-us-1165301-r5.pdf}{V100} & 32GiB&  130  TFLOP/s &   1.1 TiB/s  & 118  FLOPS/B & 16 GiB/s \\ \hline
 \end{tabular}
 \end{center}
@@ -1317,7 +1397,27 @@ where
     \item $ \lambda _{ {\rm  math}  } = \frac{  \lambda _{ {\rm FLOP/s}  } }{ \lambda _{ {\rm mem} } } $ is \href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch}{math bandwidth}
     \item $ \lambda _{ {\rm  comms}  } $ is one-way communication bandwidth
 \end{itemize}
+A useful approximate conversion rate is that $ 1 \ {\rm TFLOP/s} \approx 100\  {\rm PFLOP/day} $.
 
+Important practical note: the $ \lambda _{ {\rm FLOP/s} } $ numbers should be taken as aspirational.
+Out-of-the box, \pyinline{torch.float16} matrix-multiplies in \pyinline{torch} with well-chosen
+dimensions tops out around $ \sim 250 $ FLOPS/s
+
+\subsection{Intra- and Inter-Node Communication}
+
+For intra-node communication, GPUs are connected by either PCIe or NVLink, generally.
+\begin{itemize}
+    \item \href{https://blogs.nvidia.com/blog/2023/03/06/what-is-nvidia-nvlink/}{NVLink}
+        interconnects are continually updated and achieve speeds of $ \lambda _{ {\rm comm} } ^{
+        {\rm intra} } \sim 300$ GiB/s.
+\end{itemize}
+
+
+For inter-node communication, nodes are often connected by:
+\begin{itemize}
+    \item \href{https://en.wikipedia.org/wiki/InfiniBand}{InfiniBand} apparently also achieves speeds $ \lambda _{ {\rm comm} } ^{
+        {\rm intra} } \sim 100$ GiB/s?  Haven't found a clear reference.
+\end{itemize}
 
 
 
@@ -1374,8 +1474,8 @@ Sec.~\ref{sec_kv_cache}) we only need to process a \textit{single} token at a ti
 \longrightarrow 1 $ in the numerator in the preceding, while the denominator is also weighed down by
 the  kv-cache in the attention layers.
 
-In more detail, the \pyinline{MLP} layers just process $ S=1 $ length tensors, but are insensitive
-to the kv-cache, so their intensity comes from just setting $ S=1 $ in the above,
+In more detail, the \pyinline{MLP} layers just process $ S=1 $ length tensors during generation, but
+are insensitive to the kv-cache, so their intensity comes from just setting $ S=1 $ in the above,
 \begin{align}
    \sim \frac{ BD  }{ B + D } \ ,
 \end{align}
@@ -1402,7 +1502,7 @@ Collecting all of the most fundamental equations, given to various degrees of ac
 
 Number of parameters per device:
 \begin{align}
-    N _{ {\rm params} } &=  \frac{ (4+2E)LD ^{ 2 } }{  T} + VD+ \Ocal \left( DL \right) \approx  \frac{ (4+2E)LD ^{ 2 } }{  T} \ ,
+    N _{ {\rm params} } &=   (4+2E)LD ^{ 2 } + VD+ \Ocal \left( DL \right) \approx   \left ( 4+2E \right )LD ^{ 2 }\ ,
 \end{align}
 assuming no sharding of the embedding matrix.
 
