@@ -18,11 +18,11 @@ class MLP(nn.Module):
         linear_1 = nn.Linear(hidden_dim, expansion_factor * hidden_dim)
         linear_2 = nn.Linear(expansion_factor * hidden_dim, hidden_dim)
         gelu = nn.GELU()
-        self.num_layers = nn.Sequential(linear_1, gelu, linear_2)
+        self.layers = nn.Sequential(linear_1, gelu, linear_2)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, inputs):
-        z = self.num_layers(inputs)
+        z = self.layers(inputs)
         z = self.dropout(z)
         return z
 

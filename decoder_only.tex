@@ -486,11 +486,10 @@ M _{ \rm act  } ^\texttt{Attention} &= BLS \left ( (5p+1)D + (2p+1)AS  \right ) 
 
 \paragraph{MLP Activations}
 
-  Eirst we cache the
-\pyinline{(B, S, D)}-shaped inputs into the first MLP layer. These turn into the
-\pyinline{(B, S, ED)} inputs of the non-linearity, which are then passed into the last
-\pyinline{Linear} layer, summing to $ (2E+1)BDS $ total elements thus far. Adding in the dropout
-mask, the total memory requirement across all \pyinline{MLP} layers is:
+ First we pass the \pyinline{(B, S, D)}-shaped inputs into the first MLP layer. These turn into the
+ \pyinline{(B, S, ED)} inputs of the non-linearity, which are then passed into the last
+ \pyinline{Linear} layer, summing to $ (2E+1)BDS $ total elements thus far. Adding in the dropout
+ mask, the total memory requirement across all \pyinline{MLP} layers is:
 \begin{align}
 M _{ \rm act  } ^\texttt{MLP} &= (2Ep+p+1)BDLS\ .
 \label{eq_mlp_actmem_vanilla}
@@ -932,61 +931,55 @@ The grand sum is then\footnote{With a large vocabulary, the cost of the final la
 matrix multiply can also be significant, but we have omitted its $ L $-independent,  $ 2BDSV $
 contribution here. }:
 \begin{align}
-F _{ {\rm total}  } ^{ {\rm  model}  } &\approx 12 BDLS \left ( S + \left ( 2+E \right )D \right ) \label{eq_model_flops}\ .
+C  ^{ {\rm  model}  } &\approx 12 BDLS \left ( S + \left ( 2+E \right )D \right ) \label{eq_model_flops}\ .
 \end{align}
 We can also phrase the FLOPs in terms of the number of parameters \eqref{eq_approx_params_tensor_parallel} as
 \begin{align}
- F _{ {\rm total}  } ^{ {\rm  model}  } \big| _{ T=1 }  &= 6BS N _{ {\rm  params}  }\times \left ( 1 + \Ocal \left( S/D\right)  \right )
+ C  ^{ {\rm  model}  } \big| _{ T=1 }  &= 6BS N _{ {\rm  params}  }\times \left ( 1 + \Ocal \left( S/D\right)  \right )
 \end{align}
 where we took the $ T=1, D \gg S $ limit for simplicity and we note that $ BS $  is the number of
 total tokens in the processed batches.
 
-Based on the above, it is common to write down the rule of
-thumb\footnote{See
-\href{https://medium.com/@dzmitrybahdanau/the-flops-calculus-of-language-model-training-3b19c1f025e4}{this
-blog post} or the link in Foot.~\ref{foot_eleuther_math_101}.}
+
+\section{Training Training \label{sec_train_time} }
+
+
+
+Training is generally compute bound (see App.~\ref{app_compute_mem_bound}) and based on the results
+of Sec.~\ref{sec_flops_training} the quickest one could possibly push a batch of data through the
+model is
 \begin{align}
-  \left ( {\rm Achievable \ FLOPs/sec}  \right ) \times \left ( {\rm  Training \ time}  \right )
-  &\approx 6 N _{ {\rm params}  } \times \left ( {\rm Total \ tokens} \right ) \ . \label{eq_training_rule_of_thumb}
+  t _{ {\rm  min} }  &= \frac{ C  ^{ {\rm  model}  }  }{   \lambda _{ {\rm FLOP/s} } }\ . \label{eq_tmin_model}
 \end{align}
-The above is the total compute needed to train a model with the above data.
-
-
-Lastly, some common terminology. The \textbf{model FLOPs utilization} (MFU) is an often-quoted quantity, which is just ratio
-of actually achieved FLOP/s (the rate, not the gross sum) to the maximum possible given the hardware. If $
-\lambda _{ {\rm FLOP/s} }  $ is the maximum FLOPs/s of the GPU (see App.~\ref{app_gpu_stats}), then the
-quickest one could possibly push a batch of data through the model is
+Expanding to the entire training run, then with perfect utilization training will take a time
 \begin{align}
-  t _{ {\rm  min} }  &= \frac{ F _{ {\rm total}  } ^{ {\rm  model}  }  }{   \lambda _{ {\rm FLOP/s} } }
+  t _{ {\rm  total} }  &\approx  \frac{6N _{ {\rm params} } N _{ {\rm tokens} }}{   \lambda _{ {\rm FLOP/s} } }\ . \label{eq_training_rule_of_thumb}
 \end{align}
-where $ F _{ {\rm total}  } ^{ {\rm  model} }  $ is the total FLOPs per GPU. If $ t _{ {\rm  iter} } $ is the actual time it
-took to process the batch, then the ratio defines the MFU:
+Adjust $ \lambda _{ {\rm FLOP/s} } $ to the actual achievable FLOP/s in your setup to get a realistic estimate.
+
+How many tokens should a model of size $ N _{ {\rm params} } $? Scaling laws (Sec.~\ref{sec_scaling_laws}) provide
+the best known answer, and the Summer 2023 best-guess is that we optimally have $ N _{ {\rm tokens} }\approx 20 N _{ {\rm params} } $.
+So that the above is
 \begin{align}
-  {\rm MFU}  &= \frac{ t _{ {\rm min} } }{ t _{ {\rm iter} } } \label{eq_mfu}\ .
+t _{ {\rm  total} }  &\approx  \frac{120N _{ {\rm params} } ^{ 2 }}{   \lambda _{ {\rm FLOP/s} } }\ ,
 \end{align}
-The above implicitly assumed that we just do a straightforward forwards-and-backwards pass without
-any re-computation.  In cases where we \textit{do} recompute in order to save activation memory, we
-just update the $ t _{ {\rm min} } $ value above to reflect the actual amount of recomputation
-performed (raising $ t _{ {\rm  min} } $) and compute the same ratio above. This defined the
-\textbf{hardware FLOPs utilization}  (HFU).
-
-\section{Training Latency \label{sec_latency_train} }
-
-The main factors which determine training times are the speed at which the necessary FLOPs can be completed
-and the communication times. We analyze both here.
+leading to quadratic growth in training time.
 
 
-\subsection{FLOPs Latency}
-
-For any given operation in the model, the data needs to be first loaded in from GPU memory (DRAM) to
-the processor's SRAM, after which the computation begins. When training, the latter part is the limiting
-factor (see App.~\ref{app_compute_mem_bound}), in which case the time per iteration is about
+Note that the above is only correct if we are actually only spending $C  ^{ {\rm  model}  }$
+compute per iteration. This is not correct if we use gradient checkpointing and recomputation, in which case
+we alternatively spend true compute  $C  ^{ {\rm  hardware}  } > C  ^{ {\rm  model}  } $,
+a distinction between \textbf{hardware FLOPs} and \textbf{model FLOPs}. Two corresponding efficiency
+measures are \textbf{model FLOPs utilization} (MFU) and \textbf{hardware FLOPs utilization}  (HFU).
+If our iterations take actual time $ t _{ {\rm iter} } $, then these are given by
 \begin{align}
-    t _{{\rm FLOP/s}} &=  \frac{ F _{ {\rm total}  } ^{ {\rm  model}  }  }{ \lambda _{ {\rm FLOP/s} } } \approx \frac{ 2 BSN _{ {\rm params} } }{ \lambda _{ {\rm FLOP/s} } }\ .
+    {\rm MFU} &= \frac{ t _{ {\rm iter} } }{ t _{ {\rm  min} } ^{ {\rm  model} } } \ , \quad {\rm HFU} = \frac{ t _{ {\rm iter} } }{ t _{ {\rm  min} } ^{ {\rm  hardware} } } \ , \label{eq_mfu}
 \end{align}
+where $ t _{ {\rm min} } ^{ {\rm  model} } $ is \eqref{eq_tmin_model} and $ t _{ {\rm min} } ^{ {\rm  hardware} } $ is similar but using
+$ C  ^{ {\rm  hardware} } $.
 
 
-\section{Scaling Laws}
+\section{Scaling Laws \label{sec_scaling_laws}}
 
 
 Empirically-discovered scaling laws have driven the race towards larger and larger models.
@@ -999,19 +992,41 @@ with respect to such scaling improvements.
 
 The central parameters are:
 \begin{itemize}
-    \item $ N _{ {\rm params} } $: the number of model parameters\footnote{Sometimes this omits the
-        parameters in the embedding and language-model head layers \cite{kaplan2020scaling}.}
+    \item The number of non-embedding model parameters, as excising embedding params was found to
+        generate cleaner scaling laws. Because our $ N _{ {\rm params} }$ has already been typically
+        neglecting these parameters, we will just use this symbol in scaling laws and keep the above
+        understanding implicit.\footnote{Presumably, the scaling laws are
+            cleaner with these neglected because these params do not contribute directly to
+FLOPs, unlike most other parameters.} \cite{kaplan2020scaling}.
     \item $ C $: total compute, often in units like PFLOP/s-days $ \sim 10 ^{ 20 } $ FLOPs
     \item $ N _{ {\rm tokens} } $: dataset-size in tokens
     \item $\Lcal$: cross-entropy loss in nats
 \end{itemize}
-
+The specific form of any given scaling law should also be understood to apply to a pretty narrowly
+defined training procedure, in which choices like the optimizer, learning-rate scheduler,
+hyperparameter search budget, vocabulary size, tokenization, etc. are often rigidly set. Changing
+different components of the training procedure is liable to create different scaling laws (though
+nice laws of some form are still expected to exist).
 
 
 \subsection{Original Scaling Laws}
 
 
-The first scaling-laws were reported in \cite{kaplan2020scaling}.
+The first scaling-laws were reported in \cite{kaplan2020scaling}.   Their simplest form relates the
+value of the cross-entropy loss \textit{at convergence} (and in nats), $ \Lcal  $,  to the number of non-embedding
+parameter, dataset size in token, and the amount of compute, \textit{in the limit} where only one of
+this factors is limiting\footnote{Unclear to me how you know when this is the case?}. The laws (in our notation):
+\begin{itemize}
+    \item $ \Lcal (N _{ {\rm params} }) \approx  \left ( N _{ {\rm  params} }^{ \star } / N _{ {\rm  params}
+        } \right ) ^{ \alpha _{ N } } $, with $ \alpha _{ N } \approx 0.076 $ and $ N _{ {\rm params} } ^{ \star }  \approx
+        8.8\times 10 ^{ 13 }$
+    \item $ \Lcal (N _{ {\rm  tokens} }) \approx  \left ( N _{ {\rm tokens}} ^{ \star } / N _{ {\rm  tokens}
+        } \right ) ^{ \alpha _{ T } } $, with $ \alpha _{ T } \approx 0.095 $ and $ N _{{\rm  tokens}  } ^{  \star }  \approx
+        5.4\times 10 ^{ 13 }$
+    \item $ \Lcal (C) \approx  \left ( C ^{ \star } /  C
+         \right ) ^{ \alpha _{ C } } $, with $ \alpha _{ C } \approx 0.050  $ and $ C ^{  \star }  \approx
+        3.1\times 10 ^{8} $ PFLOP/s-days, where the batch size was assumed to be chosen to be compute optimal per the criteria they outline
+\end{itemize}
 
 \begin{figure}[ht]
     \centering
@@ -1024,9 +1039,52 @@ The first scaling-laws were reported in \cite{kaplan2020scaling}.
 \begin{figure}[ht]
     \centering
     \includegraphics[scale=.5]{figures/EfficiencyIllustration.pdf}
-    \caption{Original scaling laws from \cite{kaplan2020scaling}.}
+    \caption{From \cite{kaplan2020scaling}. Larger models are much more sample-efficient (faster).}
     \label{fig_scaling_laws_original_2}
 \end{figure}
+
+
+\subsection{Chinchilla Scaling Laws}
+
+As of Summer 2023, the Chinchilla scaling laws in \cite{hoffmann2022training} are the de facto best
+scaling laws for guiding training. The central difference between \cite{hoffmann2022training} and
+\cite{kaplan2020scaling} is that in the former they adjust their cosine learning-rate schedule to
+reflect the amount of planned training, while in the latter they do not\footnote{The learning-rate
+schedule consist of a linear warm-up stage from a very small $ \eta  $ up to the largest value $ \eta _{ {\rm max} } $, after
+which the cosine bit kicks in: $ \eta (s)= \eta _{ {\rm min} } + \left ( \eta _{ {\rm max} } - \eta  _{ {\rm
+min} } \right ) \times \cos \left (\frac{ \pi s }{ 2 s _{ {\rm max} } }  \right) $ with $ s $ the
+step number. In Fig.~A1 of \cite{hoffmann2022training} they demonstrate that having the planned $ s
+_{ {\rm max} } $ duration of the scheduler be longer than the actual number of training steps is
+detrimental to training (they do not study the opposite regime), which is effectively what was done
+in \cite{kaplan2020scaling}. Probably the more important general point is again that the precise
+form of these scaling laws depend on details of fairly arbitrary training procedure choices, such as
+the choice of learning-rate scheduler.}.
+
+Several different analyses are performed which all give very similar results. The outputs are the optimal values of $ N _{ {\rm params} }, N _{ {\rm tokens} } $ given a compute budget $ C $.
+\begin{itemize}
+\item They fix various buckets of model sizes and train for varying lengths. In their resulting
+    loss-vs-FLOPs plot, they determine the model size which led to the best loss at each given FLOPs value, thereby generating
+    and optimal model size vs compute relation.
+\item They fix various buckets of FLOPs budget and train models of different sizes with that budget,
+    finding the optimal model size in each case. A line can then be fit to the optimal settings across
+    FLOPs budgets in both the parameter-compute and tokens-compute planes.
+\item  They perform a parametric fit to the loss\footnote{In \cite{hoffmann2022training} they model
+the scaling of the test loss, while in \cite{kaplan2020scaling} they use the training loss.}:
+\begin{align}
+    \Lcal (N _{ {\rm params} }, N _{ {\rm tokens} }) &=E + \frac{ A }{ N _{ {\rm  params} } ^{ \alpha  } }  + \frac{ B }{ N _{ {\rm tokens} } ^{ \beta  } } \label{eq_chinchilla} \ ,
+\end{align}
+fit over a large range of parameter and token choices. The best-fit values are:
+\begin{align}
+    E &= 1.69 \ , \quad A = 406.4 \ , \quad B = 410.7 \ , \quad  \alpha = 0.34 \ , \quad \beta =0.28 \ .
+\end{align}
+Using $ C \approx 6 N _{ {\rm params}} N _{ {\rm tokens} } $, the above can be minimized at fixed compute
+either for number of parameter or the size of the dataset.
+\end{itemize}
+In all cases, the findings are that at optimality  $ N _{ {\rm params} }  \sim N _{ {\rm tokens}
+}\sim C ^{ .5 } $: both the parameter and tokens budget should be scaled in equal measure.
+
+
+
 
 
 
@@ -1188,7 +1246,7 @@ since we are only processing a single token, per previous results.   This is in 
 \end{align}
 Inference now has a computational-intensity of
 \begin{align}
-    \frac{ F _{ {\rm infer} } ^{ {\rm kv-cache} } }{ M _{ {\rm infer}  }^{ {\rm kv-cache}  } } & \sim \frac{ BD }{ S } \ ,
+    \frac{ C _{ {\rm infer} } ^{ {\rm kv-cache} } }{ M _{ {\rm infer}  }^{ {\rm kv-cache}  } } & \sim \frac{ BD }{ S } \ ,
 \end{align}
 dropping $ \Ocal \left( 1 \right)  $ factors, is now memory-bound (again, see
 App.~\ref{app_compute_mem_bound}), and has per-token-latency of approximately $ M _{ {\rm infer} }/
@@ -1247,10 +1305,9 @@ We loosely follow the conventions of \cite{korthikanti2022reducing}.  Common par
 \begin{itemize}
     \item $ A $: number of attention heads
     \item $ B $: microbatch size
-    \item $ C $: compute
+    \item $ C $: compute (FLOPs)
     \item $ D $: the hidden dimension size
     \item $ E $: expansion factor for MLP layer (usually $ E=4 $)
-    \item $ F $: FLOPs
     \item $ K $: the block size (maximum sequence length\footnote{In the absence of methods such as         ALiBi \cite{ALiBi}  can be used to extend the sequence length at inference time.})
     \item $ L $: number of transformer layers
     \item $ N _{ {\rm params}  } $: total number of model parameters
@@ -1258,7 +1315,7 @@ We loosely follow the conventions of \cite{korthikanti2022reducing}.  Common par
     \item $ S $: input sequence length
     \item $ T $: tensor parallel size
     \item $ V $: vocabulary size
-    \item $ \tau $: various timescales
+    \item $ t $: various timescales
     \item $ p $: the precision of the elements of a tensor in bytes
     \item $ \lambda  $: various rates, e.g. $ \lambda _{ {\rm mem}  } $ is memory bandwidth
 \end{itemize}
@@ -1496,11 +1553,112 @@ $ \Ocal \left( 1 + \frac{ D }{ AS } \right)  $. An analysis equivalent to the on
 \cite{shazeer2019fast}.}.
 
 
+\section{Batch Size, Compute, and Training Time \label{app_batch_size}}
+
+The amount of compute directly determines the training time, but not all ways of spending compute
+are equivalent. We follow the discussion in \cite{mccandlish2018empirical} which gives a rule of thumb
+for determining the optimal batch size which is sometimes used in practice. The basic point is that
+all of the optimization steps take the gradient $ \bfg  $ as an input, and since the gradient is the
+average over randomly selected datapoints, steps are more precise as the batch size increases (with
+diminishing returns, past a certain point, but the computational cost also rises with batch size,
+and a balance between the two concerns should be struck.
+
+Consider vanilla SGD and study how the training loss changes with each step.  We randomly sample $ B
+$ datapoints $ x \in \Dcal$ from the dataset through some i.i.d. process\footnote{The below uses
+sampling with replacement, while in practice we sample without replacement, but the different is
+negligible for all practical cases.}. Each corresponding gradient $ \bfg (x) = \partial _{ w} \Lcal
+\left ( w, x \right ) $ is itself a random variable whose average is the true gradient across the
+entire dataset $ \bar{\bfg} $ and we take the variance to be
+\begin{align}
+    {\rm Var}[\bfg (x), \bfg (x')]&=\Sigma
+\end{align}
+for some matrix $ \Sigma  $ with (supressed) indices spanning the space of model weights. Taking instead the mean
+of a sum of such estimates, $ \bfg _{ B }\equiv \frac{ 1 }{ B } \sum _{ x \in \Bcal} \bfg (x) $,
+the mean stays the same, but the variance reduces in the usual way: $ {\rm Var}[\bfg _{ B } (x),
+\bfg _{ B }(x')]=\Sigma /B$.
+
+Study the mean loss across the entire dataset: $ \Lcal \left ( w \right ) = \langle
+\Lcal \left ( w, x \right) \rangle$. Using SGD we take a step $ w \longrightarrow w -\eta \bfg _{ B }   $
+and change the loss as
+\begin{align}
+    \Lcal \left ( w -\eta \bfg _{ B } \right )  = \Lcal \left ( w  \right ) -\eta \bar{\bfg }\cdot
+    \bfg _{ B } + \frac{ 1 }{ 2 } \bfg _{ B }\cdot  H \cdot  \bfg _{ B } + \Ocal \left( \bfg _{ B }
+    ^{ 3 } \right)\ ,
+\end{align}
+where $ H $ is the true hessian of the loss over the entire dataset at this value of the weights.
+Taking the expectation value and minimizing the results  over $ \eta  $ gives the optimal choice:
+\begin{align}
+    \eta _{ \star } &= \frac{ \eta _{ {\rm  max} } }{ 1 + \frac{ B _{ {\rm  noise} } }{ B } }\ , \quad  \eta _{ {\rm  max} }\equiv \frac{ \bar{\bfg } ^{ 2 } }{ \bar{\bfg }\cdot  H \cdot  \bar{\bfg } } , \quad  B _{ {\rm  noise} } \equiv \frac{ \Tr H \cdot \Sigma  }{  \bar{\bfg }\cdot  H \cdot  \bar{\bfg }}\ .
+\end{align}
+Notably, the above supports the usual rule of thumb that the learning rate should be increased
+proportionally to the batch size, at least whenever $ B \ll B _{ {\rm  noise} } $. The diminishing
+returns of pushing batch sizes past $ B _{ {\rm noise} } $ are also evident. In practice it is too
+expensive to compute the Hessian, but thankfully the entirely unjustified approximation in which the
+Hessian is multiple of the identity such that
+\begin{align}
+    B _{ {\rm noise} } &\approx B _{ {\rm  simple} } \equiv \frac{ \Tr \Sigma  }{ \bar{\bfg } ^{ 2 } }\ ,
+\end{align}
+is somehow a decent approximation empirically, and an estimator can be created for $ B _{ {\rm noise} } $
+in a data-parallel setup; see \cite{mccandlish2018empirical} or
+\href{https://github.com/crowsonkb/k-diffusion/blob/ab527a9a6d347f364e3d185ba6d714e22d80cb3c/k_diffusion/gns.py#L1}{Katherine
+Crowson's implementation} or \href{https://github.com/EleutherAI/gpt-neox/blob/408e29d9c746a02d842917bb7447c5c4be0b42d4/megatron/gradient_noise_scale/gradient_noise_scale.py#L1}{neox} for more.
+
+
+We can further characterize the trade-off between compute and optimization steps. The expected
+decrease in loss per update is then
+\begin{align}
+\langle \delta \Lcal \rangle  &\approx \frac{ \eta _{ {\rm  max} } }{ 1 + \frac{ B _{ {\rm  noise} } }{ B } } \bar{\bfg } ^{2 } + \Ocal \left( \eta _{ {\rm max} } ^{ 2 } \right) \ ,
+\end{align}
+that is, we would need $ 1 + \frac{ B _{ {\rm noise} } }{ B } $ times as many SGD steps to make the
+same progress we would have as compared to full-batch SGD. If $ S _{ {\rm  min} } $ is the number of
+steps that would have been needed for full-batch SGD, we would need $ S=S _{ {\rm  min} } + S _{
+{\rm  min} } \frac{ B _{ {\rm noise} } }{ B } $ steps for minibatch SGD.  The total number of
+examples seen is correspondingly $ E = S _{ {\rm  min} } \times  \left ( B _{ {\rm  noise} } +B
+\right)\equiv E _{ {\rm min} }+ S _{ {\rm  min} }B $, and so we see the trade-off between SGD steps
+$ S $ and compute $ E $ alluded to above.  These relations can be written as\footnote{The analysis
+here is simplified in that it assumes that the noise scale and the chosen batch size are both
+time-independent. There is confusing logic treating the more general case where both
+$ B _{ {\rm noise} } $ and $ B $ vary with step in \cite{mccandlish2018empirical}, but in any case,
+the ultimate relations they use are effectively the same.}
+\begin{align}
+    \left ( \frac{ S }{ S _{ {\rm  min} } }-1 \right )\left ( \frac{ E }{ E _{ {\rm min} } }-1 \right ) &=1
+\end{align}
+which represent hyperbolic Pareto frontier curves. So, solutions are of the form $ S=\left ( \alpha
++1 \right )S _{ {\rm  min} } $, $ E=\left ( \frac{ 1 }{ \alpha  } +1 \right )E _{ {\rm  min} } $
+and since $E=BS $ the corresponding batch size is $ B _{ {\rm crit} } \equiv  \frac{ 1 }{ \alpha  }
+B _{ {\rm noise} }$. The parameter $ \alpha $ characterizes how much you value the trade-off between
+these two factors and a reasonable balance is the $ \alpha =1 $ solution for which $S = 2S _{ {\rm
+min} } $, $ E=2E _{ {\rm min} } $ and $ B _{ {\rm crit} }= B _{ {\rm  noise} } $ exactly.
+
+Correspondingly, in \cite{mccandlish2018empirical} they suggest training at precisely this batch
+size.  But it seems much more relevant to balance time against compute directly, rather than
+optimization steps vs compute. Modeling the total training time by $ T\approx S \left ( \kappa B + \sigma  \right)$
+for some $ \kappa ,\sigma  $ to model compute costs\footnote{Computation and communication costs
+each scale with $ B $, the optimizer step does not (and maybe some overhead?), for instance.}, then
+the above is equivalent to
+\begin{align}
+    T &= \frac{\left ( E _{ {\rm min} } + S _{ {\rm min} } B \right) \left ( \kappa B+ \sigma   \right ) }{  B  }\ .
+\end{align}
+which has a minimum at
+\begin{align}
+    B &= \sqrt{\frac{ \sigma E _{ {\rm min} } }{ \kappa S _{ {\rm min} }   }}\ .
+\end{align}
+for which the total time is
+\begin{align}
+    T _{ {\rm  min} } &= \left ( \sqrt{\kappa E _{ {\rm  min} }} - \sqrt{\sigma S _{ {\rm min} }} \right ) ^{ 2 }\ .
+\end{align}
+In comparison, the total time for the $ B _{ {\rm  crit} } = \frac{ E _{ {\rm min} } }{ S _{ {\rm
+min} } } $ strategy of \cite{mccandlish2018empirical} gives $ T _{ {\rm  min} } = 2 \left ( \kappa E
+_{ {\rm min} } + \sigma S _{ {\rm min} } \right ) $ which is a factor of $ \frac{ 2 }{ 1- \frac{
+    \sqrt{\sigma \kappa B _{ {\rm noise} } } }{ \kappa B _{ {\rm noise}  } + \sigma } } $ larger.
+    So, this seems like a better choice of optimal batch size, if you value your time.
+
+
 \section{Cheat Sheet \label{app_cheat_sheet}}
 
 Collecting all of the most fundamental equations, given to various degrees of accuracy.
 
-Number of parameters per device:
+Number of model parameters:
 \begin{align}
     N _{ {\rm params} } &=   (4+2E)LD ^{ 2 } + VD+ \Ocal \left( DL \right) \approx   \left ( 4+2E \right )LD ^{ 2 }\ ,
 \end{align}
@@ -1509,7 +1667,7 @@ assuming no sharding of the embedding matrix.
 
 \paragraph{Training}
 
-Memory costs for fp16-like training:
+Memory costs for mixed-precision training:
 \begin{align}
     M _{ {\rm model} } &=p _{ {\rm model} } N _{ {\rm params} } \nn
     M _{ {\rm optim} }  &=  \left ( s _{ {\rm states} }+1 \right) \times p _{ {\rm master } } N _{ {\rm params} } \nn
