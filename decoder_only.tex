@@ -12,13 +12,13 @@
 %
 \renewcommand{\thefootnote}{\fnsymbol{footnote}}
 \begin{center}
-{\huge \bf{Decoder-Only Transformers}}
+	{\huge \bf{Decoder-Only Transformers}}
 \end{center}
 
 
 \begin{abstract}
 
-Notes on various aspects of Decoder-Only Transformers.
+	Notes on various aspects of Decoder-Only Transformers.
 
 \end{abstract}
 
@@ -40,44 +40,53 @@ GPT models \cite{gpt2radford2019language, gpt3brown2020language, gpt4openai2023}
 The full decoder-only architecture can be seen in Fig.~\ref{fig_transformers_architecture}. The
 parameters which define the network can be found in App.~\ref{app_conventions}.
 \begin{figure}[ht]
-    \centering
-    \includegraphics[scale=0.28]{figures/transformer-general.jpg}
-    \caption{The full transformers architecture. Diagram taken from \cite{korthikanti2022reducing} }
-    \label{fig_transformers_architecture}
+	\centering
+	\includegraphics[scale=0.28]{figures/transformer-general.jpg}
+	\caption{The full transformers architecture. Diagram taken from \cite{korthikanti2022reducing} }
+	\label{fig_transformers_architecture}
 \end{figure}
 
 
-At a high level, decoder-only transformers take in a series of word-like objects, called tokens, and are trained
-to predict the next token in the sequence. An outline of the mechanics:
+At a high level, decoder-only transformers take in a series of word-like objects, called tokens, and
+are trained to predict the next token in the sequence. Equivalently, given some initial text,
+transformers can be used to give a prediction for the likelihood of any possible continuation of that
+text. An outline of the mechanics:
 \begin{enumerate}
-    \item Raw text is \textbf{tokenized} and turned into a series of integers\footnote{There are
-        about \href{https://github.com/ray-project/llm-numbers}{1.3 tokens per word}, on average.} whose values lie in \pyinline{range(V)}, with $ V $ the vocabulary
-        size.
-    \item The tokenized text is chunked and turned into \pyinline{(B, S)}-shaped (batch size and
-        sequence length, respectively) integer tensors, $ x _{ bs } $.
-    \item The \textbf{embedding layer} converts the integer tensors into continuous representations of shape
-        \pyinline{(B, S, D)}, $ z _{ bsd } $, with $ D $ the size of the hidden dimension.
-        \textbf{Positional encodings} have also been added to the tensor at this stage to help the
-        architecture understand the relative ordering of the text.
-    \item The $ z _{ bsd } $ tensors pass through a series of transformer blocks, each of which has
-        two primary components:
-        \begin{enumerate}
-        \item In the \textbf{attention} sub-block, components of $ z _{ bsd } $ at different
-            positions ($ s $-values) interact with each other, resulting in another \pyinline{(B, S, D)}-shaped
-            tensor, $  z' _{ bsd } $.
-        \item In the \textbf{MLP} block, each position in  $ z' _{ bsd } $ is processed
-            independently and in parallel by a two-layer feed-forward network, resulting once more
-            in a \pyinline{(B, S, D)}-shaped tensor.
-        \end{enumerate}
-        Importantly, there are \textbf{residual connections} around each of these\footnote{This
-        gives rise to the concept of the \textbf{residual stream} which each transformer block reads
-        from and writes back to repeatedly.} (the arrows in Fig.~\ref{fig_transformers_architecture}).
-    \item Finally, we convert the \pyinline{(B, S, D)}-shaped
-        tensors to \pyinline{(B, S, V)}-shaped ones, $ y _{ bsv } $. This is the role of
-        the \textbf{language model head} (which is often just the embedding layer used in an inverse
-        manner.)
-    \item  The $ y _{ bsv } $ predict what the next token will be, i.e. $ x _{ bs+1 } $, having seen the \textbf{context}
-        of the first $ s $ tokens in the sequence.
+	\item Raw text is \textbf{tokenized} and turned into a series of integers\footnote{There are
+		      about \href{https://github.com/ray-project/llm-numbers}{1.3 tokens per word}, on average.} whose values lie in \pyinline{range(V)}, with $ V $ the vocabulary
+	      size.
+	\item The tokenized text is chunked and turned into \pyinline{(B, S)}-shaped (batch size and
+	      sequence length, respectively) integer tensors, $ x _{ bs } $.
+	\item The \textbf{embedding layer} converts the integer tensors into continuous representations of shape
+	      \pyinline{(B, S, D)}, $ z _{ bsd } $, with $ D $ the size of the hidden dimension.
+	      \textbf{Positional encodings} have also been added to the tensor at this stage to help the
+	      architecture understand the relative ordering of the text.
+	\item The $ z _{ bsd } $ tensors pass through a series of transformer blocks, each of which has
+	      two primary components:
+	      \begin{enumerate}
+		      \item In the \textbf{attention} sub-block, components of $ z _{ bsd } $ at different
+		            positions ($ s $-values) interact with each other, resulting in another \pyinline{(B, S, D)}-shaped
+		            tensor, $  z' _{ bsd } $.
+		      \item In the \textbf{MLP} block, each position in  $ z' _{ bsd } $ is processed
+		            independently and in parallel by a two-layer feed-forward network, resulting once more
+		            in a \pyinline{(B, S, D)}-shaped tensor.
+	      \end{enumerate}
+	      Importantly, there are \textbf{residual connections} around each of these\footnote{This
+		      gives rise to the concept of the \textbf{residual stream} which each transformer block reads
+		      from and writes back to repeatedly.} (the arrows in Fig.~\ref{fig_transformers_architecture}).
+	\item Finally, we convert the \pyinline{(B, S, D)}-shaped
+	      tensors to \pyinline{(B, S, V)}-shaped ones, $ y _{ bsv } $. This is the role of
+	      the \textbf{language model head} (which is often just the embedding layer used in an inverse
+	      manner.)
+	\item  The $ y _{ bsv } $ predict what the next token will be, i.e. $ x _{ bs+1 } $, having seen the \textbf{context}
+          of the first $ s $ tokens in the sequence. Specifically, removing the batch index for
+          simplicity, a \pyinline{Softmax}  of $ y _{ bsv } $ gives the conditional probability $ p _{ bsv
+          } = P(t _{ s+1 }:t _{ s } \ldots t _ {}) $ for the indicated series of tokens. Because of
+          the chain rule of probability, these individual probabilities can be combined to form the
+          probability that any sequence of tokens follows a given initial seed\footnote{In more
+          detail, these probabilities are created by products: $ P(t _{ s+n } \ldots t _{ s+1}| t _{
+          s } \ldots  t _{ 0 }) =P(t _{ s+n }| t _{ s+n - 1} \ldots  t _{ s } \ldots  t _{ 0}) \times
+      \ldots  \times P(t _{ s+1 } | t _{ s } \ldots  t _{ 0 }) $..}.
 \end{enumerate}
 
 
@@ -99,12 +108,12 @@ To each item in a batch, we add identical \textbf{positional encodings} to the v
 the goal of adding fixed, position-dependent correlations in the sequence dimension which will
 hopefully make it easier for the architecture to pick up on the relative positions of the inputs
 \footnote{Positional encodings and the causal mask are the only components in the transformers
-architecture which carry weights with a dimension of size $ S $; i.e. they are the only parts that
-have explicit sequence-length dependence. A related though experiment: you can convince yourself
-that if the inputs $ z_{ bsd } $
-were just random noise, the transformers architecture would not be able to predict
-the $ s $-index of each such input in the absence of positional encodings. } This layer maps $ z _{
-bsd} \leftarrow z _{ bsd } + p _{ sd } $, with $ p _{ sd } $ the positional encoding tensor.
+	architecture which carry weights with a dimension of size $ S $; i.e. they are the only parts that
+	have explicit sequence-length dependence. A related though experiment: you can convince yourself
+	that if the inputs $ z_{ bsd } $
+	were just random noise, the transformers architecture would not be able to predict
+	the $ s $-index of each such input in the absence of positional encodings. } This layer maps $ z _{
+			bsd} \leftarrow z _{ bsd } + p _{ sd } $, with $ p _{ sd } $ the positional encoding tensor.
 
 The above components require $ (V+S)D \approx VD $ parameters per layer.
 
@@ -115,14 +124,14 @@ The above components require $ (V+S)D \approx VD $ parameters per layer.
 The original transformers paper \cite{vaswani2017attention} put \pyinline{LayerNorm} instances after
 the \textbf{attention} and \textbf{MLP} blocks, but now it is common \cite{xiong2020layer} to put
 them before these blocks\footnote{Which makes intuitive sense for the purposes of stabilizing the
-matrix multiplications in the blocks}.
+	matrix multiplications in the blocks}.
 
 The \pyinline{LayerNorm} operations acts over the sequence dimension. Spelling it out, given the
 input tensor $ z _{ bsd } $ whose mean and variance over the $ s $-index are $ \mu _{ bd } $ and $
-\sigma _{ bd } $, respectively, the \pyinline{LayerNorm} output is
+	\sigma _{ bd } $, respectively, the \pyinline{LayerNorm} output is
 \begin{align}
-  z _{ bsd } &\leftarrow \left ( \frac{ z _{ bsd } - \mu _{ bd } }{ \sigma _{ bd } } \right )\times \gamma _{ d }
-  + \beta _{ d } \equiv \LN _{ s } z _{ bsd}
+	z _{ bsd } & \leftarrow \left ( \frac{ z _{ bsd } - \mu _{ bd } }{ \sigma _{ bd } } \right )\times \gamma _{ d }
+	+ \beta _{ d } \equiv \LN _{ s } z _{ bsd}
 \end{align}
 where $ \gamma _{ d }, \beta  _{ d } $ are the trainable scale and bias parameters. In
 \pyinline{torch}, this is a \pyinline{nn.LayerNorm(D)} instance.
@@ -136,9 +145,9 @@ Sec.~\ref{subsec_seq_parallelism}), but note: the  $ \gamma _{ d }, \beta _{ d }
 \textit{totally redundant} if \pyinline{LayerNorm} is immediately followed by a \pyinline{Linear}
 layer, as it is in the standard transformers architecture. Explicitly, we have the equivalence:
 \begin{align}
- \left (     x _{ bsd } \gamma _{ d } + \beta _{ d } \right )  W _{d d'}    + b _{ d' }&= x _{ bsd }
- W' _{ d d' } + b' _{ d' } \ , \quad W' _{ d d' } \equiv  \gamma _{  d} W _{ d d' } \ , \quad b' _{
- d' } \equiv b _{ d' } + \beta _{ d }W _{ d d' } \ .
+	\left (     x _{ bsd } \gamma _{ d } + \beta _{ d } \right )  W _{d d'}    + b _{ d' } & = x _{ bsd }
+	W' _{ d d' } + b' _{ d' } \ , \quad W' _{ d d' } \equiv  \gamma _{  d} W _{ d d' } \ , \quad b' _{
+	d' } \equiv b _{ d' } + \beta _{ d }W _{ d d' } \ .
 \end{align}
 The scaling the biases performed by these
 parameters can be equivalently performed by the weight matrix and bias (if included) in
@@ -147,21 +156,21 @@ parameters can be equivalently performed by the weight matrix and bias (if inclu
 \subsection{Causal Attention \label{subsubsec_attn_layer} }
 
 The \textbf{causal attention} layer is the most complex layer. It features $ A $  triplets\footnote{
-We assume throughout that $ A $ divides the hidden dimension $ D $ evenly.} of weight
+	We assume throughout that $ A $ divides the hidden dimension $ D $ evenly.} of weight
 matrices\footnote{There are also bias terms, but we will often neglect to write them explicitly or
-    account for their (negligible)
-parameter count.}  $ Q ^{ a } _{ d f }, K ^{ a } _{ df }, V ^{ a } _{ df }  $
+	account for their (negligible)
+	parameter count.}  $ Q ^{ a } _{ d f }, K ^{ a } _{ df }, V ^{ a } _{ df }  $
 where $ a \in \left \{ 0, \ldots, H-1 \right \} $ and $ f \in \left \{ 0, \ldots, D/A \right \} $.
 From these, we form three different vectors:
 \begin{align}
-  q ^{ a }_{ bsf } &= z _{ bsd } Q ^{ a }_{ df } \ , \quad
-  k ^{ a }_{ bsf } = z _{ bsd } K ^{ a }_{ df }  \ , \quad
-  v ^{ a }_{ bsf } = z _{ bsd } V ^{ a }_{ df }
+	q ^{ a }_{ bsf } & = z _{ bsd } Q ^{ a }_{ df } \ , \quad
+	k ^{ a }_{ bsf } = z _{ bsd } K ^{ a }_{ df }  \ , \quad
+	v ^{ a }_{ bsf } = z _{ bsd } V ^{ a }_{ df }
 \end{align}
 These are the \textbf{query, key, and value} tensors, respectively \footnote{There are of course
-many variants of the architecture and one variant which is popular in Summer 2023 is multi-query
-attention \cite{shazeer2019fast} in which all heads share \textit{the same} key and value vectors
-and only the query changes across heads, as this greatly reduces inference costs.}.
+	many variants of the architecture and one variant which is popular in Summer 2023 is multi-query
+	attention \cite{shazeer2019fast} in which all heads share \textit{the same} key and value vectors
+	and only the query changes across heads, as this greatly reduces inference costs.}.
 
 Using the above tensors, we will then build up an \textbf{attention map}  $ w ^{ a }_{ bss' } $
 which corresponds to how much attention the token at position $ s $ pays to the token at
@@ -170,52 +179,52 @@ next token in the sequence, we need these weights to be causal: the final predic
 should only have access to information propagated from positions $ x _{ bs'v } $ with $ s' \le s $.
 This corresponds to the condition that $ w ^{ a }_{ bss' } = 0  $ if  $ s' > s  $.
 
- These weights come from \pyinline{Softmax}-ed attention scores, which are just a normalized
- dot-product over the hidden dimension:
+These weights come from \pyinline{Softmax}-ed attention scores, which are just a normalized
+dot-product over the hidden dimension:
 \begin{align}
-    w ^{ a }_{ bss'd } &=\Sm _{ s' } \left (m _{ s s' }+\ q ^{ a }_{ bsf }k ^{ a }_{ bs'f } / \sqrt{D/A} \right
-        )\ ,  \quad {\rm s.t.} \quad \sum_{s'}w ^{ a }_{ bdss' } =1
+	w ^{ a }_{ bss'd } & =\Sm _{ s' } \left (m _{ s s' }+\ q ^{ a }_{ bsf }k ^{ a }_{ bs'f } / \sqrt{D/A} \right
+	)\ ,  \quad {\rm s.t.} \quad \sum_{s'}w ^{ a }_{ bdss' } =1
 \end{align}
 The tensor $ m _{  s s' } $ is the causal mask which zeroes out the relevant attention map
 components above
 \begin{align}
-    m _{ s s' } &= \begin{cases}
-            0 & s \le s' \nn
-            -\infty &= s > s'
-        \end{cases}\ ,
+	m _{ s s' } & = \begin{cases}
+		                0       & s \le s' \nn
+		                -\infty & = s > s'
+	                \end{cases}\ ,
 \end{align}
 forcing $ w ^{ a  } _{ bss'd } =0$ for $ s> s' $. In other words, the causal mask ensures that a
 given tensor, say $ z _{ bsd } $, only has dependence on other tensors whose sequence index, say $
-s' $, obeys $ s' \le s $.  This is crucial for inference-time optimizations, in particular the use
+	s' $, obeys $ s' \le s $.  This is crucial for inference-time optimizations, in particular the use
 of the \textbf{kv-cache} in which key-value pairs do not need to be re-computed.
 
 The $ \sqrt{D/A} $ normalization is motivated by demanding
 that the variance of the \pyinline{Softmax} argument be 1 at initialization, assuming that other
 components have been configured so that that the query and key components are i.i.d. from a Gaussian
 normal distribution \footnote{However, in \cite{yang2022tensor} it is instead argued that no square
-root should be taken in order to maximize the speed of learning via SGD.}.
+	root should be taken in order to maximize the speed of learning via SGD.}.
 
 The weights above are then passed through a dropout layer and used to re-weigh the \textbf{value} vectors and form the tensors
 \begin{align}
-  t ^{ a }_{ bsf }&=\Dr  \left (w ^{ a }_{ bdss' } \right ) v ^{ a }_{ bs'f }
-  \label{eq_reweighted_values}
+	t ^{ a }_{ bsf } & =\Dr  \left (w ^{ a }_{ bdss' } \right ) v ^{ a }_{ bs'f }
+	\label{eq_reweighted_values}
 \end{align}
 and these $ A $ different \pyinline{(B, S, D/A)}-shaped tensors
 are then concatenated along the $ f $-direction to re-form a \pyinline{(B, S, D)}-shaped
 tensor\footnote{It is hard to come up with good index-notation for concatenation.}
 \begin{align}
-    u _{ bsd } &= {\rm Concat}^{ a }_{ fd } \left ( t ^{ a }_{ bsf }\right )\ .
+	u _{ bsd } & = {\rm Concat}^{ a }_{ fd } \left ( t ^{ a }_{ bsf }\right )\ .
 \end{align}
 Finally, another weight matrix $ O _{d' d } $ and dropout layer transform the output once again to get the final
 output
 \begin{align}
-  z _{ bsd } &= \Dr \left (u  _{ bsd' } O _{ d'd }\right )\ .
+	z _{ bsd } & = \Dr \left (u  _{ bsd' } O _{ d'd }\right )\ .
 \end{align}
 
 For completeness, the entire operation in condensed notation with indices left implicit is:
 \begin{align}
-    z  &\leftarrow \Dr \left ({\rm Concat} \ \left ( \Dr \left (\Sm  \left ( \frac{ \left ( z \cdot Q ^{ a } \right )\cdot \left ( z \cdot K ^{ a } \right )}{ \sqrt{D/A} }
-            \right)\right )\cdot z \cdot V ^{ a } \right ) \cdot O \right ) \label{eq_causal_attn}
+	z & \leftarrow \Dr \left ({\rm Concat} \ \left ( \Dr \left (\Sm  \left ( \frac{ \left ( z \cdot Q ^{ a } \right )\cdot \left ( z \cdot K ^{ a } \right )}{ \sqrt{D/A} }
+		\right)\right )\cdot z \cdot V ^{ a } \right ) \cdot O \right ) \label{eq_causal_attn}
 \end{align}
 where all of the dot-products are over feature dimensions (those of size $ D $ or $ D/A $).
 
@@ -223,9 +232,9 @@ Below is pedagogical\footnote{The
 code is written for clarity, not speed. An example optimization missing here: there is no need to
 form separate $ Q ^{ a },K ^{ a },V ^{ a} $ \pyinline{Linear} layers, one large layer which is later
 chunked is more efficient} sample code for such a  \pyinline{CausalAttention} layer\footnote{When
-using sequence-parallelism, it will be more natural to separate out the final \pyinline{Dropout} layer
-and combine it with the subsequent \pyinline{LayerNorm}, as they are sharded together; see
-Sec.~\ref{subsec_seq_parallelism}. The same is true for the \pyinline{MLP} layer below.}:
+	using sequence-parallelism, it will be more natural to separate out the final \pyinline{Dropout} layer
+	and combine it with the subsequent \pyinline{LayerNorm}, as they are sharded together; see
+	Sec.~\ref{subsec_seq_parallelism}. The same is true for the \pyinline{MLP} layer below.}:
 \pyfile[firstline=8,lastline=68]{python/causal_attention.py}
 
 The parameter count is dominated by the weight matrices which carry $ 4 D ^{ 2 } $ total parameters per layer.
@@ -235,13 +244,13 @@ The parameter count is dominated by the weight matrices which carry $ 4 D ^{ 2 }
 
 The feed-forward network is straightforward and corresponds to
 \begin{align}
-  z _{ bsd } &\leftarrow \Dr \left (\phi \left ( z _{ bsd' }W ^{ 0 }_{ d'e } \right ) W ^{ 1 } _{ ed
-      } \right ) \label{eq_mlp}
+	z _{ bsd } & \leftarrow \Dr \left (\phi \left ( z _{ bsd' }W ^{ 0 }_{ d'e } \right ) W ^{ 1 } _{ ed
+	} \right ) \label{eq_mlp}
 \end{align}
 where $ W ^{ 0 } $ and $ W ^{ 1 } $ are \pyinline{(D, ED)}- and \pyinline{(ED, D)}-shaped matrices,
 respectively (see App.~\ref{app_conventions} for notation) and $ \phi $ is a
 non-linearity\footnote{The \pyinline{GeLU}
-\href{https://pytorch.org/docs/stable/generated/torch.nn.GELU.html}{non-linearity} is common.}.
+	\href{https://pytorch.org/docs/stable/generated/torch.nn.GELU.html}{non-linearity} is common.}.
 In code, where we again separate out the last \pyinline{Dropout} layer as we did in in
 Sec.~\ref{subsubsec_attn_layer}.  \pyfile[firstline=6, lastline=27]{python/mlp.py}
 
@@ -264,8 +273,8 @@ transformer block like
 \pyfile[firstline=8, lastline=45]{python/transformer_block.py}
 which corresponds to the schematic function
 \begin{align}
-  z &\leftarrow  z + \texttt{MLP}\left ( \LN \left ( z + \texttt{CausalAttention}\left ( \LN \left (
-  z\right ) \right )  \right ) \right )\ ,
+	z & \leftarrow  z + \texttt{MLP}\left ( \LN \left ( z + \texttt{CausalAttention}\left ( \LN \left (
+				z\right ) \right )  \right ) \right )\ ,
 \end{align}
 indices suppressed.
 
@@ -276,24 +285,24 @@ And then the entire architecture: \pyfile[firstline=7, lastline=56]{python/decod
 
 The last necessary component is the loss function. The training loop data is canonically the
 \pyinline{(B, K)}-shaped\footnote{\pyinline{K} is the block size, the maximum sequence-length for
-the model. See App.~\ref{app_conventions}.}  token inputs ($ x _{ bs } $) along with their shifted-by-one relatives $ y
-_{ bs }$ where \pyinline{x[:, s + 1] == y[:, s]}.  The \pyinline{(B, K, V)}-shaped
+	the model. See App.~\ref{app_conventions}.}  token inputs ($ x _{ bs } $) along with their shifted-by-one relatives $ y
+		_{ bs }$ where \pyinline{x[:, s + 1] == y[:, s]}.  The \pyinline{(B, K, V)}-shaped
 outputs ($ z _{ bsv } $)  of the \pyinline{DecoderOnly} network are treated as the logits which
 predict the value of the next token, given the present context:
 \begin{align}
-    p(x _{ b (s+1) }=v| x _{ b s }, x _{ b (s-1) }, \ldots, x _{ b 0 }) &= \Sm _{ v }\ z _{ bsv
-    }\label{eq_transformer_conditional_prob}
+	p(x _{ b (s+1) }=v| x _{ b s }, x _{ b (s-1) }, \ldots, x _{ b 0 }) & = \Sm _{ v }\ z _{ bsv
+		}\label{eq_transformer_conditional_prob}
 \end{align}
 and so the model is trained using the usual cross-entropy/maximum-likelihood loss
 \begin{align}
-  \Lcal &= -\frac{ 1 }{ BK }\sum _{ b,s }\ln p(x _{ b (s+1) }=| x _{ b s }, x _{ b (s-1) },
-  \ldots, x _{ b 0 })\nn
-  &= \frac{- 1 }{ BK }\sum _{ b,s }\Sm _{ v }\ z _{ bsv}\big| _{ v=y _{ bs } } \ .
+	\Lcal & = -\frac{ 1 }{ BK }\sum _{ b,s }\ln p(x _{ b (s+1) }=| x _{ b s }, x _{ b (s-1) },
+	\ldots, x _{ b 0 })\nn
+	      & = \frac{- 1 }{ BK }\sum _{ b,s }\Sm _{ v }\ z _{ bsv}\big| _{ v=y _{ bs } } \ .
 \end{align}
 Note that the losses for all possible context lengths are included in the sum\footnote{In Natural Language Processing (NLP),
-the \pyinline{perplexity} is often reported instead of the loss, which is just the exponential of the loss, a geometric-mean over the
-gold-answer probabilities: $ {\rm perplexity} = e^{ \Lcal } =\left (\prod _{ b, s }p(x _{ b (s+1) }=| x _{ b s }, x _{ b (s-1) },
-  \ldots, x _{ b 0 })\right ) ^{ \frac{ -1 }{ BK } }$.}.
+	the \pyinline{perplexity} is often reported instead of the loss, which is just the exponential of the loss, a geometric-mean over the
+	gold-answer probabilities: $ {\rm perplexity} = e^{ \Lcal } =\left (\prod _{ b, s }p(x _{ b (s+1) }=| x _{ b s }, x _{ b (s-1) },
+		\ldots, x _{ b 0 })\right ) ^{ \frac{ -1 }{ BK } }$.}.
 
 In \pyinline{torch}
 code, the loss computation might look like the following (using fake data):
@@ -312,7 +321,7 @@ In \cite{shazeer2019fast}, the $ A $ different key and value matrices are replac
 matrix each, while $ A$ different query-heads remain. The mechanisms are otherwise unchanged: where
 there were previously distinct key and value tensors used across different heads, we just use the same
 tensors everywhere\footnote{TODO: understand how this changes tensor-parallelism, since it naively
-introduces $ A $-fold redundancy}.
+	introduces $ A $-fold redundancy}.
 
 
 The primary reason for multi-query attention is that it vastly reduces the size of the kv-cache (see
@@ -328,15 +337,64 @@ those outputs on to \pyinline{MLP} in series, \href{https://github.com/kingoflol
 instead processes the \pyinline{LayerNorm} outputs in \textit{parallel}. That is, instead of something
 like
 \begin{align}
-    z \leftarrow z + \texttt{MLP}\left ( \texttt{LayerNorm}\left ( z + \texttt{CausalAttention}\left ( z \right ) \right ) \right )
+	z \leftarrow z + \texttt{MLP}\left ( \texttt{LayerNorm}\left ( z + \texttt{CausalAttention}\left ( z \right ) \right ) \right )
 \end{align}
 we instead have\footnote{This alternative layer was also used in PaLM \cite{chowdhery2022palm} where it
-was claimed that this formulation is $\sim 15\%$ faster due to the ability to fuse the \pyinline{MLP}
-and \pyinline{CausalAttention} matrix multiplies together (though this is not done in the GPT-J-6B repo above).}
+	was claimed that this formulation is $\sim 15\%$ faster due to the ability to fuse the \pyinline{MLP}
+	and \pyinline{CausalAttention} matrix multiplies together (though this is not done in the GPT-J-6B repo above).}
 \begin{align}
-z \leftarrow z + \texttt{MLP}\left ( z \right )    + \texttt{CausalAttention}\left ( z \right )\ .
+	z \leftarrow z + \texttt{MLP}\left ( z \right )    + \texttt{CausalAttention}\left ( z \right )\ .
 \end{align}
 Note that a \pyinline{LayerNorm} instance is also removed.
+
+\subsection{RoPE Embeddings}
+
+A shortcoming of traditional embeddings $ x _{ bsd } \longrightarrow x _{ bsd } + p _{ sd } $ is
+that they do not generalize very well: a model trained on such embeddings with a maximum sequence
+length $ K $ will do very poorly when evaluated on longer sequences. RoPE (Rotary Position
+Embedding) and variants thereof can extend the viable context length by more clever mechanisms with
+stronger implicit biases.
+
+RoPE and its variants can be motivated by a few natural conditions.  Given the queries and keys for
+an input $ q _{ sd }, k _{ sd } $ (suppressing batch indices), the corresponding attention scores computation $ a _{ ss' }\left ( q _{ s },
+	k _{ s' } \right ) $ should reasonably satisfy the below:
+\begin{enumerate}
+	\item The attention score should only depend on the position indices $ s, s' $ through their difference
+	      $ s-s' $, i.e., through their relative distance to each other.
+	\item The score computation should still be efficient, i.e., based on matrix-mulitiplies.
+	\item The operation should preserve the scale of the intermediate representations and attention
+	      scores, in order to avoid issues with standard normalization.
+\end{enumerate}
+These conditions suggest a very natural family of solutions: rotation of the queries by some fixed
+element of $ SO(d) $ with a generator proportional to the position index, and rotation of keys by
+the conjugate element,
+\begin{align}
+	q _{ sd } & \longrightarrow \left [e^{ i s \hat{n}\cdot T }\right ]_{ d d' } q _{ sd' } \equiv R(s) _{ d d' } q _{ sd' } \nn
+	k _{ sd } & \longrightarrow \left [e^{ -i s \hat{n}\cdot T }\right ]_{ d d' } k _{ sd' } \equiv  R(s)^{ \dagger } _{ d d' } \ . \label{eq_rope}
+\end{align}
+
+Performing the above computation with a dense element of $ SO(D) $ is infeasible, as it would require
+a new dense matrix-multiply by a unique $ D \times D $ matrix at each sequence
+position\footnote{For one, the $ \Ocal \left( SD ^{ 2 } \right)  $ memory cost to store the matrices
+    would be prohibitive. The FLOPs cost is only $ 2BSD ^{ 2 } $, the same as for other matrix
+    multiplies, but because different matrices are needed at position, these FLOPs would be much more
+    GPU memory-bandwidth intensive.
+}
+
+In the original RoPE paper, the rotation $ \hat{n} $ was chosen such that the matrices are $ 2
+	\times  2 $ block-diagonal with the entries of the form\footnote{If $ D $ isn't even, the vectors
+	are padded by an extra zero.}
+\begin{align}
+	R(s)_{ [d:d+2][d:d+2] } & =\begin{pmatrix}
+		                           \cos \left ( s \theta _{ d }   \right ) & -\sin \left ( s \theta _{ d }   \right ) \\
+		                           \sin \left ( s \theta _{ d }   \right ) & \cos \left ( s \theta _{ d }   \right )
+	                           \end{pmatrix}
+\end{align}
+where
+\begin{align}
+	\theta _{ d } & = 10 ^{ -8d/D   } \ .
+\end{align}
+
 
 
 
@@ -351,26 +409,26 @@ strategies\footnote{A nice related blog post is \href{https://blog.eleuther.ai/t
 The memory cost is much more than simply the cost of the model
 parameters. Significant factors include:
 \begin{itemize}
-\item Optimizer states, like those of \pyinline{Adam}
-\item Mixed precision training costs, due to keeping multiple model copies.
-\item Gradients
-\item Activation memory\footnote{Activations refers to any intermediate value which needs to be
-    cached in order to compute backpropagation. We will be conservative and assume that the inputs
-of all operations need to be stored, though in practice gradient checkpointing and recomputation
-allow one to trade caching for redundant compute. In particular, flash attention
-\cite{dao2022flashattention} makes use of this strategy.} , needed for backpropagation.
+	\item Optimizer states, like those of \pyinline{Adam}
+	\item Mixed precision training costs, due to keeping multiple model copies.
+	\item Gradients
+	\item Activation memory\footnote{Activations refers to any intermediate value which needs to be
+		      cached in order to compute backpropagation. We will be conservative and assume that the inputs
+		      of all operations need to be stored, though in practice gradient checkpointing and recomputation
+		      allow one to trade caching for redundant compute. In particular, flash attention
+		      \cite{dao2022flashattention} makes use of this strategy.} , needed for backpropagation.
 \end{itemize}
 Because the activation counting is a little more involved, it is in its own section.
 
 
 \begin{nicebox}{Essentials}
-Memory costs count the elements of all tensors in some fashion, both from model parameters and
-intermediate representations. The gradient and optimizer state costs scale with the former quantity:
-$ \Ocal \left ( N _{ {\rm params}  } \right ) \sim \Ocal \left ( L D ^{ 2 } \right )$, only counting
-the dominant contributions from weight matrices. Activation memory scales with the latter,
-which for a \pyinline{(B, S, D)}-shaped input gives $ \Ocal \left ( BDLS  \right ) $ contributions
-from tensors which preserve the input shape, as well as $ \Ocal \left( BHLS ^{ 2 } \right)  $
-factors from attention matrices.
+	Memory costs count the elements of all tensors in some fashion, both from model parameters and
+	intermediate representations. The gradient and optimizer state costs scale with the former quantity:
+	$ \Ocal \left ( N _{ {\rm params}  } \right ) \sim \Ocal \left ( L D ^{ 2 } \right )$, only counting
+	the dominant contributions from weight matrices. Activation memory scales with the latter,
+	which for a \pyinline{(B, S, D)}-shaped input gives $ \Ocal \left ( BDLS  \right ) $ contributions
+	from tensors which preserve the input shape, as well as $ \Ocal \left( BHLS ^{ 2 } \right)  $
+	factors from attention matrices.
 \end{nicebox}
 
 
@@ -381,15 +439,15 @@ parallelism strategies later will be relatively straightforward, as it involves 
 factors here and there.
 
 \subsubsection{Parameters, Gradients, Optimizer States, and Mixed Precision
-\label{sec_params_grads_optim_mem}}
+	\label{sec_params_grads_optim_mem}}
 
 
 Memory from the bare parameter cost, gradients, and optimizer states are fixed costs independent of
 batch size and sequence-length (unlike activation memory), so we discuss them all together here. The
 parameter and optimizer costs are also sensitive to whether or not mixed-precision is used, hence we
 also address that topic, briefly.  We will assume the use of \pyinline{Adam}\footnote{Which stores
-    \href{https://pytorch.org/docs/stable/generated/torch.optim.Adam.html}{two different running
-averages} per-model parameter.} throughout, for simplicity and concreteness. It will sometimes be
+	\href{https://pytorch.org/docs/stable/generated/torch.optim.Adam.html}{two different running
+		averages} per-model parameter.} throughout, for simplicity and concreteness. It will sometimes be
 useful below to let $ p $ to denote the precision in bytes that any given element is stored in, so
 \pyinline{torch.float32} corresponds to $ p=4 $, for instance. Ultimately, we primarily consider
 vanilla training in $ p=4 $ precision and \pyinline{torch.float32}/\pyinline{torch.float16} ($ p=4
@@ -400,19 +458,19 @@ precision variable where we can.
 Without mixed precision, the total cost of the
 \pyinline{torch.float32} ($ p=4 $ bytes) model and optimizer states in bytes is then
 \begin{align}
-    M _{ \rm model} &= 4 N _{ \rm params } \ , \quad M_{ \rm  optim } = 8 N _{ \rm params }
-    \quad ({\rm no \ mixed \ precision, } p=4)
-    \label{eq_optimizer_states_mem_no_mp}
+	M _{ \rm model} & = 4 N _{ \rm params } \ , \quad M_{ \rm  optim } = 8 N _{ \rm params }
+	\quad ({\rm no \ mixed \ precision, } p=4)
+	\label{eq_optimizer_states_mem_no_mp}
 \end{align}
 where, from the previous section, the pure parameter-count of the decoder-only Transformers
 architecture is
 \begin{align}
-    N _{ \rm params } &\approx  (4 + 2E) L D ^{ 2 } \times \left ( 1 + \Ocal \left( \frac{ V }{ DL }
-    \right) + \Ocal \left( \frac{ 1 }{ D } \right)  \right ) \ . \label{eq_approx_params_no_sharding}
+	N _{ \rm params } & \approx  (4 + 2E) L D ^{ 2 } \times \left ( 1 + \Ocal \left( \frac{ V }{ DL }
+		\right) + \Ocal \left( \frac{ 1 }{ D } \right)  \right ) \ . \label{eq_approx_params_no_sharding}
 \end{align}
 where the first term comes from the \pyinline{TransformerBlock} weight matrices\footnote{So,
-in the usual $ E=4 $ case, the \pyinline{MLP} layers are twice as costly as the
-\pyinline{CausalAttention} layers.}, the first omitted subleading correction term is the embedding
+	in the usual $ E=4 $ case, the \pyinline{MLP} layers are twice as costly as the
+	\pyinline{CausalAttention} layers.}, the first omitted subleading correction term is the embedding
 matrix, and the last comes from biases, \pyinline{LayerNorm} instances, and other negligible
 factors.  The optimizer states cost double the model itself.
 
@@ -420,17 +478,17 @@ factors.  The optimizer states cost double the model itself.
 The situation is more complicated when mixed-precision is used \cite{micikevicius2018mixed}.
 The pertinent components of mixed-precision:
 \begin{itemize}
-\item A half-precision ($ p=2 $ bytes) copy of the model is used to perform the forwards and
-    backwards passes
-\item A second, "master copy" of the model is also kept with weights in full $ p=4 $ precision
-\item The internal \pyinline{Adam} states are kept in full-precision
+	\item A half-precision ($ p=2 $ bytes) copy of the model is used to perform the forwards and
+	      backwards passes
+	\item A second, "master copy" of the model is also kept with weights in full $ p=4 $ precision
+	\item The internal \pyinline{Adam} states are kept in full-precision
 \end{itemize}
 Confusingly, the master copy weights are usually accounted for as part of the optimizer state, in
 which case the above is altered to
 \begin{align}
-    M _{ \rm model} &= 2 N _{ \rm params } \ , \quad M_{ \rm  optim } = 12 N _{ \rm params }
-    \quad ({\rm mixed \ precision}) .
-    \label{eq_optimizer_states_mem_mp}
+	M _{ \rm model} & = 2 N _{ \rm params } \ , \quad M_{ \rm  optim } = 12 N _{ \rm params }
+	\quad ({\rm mixed \ precision}) .
+	\label{eq_optimizer_states_mem_mp}
 \end{align}
 The optimizer state is now six times the cost of the actual model used to process data and the costs
 of \eqref{eq_optimizer_states_mem_mp} are more than those of \eqref{eq_optimizer_states_mem_no_mp}.
@@ -444,11 +502,11 @@ why training is so much more expensive than inference.
 Gradients are pretty simple and always cost the same regardless of whether or not mixed-precision is
 used:
 \begin{align}
-    M_{ \rm grad} &= 4 N _{ \rm params }     \label{eq_grad_memory} \ .
+	M_{ \rm grad} & = 4 N _{ \rm params }     \label{eq_grad_memory} \ .
 \end{align}
 In mixed precision, even though the gradients are initially computed in $ p= 2$, they
 \href{https://huggingface.co/docs/transformers/v4.20.1/en/perf_train_gpu_one#anatomy-of-models-memory}{have to
-be converted} to $ p=4 $ to be applied to the master weights of the same precision.
+	be converted} to $ p=4 $ to be applied to the master weights of the same precision.
 
 
 
@@ -466,7 +524,7 @@ and $ S $, scaling linearly with both.
 We will count the number of input elements which need to be cached. Our \pyinline{(B, S, D)}-shaped inputs
 to the attention layer with $ BDS $ elements are first converted to $ 3BDS $ total query, key, value
 elements, and the query-key dot products produce $ ABS ^{ 2 } $ more, which are softmaxed into $ ABS
-^{ 2 } $ normalized scores. The re-weighted inputs to the final linear layer also have $ BDS $
+		^{ 2 } $ normalized scores. The re-weighted inputs to the final linear layer also have $ BDS $
 elements, bringing the running sum to $ BS \left ( 5D + 2AS  \right ) $
 
 Finally, there are also the dropout layers applied to the normalized attention scores and the final
@@ -474,11 +532,11 @@ output whose masks must be cached in order to
 backpropagate. In torch, the mask is a \pyinline{torch.bool} tensor, but
 \href{https://github.com/pytorch/pytorch/issues/41571}{surprisingly} these use one \textit{byte} of
 memory per element, rather than one bit \footnote{As you can verify
-via \pyinline{4 * torch.tensor([True]).element_size() == torch.tensor([1.]).element_size().}}.
+	via \pyinline{4 * torch.tensor([True]).element_size() == torch.tensor([1.]).element_size().}}.
 Given this, the total memory cost from activations is
 \begin{align}
-M _{ \rm act  } ^\texttt{Attention} &= BLS \left ( (5p+1)D + (2p+1)AS  \right ) \ .
-\label{eq_att_actmem_vanilla}
+	M _{ \rm act  } ^\texttt{Attention} & = BLS \left ( (5p+1)D + (2p+1)AS  \right ) \ .
+	\label{eq_att_actmem_vanilla}
 \end{align}
 
 
@@ -486,13 +544,13 @@ M _{ \rm act  } ^\texttt{Attention} &= BLS \left ( (5p+1)D + (2p+1)AS  \right ) 
 
 \paragraph{MLP Activations}
 
- First we pass the \pyinline{(B, S, D)}-shaped inputs into the first MLP layer. These turn into the
- \pyinline{(B, S, ED)} inputs of the non-linearity, which are then passed into the last
- \pyinline{Linear} layer, summing to $ (2E+1)BDS $ total elements thus far. Adding in the dropout
- mask, the total memory requirement across all \pyinline{MLP} layers is:
+First we pass the \pyinline{(B, S, D)}-shaped inputs into the first MLP layer. These turn into the
+\pyinline{(B, S, ED)} inputs of the non-linearity, which are then passed into the last
+\pyinline{Linear} layer, summing to $ (2E+1)BDS $ total elements thus far. Adding in the dropout
+mask, the total memory requirement across all \pyinline{MLP} layers is:
 \begin{align}
-M _{ \rm act  } ^\texttt{MLP} &= (2Ep+p+1)BDLS\ .
-\label{eq_mlp_actmem_vanilla}
+	M _{ \rm act  } ^\texttt{MLP} & = (2Ep+p+1)BDLS\ .
+	\label{eq_mlp_actmem_vanilla}
 \end{align}
 
 
@@ -515,14 +573,14 @@ ultimately $ \sim \Ocal \left( \frac{ V }{ DL } \right)  $ suppressed, so we neg
 
 Summing up the contributions above, the total activation memory cost per-layer is
 \begin{align}
-    M _{ {\rm act}  } ^{ {\rm  total}  } & \approx  2BDLS   \left ( p(E+4) + 1 + \Ocal \left( \frac{
-    V}{ DL } \right)  \right )
-    + ABLS ^{ 2 } \left ( 2p+1\right ) \label{eq_act_mem_total_no_sharding}\ .
+	M _{ {\rm act}  } ^{ {\rm  total}  } & \approx  2BDLS   \left ( p(E+4) + 1 + \Ocal \left( \frac{
+		V}{ DL } \right)  \right )
+	+ ABLS ^{ 2 } \left ( 2p+1\right ) \label{eq_act_mem_total_no_sharding}\ .
 \end{align}
 Evaluating in common limits, we have:
 \begin{align}
-    M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=4 } &=BLS \left ( 66 D+15AS  \right ) \nn
-    M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=2 } &=BLS \left ( 34 D+5AS  \right )
+	M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=4 } & =BLS \left ( 66 D+15AS  \right ) \nn
+	M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=2 } & =BLS \left ( 34 D+5AS  \right )
 \end{align}
 
 
@@ -531,11 +589,11 @@ that mixed precision \textit{increases} the fixed costs of non-activation memory
 we also see that it also \textit{reduces} the activation memory and the saving increase with larger
 batch sizes and sequence lengths. It is straightforward to find where the tipping point is.
 Specializing to the case $E=4$, vanilla mixed-precision case with no parallelism\footnote{With both
-tensor- and sequence-parallelism, the parallelism degree $ T $ actually drops out in the comparison
-(since both form of memory are decrease by $ 1/T $, so this restriction  can be lifted.}, the
+	tensor- and sequence-parallelism, the parallelism degree $ T $ actually drops out in the comparison
+	(since both form of memory are decrease by $ 1/T $, so this restriction  can be lifted.}, the
 minimum batch size which leads to memory savings is
 \begin{align}
-  B _{ {\rm min}  } &= \frac{ 6 D ^{ 2 } }{ 8 DS + A S ^{ 2 } }\label{eq_min_mp_batch_size}\ .
+	B _{ {\rm min}  } & = \frac{ 6 D ^{ 2 } }{ 8 DS + A S ^{ 2 } }\label{eq_min_mp_batch_size}\ .
 \end{align}
 Plugging in numbers for the typical $ \Ocal \left( 40 \ {\rm GiB} \right)$ model in the Summer of
 2023 gives $ B _{ {\rm min} } \sim \Ocal \left( 1\right)  $, so mixed-precision is indeed an overall
@@ -551,15 +609,15 @@ matrices are split across devices \cite{shoeybi2020megatronlm}. We consider the 
 hidden dimension into $ T $-equal parts. The total number of workers is some $ N \ge T $ which is
 evenly divisible by $ T $. With $ N >T $ workers, the workers are partitioned into $ N/T $ groups
 and collective communications will be required within, but not across, groups\footnote{Ideally, all
-the workers in a group reside on the same node.}. The members of a given group need to all process
+	the workers in a group reside on the same node.}. The members of a given group need to all process
 the same batch of data; data-parallelism must span different groups.
 
 
 \begin{nicebox}{Essentials}
-The cost of large weights can be amortized by first sharding its output dimension, resulting in
-differing activations across group members. Later, the activations are brought back in sync via
-an \pyinline{AllReduce}. Weights which act on the sharded-activations can also be sharded in their
-input dimension.
+	The cost of large weights can be amortized by first sharding its output dimension, resulting in
+	differing activations across group members. Later, the activations are brought back in sync via
+	an \pyinline{AllReduce}. Weights which act on the sharded-activations can also be sharded in their
+	input dimension.
 \end{nicebox}
 
 \paragraph{MLP}
@@ -569,9 +627,9 @@ suppress all indices apart from those of the hidden dimension for clarity.
 The first matrix multiply $ z _{ d }W ^{ 0 } _{ d e } $ is naturally partitioned across the output
 index, which spans the expanded hidden dimension $ e\in \left \{ 0, \ldots , EH-1 \right \} $. This
 functions by splitting the weight matrix across its output indices across $ T $ devices:  $ W ^{ 0 }
-_{ d e } \longrightarrow W ^{ 0t } _{ d e }$, where in the split weights $ t\in \left \{ 0,
-    \ldots , T-1  \right \} $, and $ e \in \left \{ t\frac{  EH}{ T } ,
-\ldots ,\left ( t+1 \right ) \frac{ EH }{ T } \right \} $. Note that each worker will have to store
+		_{ d e } \longrightarrow W ^{ 0t } _{ d e }$, where in the split weights $ t\in \left \{ 0,
+	\ldots , T-1  \right \} $, and $ e \in \left \{ t\frac{  EH}{ T } ,
+	\ldots ,\left ( t+1 \right ) \frac{ EH }{ T } \right \} $. Note that each worker will have to store
 all components of the input $ z $ for their backward pass, and an \pyinline{AllReduce} operation
 (see App.~\ref{app_collective_communications}) will be needed to collect gradient shards from other
 workers.
@@ -580,9 +638,9 @@ workers.
 Let the partial outputs from the previous step again be $ z _{ e } ^{ t } $, which are
 \pyinline{(B, S, E*A/T)}-shaped. The non-linearity $ \phi $ acts element wise, and using the subsequent
 $ z _{ e } ^{ t }  $ to compute the second matrix multiply requires a splitting the weights as in $ W ^{ 1 }
-_{ e d } \longrightarrow W ^{ 1t } _{  e d}$ (dividing up the $ e $ dimension), such that the desired output is computed as in
+		_{ e d } \longrightarrow W ^{ 1t } _{  e d}$ (dividing up the $ e $ dimension), such that the desired output is computed as in
 \begin{align}
-     z _{ e }\cdot W ^{ 1 }_{ ed }&=z _{ e }^{ t }\cdot W ^{ 1t }_{ ed } \ ,
+	z _{ e }\cdot W ^{ 1 }_{ ed } & =z _{ e }^{ t }\cdot W ^{ 1t }_{ ed } \ ,
 \end{align}
 sum over $ t $ implied, with each device computing one term in the sum over $ t $. Every device is thus
 left holding a \pyinline{(B, S, D)}-shaped tensor which must be \pyinline{AllReduce}-d over the
@@ -592,55 +650,55 @@ backwards pass, however.
 
 
 \begin{figure}[ht]
- \centering
- \includegraphics[scale=.33]{figures/mlp_mp_2.png}
- \caption{Tensor parallelism for the \pyinline{MLP} layers. Graphic from
- \cite{shoeybi2020megatronlm}. The $ f/g $ operations are the collective
-identity/\pyinline{AllReduce} operations in the forwards pass and the \pyinline{AllReduce}/identity
-operations in the backwards pass.}
- \label{fig_mlp_tensor_parallel}
+	\centering
+	\includegraphics[scale=.33]{figures/mlp_mp_2.png}
+	\caption{Tensor parallelism for the \pyinline{MLP} layers. Graphic from
+		\cite{shoeybi2020megatronlm}. The $ f/g $ operations are the collective
+		identity/\pyinline{AllReduce} operations in the forwards pass and the \pyinline{AllReduce}/identity
+		operations in the backwards pass.}
+	\label{fig_mlp_tensor_parallel}
 \end{figure}
 
 
- \paragraph{Attention} The computations for each the $ A $ individual attention heads, which result
- in the various re-weighted values $ t ^{ a }_{ bsf } $ \eqref{eq_reweighted_values}, can be
- partitioned arbitrarily across workers without incurring any collective communications costs.  Each
- worker then holds some subset of these $ a \in \left \{ 0, \ldots , H-1 \right \} $ activations and
- the final output matrix multiply can be schematically broken up as in \begin{align} &{\rm Concat}
-     \left ( \left [ t ^{ 0 }, \ldots , t ^{ H-1 } \right ] \right ) \cdot O \nn &= {\rm Concat}
-     \left ( \left [ {\rm Concat}\left ( \left [ t ^{ 0 }, \ldots , t ^{ \frac{ A }{ T }-1 } \right
-     ] \right ) \cdot O ^{ (0) }, \ldots ,{\rm Concat}\left ( \left [ t ^{ H-\frac{ A }{ T } },
-\ldots , t ^{ A} \right ] \right ) \cdot O ^{ (T-1) } \right ] \right ) \ , \end{align} where matrix
+\paragraph{Attention} The computations for each the $ A $ individual attention heads, which result
+in the various re-weighted values $ t ^{ a }_{ bsf } $ \eqref{eq_reweighted_values}, can be
+partitioned arbitrarily across workers without incurring any collective communications costs.  Each
+worker then holds some subset of these $ a \in \left \{ 0, \ldots , H-1 \right \} $ activations and
+the final output matrix multiply can be schematically broken up as in \begin{align}                                                                                                                                                                                                                                                                                                                 & {\rm Concat}
+                                                                                                                                                                                                                                                  \left ( \left [ t ^{ 0 }, \ldots , t ^{ H-1 } \right ] \right ) \cdot O \nn & = {\rm Concat}
+                                                                                                                                                                                                                                                  \left ( \left [ {\rm Concat}\left ( \left [ t ^{ 0 }, \ldots , t ^{ \frac{ A }{ T }-1 } \right
+	                                                                                                                                                                                                                                                  ] \right ) \cdot O ^{ (0) }, \ldots ,{\rm Concat}\left ( \left [ t ^{ H-\frac{ A }{ T } },
+		                                                                                                                                                                                                                                                  \ldots , t ^{ A} \right ] \right ) \cdot O ^{ (T-1) } \right ] \right ) \ ,\end{align} where matrix
 products and concatenation both occur along the hidden dimension. That is, each worker in a group
 has $ A/T $ different \pyinline{(B, S, D/A)}-shaped activations $ t ^{ a } $, which can be
 concatenated into a \pyinline{(B, S, D/T)}-shaped tensor and multiplied into the
 \pyinline{(D/T, D)}-shaped shard of $ O $, such that every worker is again left with a
 \pyinline{(B, S, D)}-shaped shard which much be \pyinline{AllReduce}-d, exactly as in the
 \pyinline{MLP} case above, to get the final result.  Hence, the collective communication costs for both layers are the same.
- The backwards pass requires similar collective communications to the \pyinline{MLP}
+The backwards pass requires similar collective communications to the \pyinline{MLP}
 case above.
 
 
- \begin{figure}[ht]
-     \centering
-     \includegraphics[scale=.45]{figures/attention_mp_2.png}
-     \caption{Tensor parallelism for the \pyinline{CausalAttention} layers. Graphic from
-     \cite{shoeybi2020megatronlm}. The $ f/g $ operators play the same role as in
- Fig.~\ref{fig_mlp_tensor_parallel}.}
-     \label{fig_attn_tensor_parallel}
- \end{figure}
+\begin{figure}[ht]
+	\centering
+	\includegraphics[scale=.45]{figures/attention_mp_2.png}
+	\caption{Tensor parallelism for the \pyinline{CausalAttention} layers. Graphic from
+		\cite{shoeybi2020megatronlm}. The $ f/g $ operators play the same role as in
+		Fig.~\ref{fig_mlp_tensor_parallel}.}
+	\label{fig_attn_tensor_parallel}
+\end{figure}
 
- \paragraph{Embedding and LM Head} Last, we can apply tensor parallelism to the language model head,
- which will also necessitate sharding the embedding layer, if the two share weights, as typical.
+\paragraph{Embedding and LM Head} Last, we can apply tensor parallelism to the language model head,
+which will also necessitate sharding the embedding layer, if the two share weights, as typical.
 
 For the LM head, we shard the output dimension as should be now familiar, ending up with $ T $
 different \pyinline{(B, S, V/T)}-shaped tensors, one per group member. Rather than communicating
 these large tensors around and then computing the cross-entropy loss, it is more efficient to have
 each worker compute their own loss where possible and then communicate the scalar losses
 around\footnote{In more detail, given the gold-answers $ y _{ bs } $ for the next-token-targets, a
-given worker can compute their contribution to the loss whenever their \pyinline{(B, S, V/T)}-shaped
-output $ z _{ bsv' } $ contains the vocabulary dimension $ v _{ * } $ specified by $ y _{ bs } $,
-otherwise those tensor components are ignored.}.
+	given worker can compute their contribution to the loss whenever their \pyinline{(B, S, V/T)}-shaped
+	output $ z _{ bsv' } $ contains the vocabulary dimension $ v _{ * } $ specified by $ y _{ bs } $,
+	otherwise those tensor components are ignored.}.
 
 For a weight-tied embedding layer, the former construction requires \pyinline{AllReduce} in order
 for every worker to get the full continuous representation of the input.
@@ -655,33 +713,33 @@ Sec.~\ref{subsec_seq_parallelism}.
 
 
 
- \paragraph{Effects on Memory} The per-worker memory savings come from the sharding of the weights
- and the reduced activation memory from sharded intermediate representations.
+\paragraph{Effects on Memory} The per-worker memory savings come from the sharding of the weights
+and the reduced activation memory from sharded intermediate representations.
 
- The gradient and optimizer state memory cost is proportional to the number of parameters local to
- each worker (later we will also consider sharding these components to reduce redundantly-held
- information). The number of parameters per worker is reduced to
+The gradient and optimizer state memory cost is proportional to the number of parameters local to
+each worker (later we will also consider sharding these components to reduce redundantly-held
+information). The number of parameters per worker is reduced to
 \begin{align}
-    N _{ \rm params } &\approx  (4 + 2E) \frac{ L D ^{ 2 } }{ T }\ ,
-    \label{eq_approx_params_tensor_parallel}
+	N _{ \rm params } & \approx  (4 + 2E) \frac{ L D ^{ 2 } }{ T }\ ,
+	\label{eq_approx_params_tensor_parallel}
 \end{align}
 counting only the dominant contribution from weights which scale with $ L $, since every weight is
 sharded. Since all non-activation contributions to training memory scale with $ N _{ {\rm params}  }
 $, this is a pure $ 1/T $ improvement.
 
- The per-layer activation memory costs \eqref{eq_att_actmem_vanilla} and
- \eqref{eq_mlp_actmem_vanilla} are altered to:
+The per-layer activation memory costs \eqref{eq_att_actmem_vanilla} and
+\eqref{eq_mlp_actmem_vanilla} are altered to:
 \begin{align}
-M _{ \rm act  } ^\texttt{Attention} &= BS \left ( \left (p + \frac{ 4p }{ T }+1 \right )D + \left
-(\frac{ 2p+1 }{ T } \right )AS  \right ) \nn
-M _{ \rm act  } ^\texttt{MLP} &= \left (\frac{ 2Ep }{ T }+p+1 \right )BDS\ .
-\label{eq_act_mem_attn_mlp}
+	M _{ \rm act  } ^\texttt{Attention} & = BS \left ( \left (p + \frac{ 4p }{ T }+1 \right )D + \left
+		(\frac{ 2p+1 }{ T } \right )AS  \right ) \nn
+	M _{ \rm act  } ^\texttt{MLP}       & = \left (\frac{ 2Ep }{ T }+p+1 \right )BDS\ .
+	\label{eq_act_mem_attn_mlp}
 \end{align}
 The derivation is similar to before. Adding in the (unchanged) contributions from
 \pyinline{LayerNorm} instances, the total, leading order activation memory sums to
 \begin{align}
-    M _{ {\rm act}  } ^{ {\rm  total}  } & \approx  2BDLS   \left ( p \left (2+ \frac{ E+2 }{ T }\right ) + 1   \right )
-    + ABLS ^{ 2 } \left ( \frac{ 2p+1 }{ T }\right ) \label{eq_act_mem_total_tensor_parallel}\ .
+	M _{ {\rm act}  } ^{ {\rm  total}  } & \approx  2BDLS   \left ( p \left (2+ \frac{ E+2 }{ T }\right ) + 1   \right )
+	+ ABLS ^{ 2 } \left ( \frac{ 2p+1 }{ T }\right ) \label{eq_act_mem_total_tensor_parallel}\ .
 \end{align}
 Again, the terms which did not receive the $ 1/T $ enhancement correspond to activations from
 unsharded \pyinline{LayerNorm} and \pyinline{Dropout} instances and the $ 1/T $'s improvements can
@@ -691,35 +749,35 @@ be enacted by layering sequence parallelism on top (Sec.~\ref{subsec_seq_paralle
 \subsection{Sequence Parallelism \label{subsec_seq_parallelism}}
 
 In \eqref{eq_act_mem_total_tensor_parallel}, not every factor is reduced by $ T $. \textbf{Sequence
-Parallelism} fixes that by noting that the remaining contributions, which essentially come from
+	Parallelism} fixes that by noting that the remaining contributions, which essentially come from
 \pyinline{Dropout} and \pyinline{LayerNorm}\footnote{Recall, though, from
-Sec.~\ref{subsubsec_layer_norm} that the parameters in \pyinline{LayerNorm} are completely redundant
-and can simply be removed without having any effect on the expressive capabilities of the
-architecture.}, can be parallelized in the sequence dimension (as can the residual connections).
+	Sec.~\ref{subsubsec_layer_norm} that the parameters in \pyinline{LayerNorm} are completely redundant
+	and can simply be removed without having any effect on the expressive capabilities of the
+	architecture.}, can be parallelized in the sequence dimension (as can the residual connections).
 
 The collective communications change a bit. If we shard the tensors across the sequence dimension
 before the first \pyinline{LayerNorm}, then we want the following:
 \begin{enumerate}
-\item The sequence dimension must be restored for the \pyinline{CausalAttention} layer
-\item The sequence should be re-split along the sequence dimension for the next \pyinline{LayerNorm} instance
-\item The sequence dimension should be restored for the \pyinline{MLP} layer \footnote{This doesn't
-    seem like a hard-requirement, but it's what is done in \cite{korthikanti2022reducing}.}
+	\item The sequence dimension must be restored for the \pyinline{CausalAttention} layer
+	\item The sequence should be re-split along the sequence dimension for the next \pyinline{LayerNorm} instance
+	\item The sequence dimension should be restored for the \pyinline{MLP} layer \footnote{This doesn't
+		      seem like a hard-requirement, but it's what is done in \cite{korthikanti2022reducing}.}
 \end{enumerate}
 
 The easiest way to achieve the above is the following.
 \begin{enumerate}
-    \item If the tensor parallelization degree is $ T $, we also use sequence parallelization degree $ T
-        $.
-    \item The outputs of the first \pyinline{LayerNorm} are \pyinline{AllGather}-ed to form the full-dimension
-        inputs to the \pyinline{CausalAttention}  layer
-    \item The tensor-parallel \pyinline{CausalAttention} layer functions much like in
-        Fig.~\ref{fig_attn_tensor_parallel} \textit{except} that we do not re-form the outputs to
-        full-dimensionality.  Instead, before the \pyinline{Dropout} layer, we \pyinline{ReduceScatter} them
-        from being hidden-sharded to sequence-sharded and pass them through the subsequent
-        \pyinline{Dropout}/\pyinline{LayerNorm} combination, similar to the first step
-    \item The now-sequence-sharded tensors are reformed with another \pyinline{AllGather} to be the full-dimensionality inputs to the
-        \pyinline{MLP} layer whose final outputs are similarly \pyinline{ReduceScatter}-ed to be
-        sequence-sharded and are recombined with the residual stream
+	\item If the tensor parallelization degree is $ T $, we also use sequence parallelization degree $ T
+	      $.
+	\item The outputs of the first \pyinline{LayerNorm} are \pyinline{AllGather}-ed to form the full-dimension
+	      inputs to the \pyinline{CausalAttention}  layer
+	\item The tensor-parallel \pyinline{CausalAttention} layer functions much like in
+	      Fig.~\ref{fig_attn_tensor_parallel} \textit{except} that we do not re-form the outputs to
+	      full-dimensionality.  Instead, before the \pyinline{Dropout} layer, we \pyinline{ReduceScatter} them
+	      from being hidden-sharded to sequence-sharded and pass them through the subsequent
+	      \pyinline{Dropout}/\pyinline{LayerNorm} combination, similar to the first step
+	\item The now-sequence-sharded tensors are reformed with another \pyinline{AllGather} to be the full-dimensionality inputs to the
+	      \pyinline{MLP} layer whose final outputs are similarly \pyinline{ReduceScatter}-ed to be
+	      sequence-sharded and are recombined with the residual stream
 \end{enumerate}
 The above allows the \pyinline{Dropout} mask and \pyinline{LayerNorm} weights to be sharded $ T
 $-ways, but if we save the full inputs to the \pyinline{CausalAttention} and \pyinline{MLP}  layers
@@ -730,25 +788,25 @@ performing an extra \pyinline{AllGather} when needed during the backwards pass. 
 sen in Fig.~\ref{fig_tensor_seq_parallel} and Fig.~\ref{fig_tensor_seq_parallel_detail} below. The
 activation memory is then reduced to:
 \begin{align}
-        M _{ {\rm act}  } ^{ {\rm  total}  } & =\frac{ 2BDLS   \left ( p(E+4) + 1   \right ) }{ T }
-        + \frac{ ABLS ^{ 2 } \left ( 2p+1\right ) }{ T }  + \Ocal \left( BSV \right) \label{eq_act_mem_total_seq_parallel}\ .
+	M _{ {\rm act}  } ^{ {\rm  total}  } & =\frac{ 2BDLS   \left ( p(E+4) + 1   \right ) }{ T }
+	+ \frac{ ABLS ^{ 2 } \left ( 2p+1\right ) }{ T }  + \Ocal \left( BSV \right) \label{eq_act_mem_total_seq_parallel}\ .
 \end{align}
 
 
 \begin{figure}[ht]
- \centering
- \includegraphics[scale=.25]{figures/transformer-tensor-sequence-parallel.jpg}
- \caption{Interleaved sequence and tensor parallel sections. Graphic from
- \cite{shoeybi2020megatronlm}. }
- \label{fig_tensor_seq_parallel}
+	\centering
+	\includegraphics[scale=.25]{figures/transformer-tensor-sequence-parallel.jpg}
+	\caption{Interleaved sequence and tensor parallel sections. Graphic from
+		\cite{shoeybi2020megatronlm}. }
+	\label{fig_tensor_seq_parallel}
 \end{figure}
 
 \begin{figure}[ht]
- \centering
- \includegraphics[scale=.25]{figures/mlp-tensor-sequence-parallel.jpg}
- \caption{Detail of the sequence-tensor parallel transition for the \pyinline{MLP} . Graphic from
- \cite{shoeybi2020megatronlm}. }
- \label{fig_tensor_seq_parallel_detail}
+	\centering
+	\includegraphics[scale=.25]{figures/mlp-tensor-sequence-parallel.jpg}
+	\caption{Detail of the sequence-tensor parallel transition for the \pyinline{MLP} . Graphic from
+		\cite{shoeybi2020megatronlm}. }
+	\label{fig_tensor_seq_parallel_detail}
 \end{figure}
 
 
@@ -766,24 +824,24 @@ TODO
 Let's run through the numbers for mixed-precision GPT3 with
 \href{https://bmk.sh/2020/05/29/GPT-3-A-Brief-Summary/}{parameters}:
 \begin{align}
-L &= 96 \ , \quad
-D = 12288 \ ,\quad
-A = 96\ , \quad V = 50257\ .
- \label{eq_gpt_num}
+	L & = 96 \ , \quad
+	D = 12288 \ ,\quad
+	A = 96\ , \quad V = 50257\ .
+	\label{eq_gpt_num}
 \end{align}
 We are leaving the sequence-length unspecified, but the block-size (maximum sequence-length) is $
-K=2048 $.
+	K=2048 $.
 
 
 Start by assuming no parallelism at all. The total (not per-layer!) non-activation memory is
 \begin{align}
-  M _{ {\rm non-act}  } ^ \texttt{GPT-3} & \approx 1463\ {\rm TiB}
+	M _{ {\rm non-act}  } ^ \texttt{GPT-3} & \approx 1463\ {\rm TiB}
 \end{align}
 which can be broken down further as
 \begin{align}
-  M _{ {\rm params}  } ^ \texttt{GPT-3} & \approx 162\ {\rm TiB} \ , \quad
- M _{ {\rm grads}  } ^ \texttt{GPT-3}  \approx 325\ {\rm TiB}\ , \quad
-  M _{ {\rm optim}  } ^ \texttt{GPT-3}  \approx 975\ {\rm TiB}\ .
+	M _{ {\rm params}  } ^ \texttt{GPT-3} & \approx 162\ {\rm TiB} \ , \quad
+	M _{ {\rm grads}  } ^ \texttt{GPT-3}  \approx 325\ {\rm TiB}\ , \quad
+	M _{ {\rm optim}  } ^ \texttt{GPT-3}  \approx 975\ {\rm TiB}\ .
 \end{align}
 The embedding matrix only makes up $ \approx .3\% $ of the total number of parameters, justifying our
 neglect of its contribution in preceding expressions.
@@ -791,8 +849,8 @@ neglect of its contribution in preceding expressions.
 
 The activation memory is
 \begin{align}
-  M _{ {\rm act}  } ^ \texttt{GPT-3} & \approx 3 \times 10 ^{ -2 }BS\times  \left (  1  + \frac{ S
-  }{ 10 ^{ 3 } } \right ) \ {\rm TiB} \ .
+	M _{ {\rm act}  } ^ \texttt{GPT-3} & \approx 3 \times 10 ^{ -2 }BS\times  \left (  1  + \frac{ S
+	}{ 10 ^{ 3 } } \right ) \ {\rm TiB} \ .
 \end{align}
 Note that the attention matrices, which are responsible for $ \Ocal \left( S ^{ 2 } \right)  $ term, will
 provide the dominant contribution to activation memory in the usual $ S \gtrsim 10 ^{ 3 } $ regime.
@@ -800,8 +858,8 @@ provide the dominant contribution to activation memory in the usual $ S \gtrsim 
 In the limit where we process the max block size ($ S=K=2048 $), the ratio of activation to
 non-activation memory is
 \begin{align}
-  \frac{  M _{ {\rm act}  } ^ \texttt{GPT-3}}{ M _{ {\rm non-act}  } ^ \texttt{GPT-3} }\Big| _{
-  S=2048 } & \approx  .2 B \ .
+	\frac{  M _{ {\rm act}  } ^ \texttt{GPT-3}}{ M _{ {\rm non-act}  } ^ \texttt{GPT-3} }\Big| _{
+	S=2048 } & \approx  .2 B \ .
 \end{align}
 So, the activation memory is very significant for such models.
 
@@ -809,8 +867,8 @@ So, the activation memory is very significant for such models.
 Using tensor parallelism into the above with the maximal $ T=8 $ which can be practically used, the
 savings are significant. The total memory is now
 \begin{align}
-  M _{ {\rm total}  } ^{ \texttt{GPT-3}  } & \approx 187\ {\rm TiB} + 10 ^{ -2 }BS + 5 \times 10 ^{
-  -6} BS ^{ 2 }\ .
+	M _{ {\rm total}  } ^{ \texttt{GPT-3}  } & \approx 187\ {\rm TiB} + 10 ^{ -2 }BS + 5 \times 10 ^{
+			-6} BS ^{ 2 }\ .
 \end{align}
 
 
@@ -819,36 +877,36 @@ savings are significant. The total memory is now
 \section{Training FLOPs \label{sec_flops_training} }
 
 The total number of floating point operations (FLOPs)\footnote{The notation surrounding
-floating-point operations is very confusing because another quantity of interest is the number
-of floating-point operations a given implementation can use \textit{per-second}. Sometimes,
-people use FLOPS or FLOP/s to indicate the rate, rather than the gross-count which has the lower
-case ``s", FLOPs, but there's little consistency in general. We will use FLOPs and FLOP/s.}  needed to process a given batch of
+	floating-point operations is very confusing because another quantity of interest is the number
+	of floating-point operations a given implementation can use \textit{per-second}. Sometimes,
+	people use FLOPS or FLOP/s to indicate the rate, rather than the gross-count which has the lower
+	case ``s", FLOPs, but there's little consistency in general. We will use FLOPs and FLOP/s.}  needed to process a given batch of
 data is effectively determined by the number of matrix multiplies needed.
 
 Recall that a dot-product of the form $ v \cdot M $  with $ v \in \mathbb{R}^{ m } $ and $ M \in
-\mathbb{R} ^{ m, n }$ requires $ \left (2 m-1 \right )\times n \approx 2mn$ FLOPs .
+	\mathbb{R} ^{ m, n }$ requires $ \left (2 m-1 \right )\times n \approx 2mn$ FLOPs .
 For large language models, $ m,n \sim \Ocal \left( 10 ^{ 3 } \right)  $, meaning that even expensive
 element-wise operations like \pyinline{GeLU} acting on the same vector $ v $ pale in comparison by
 FLOPs count \footnote{Since their FLOPs counts only scales as $ \sim \Ocal \left( n\right )  $ where
-the omitted constant may be relatively large, but still negligible when all dimensions are big.}. It
+	the omitted constant may be relatively large, but still negligible when all dimensions are big.}. It
 is then a straightforward exercise in counting to estimate the FLOPs for a given architecture. The
 input tensor is of shape \pyinline{(B, S, D)} throughout.
 
 \begin{nicebox}{Essentials}
-    The number of FLOPs to push a batch of $ B $ of sequence-length $ S $ examples through the forwards-pass
-    of a decoder-only transformer is approximately $ 2BS N _{ {\rm params}  } $ where the number of
-    parameters accounts for any reductions due to tensor- and sequence-parallelism\footnote{A quick argument: a
-computation of the form $T _{ a _{ 0 }\ldots  a _{ n }j } =V _{ a _{ 0 }\ldots a _{ A
-}i }M _{ ij } $ requires $ 2A _{ 0 }\ldots A _{ n }IJ $ FLOPs where the capital letters
-represent the size of their similarly-index dimensions. Thus, the FLOPs
-essentially count the size of the matrix $ M $ (that is, $ IJ $), up to a factor of 2 times all of the
-dimensions in $ V $ which weren't summed over. Therefore, passing a
-\pyinline{(B, S, D)}-shaped tensor through the Transformer architecture would give $ \sim 2BS\times
-$(sum of sizes of all weight-matrices) FLOPs, and that this last factor is also approximately the number of
-parameters in the model (since that count is dominated by weights). Thus, FLOPs $ \approx 2BSN _{
-{\rm params}  } $. This is the correct as long as the self-attention FLOPs with $ \Ocal \left( S ^{ 2 } \right)$-dependence which we
-didn't account for here are actually negligible (true for $ S \lesssim D $.}. The backwards-pass
-    costs about twice as much as the forwards-pass. This is true as long as $ S \lesssim D $).
+	The number of FLOPs to push a batch of $ B $ of sequence-length $ S $ examples through the forwards-pass
+	of a decoder-only transformer is approximately $ 2BS N _{ {\rm params}  } $ where the number of
+	parameters accounts for any reductions due to tensor- and sequence-parallelism\footnote{A quick argument: a
+	computation of the form $T _{ a _{ 0 }\ldots  a _{ n }j } =V _{ a _{ 0 }\ldots a _{ A
+			}i }M _{ ij } $ requires $ 2A _{ 0 }\ldots A _{ n }IJ $ FLOPs where the capital letters
+	represent the size of their similarly-index dimensions. Thus, the FLOPs
+	essentially count the size of the matrix $ M $ (that is, $ IJ $), up to a factor of 2 times all of the
+	dimensions in $ V $ which weren't summed over. Therefore, passing a
+	\pyinline{(B, S, D)}-shaped tensor through the Transformer architecture would give $ \sim 2BS\times
+	$(sum of sizes of all weight-matrices) FLOPs, and that this last factor is also approximately the number of
+	parameters in the model (since that count is dominated by weights). Thus, FLOPs $ \approx 2BSN _{
+				{\rm params}  } $. This is the correct as long as the self-attention FLOPs with $ \Ocal \left( S ^{ 2 } \right)$-dependence which we
+	didn't account for here are actually negligible (true for $ S \lesssim 10  D $).}. The backwards-pass
+	costs about twice as much as the forwards-pass. This is true as long as $ S \lesssim D $).
 \end{nicebox}
 
 
@@ -864,15 +922,15 @@ checkpointing.
 
 The FLOPs costs:
 \begin{itemize}
-    \item  Generating the query, key, and value vectors: $ 6BSD ^{ 2 } $
-    \item Attention scores:  $2BDS ^{ 2 }$
-    \item Re-weighting values:  $2BDS ^{ 2 }$
-    \item Final projection: $ 2BSD ^{ 2 } $
+	\item  Generating the query, key, and value vectors: $ 6BSD ^{ 2 } $
+	\item Attention scores:  $2BDS ^{ 2 }$
+	\item Re-weighting values:  $2BDS ^{ 2 }$
+	\item Final projection: $ 2BSD ^{ 2 } $
 \end{itemize}
 
 \paragraph{\pyinline{MLP}: Forwards}
 Passing a  through the \pyinline{MLP} layer, the FLOPs due to the
-first and second matrix-multiplies are equal, with total matrix-multiply requires $ 4BSED ^{ 2 } $.
+first and second matrix-multiplies are equal, with total matrix-multiply FLOPs  $ 4BSED ^{ 2 } $.
 
 \paragraph{Backwards Pass: Approximate}
 
@@ -884,42 +942,46 @@ in the forward pass, we have roughly twice as many similar operations in the bac
 
 
 The argument: consider a typical sub-computation in a neural network which is of the form $ z' =
-\phi \left ( W \cdot z \right ) $ where $ z', a $ are intermediate representations $ z, z' $, $ \phi
+	\phi \left ( W \cdot z \right ) $ where $ z', a $ are intermediate representations $ z, z' $, $ \phi
 $ is some non-linearity, and where the matrix multiply inside the activation function dominates the
 forwards-pass FLOPs count, as above.  Then, in the backwards pass for this sub-computation, imagine
 we are handed the upstream derivative $ \partial _{ z '  } \Lcal $. In order to complete
 backpropagation, we need both to compute $ \partial  _{ W }\Lcal  $ to update $ W $ and also $
-\partial  _{ z } \Lcal  $ to continue backpropagation to the next layer down. Each of these operations
- will cost about as many FLOPs as the forwards-pass, hence the estimated factor of two (but, as
- we will see, this is a very rough estimate).
+	\partial  _{ z } \Lcal  $ to continue backpropagation to the next layer down. Each of these operations
+will cost about as many FLOPs as the forwards-pass, hence the estimated factor of two (but, as
+we will see, this is a very rough estimate).
 
- Being more precise, let $ z $ be \pyinline{(D0, ... , Dn, I)}-shaped and let $ W $ be
- \pyinline{(I, J)}-shaped such that it acts on the last index of $ z $, making $ z' $
-\pyinline{(D0, ... , Dn, J)}-shaped. Denoting $D=\prod _{ i } D _{ i } $ be the number of elements
+Being more precise, let $ z $ be \pyinline{(D0, ... , Dn, J)}-shaped and let $ W $ be
+\pyinline{(I, J)}-shaped such that it acts on the last index of $ z $, making $ z' $
+\pyinline{(D0, ... , Dn, I)}-shaped. Denoting $D=\prod _{ i } D _{ i } $ be the number of elements
 along the $ D _{ i } $ directions for brevity, the forward-FLOPs cost of the sub-computation is
 therefore $ 2DIJ$.
 
 
 Adding indices, the two derivatives we need are
 \begin{align}
-    \frac{ \partial \Lcal  }{ \partial W _{ ij } }&= \frac{ \partial \Lcal  }{ \partial z '_{ d _{ 0 } \ldots  d _{ n }j } }\phi' \left (\left (  W \cdot z \right ) _{  d _{ 0 }\ldots d _{ n }i } \right )
-z _{ d _{ 0 }\ldots  d _{ n } i } \nn
-   \frac{  \partial \Lcal  }{\partial  z _{ d _{ 0 }\ldots d _{ n }i } } &= \frac{ \partial \Lcal
-   }{ \partial z '_{ d _{ 0 } \ldots  d _{ n }j } }\phi' \left (\left (  W \cdot z \right ) _{  d _{
-   0 }\ldots d _{ n }i } \right ) W _{ ij }\ ,
+    \frac{ \partial \Lcal  }{ \partial W _{ ij } } & = \frac{ \partial \Lcal  }{ \partial z '_{ d _{ 0 } \ldots  d _{ n }i } }\phi' \left (\left (  W \cdot z \right ) _{  d _{ 0 }\ldots d _{ n }i } \right )
+	z _{ d _{ 0 }\ldots  d _{ n } j } \nn
+	\frac{  \partial \Lcal  }{\partial  z _{ d _{ 0 }\ldots d _{ n }j } } & = \frac{ \partial \Lcal
+	}{ \partial z '_{ d _{ 0 } \ldots  d _{ n }i } }\phi' \left (\left (  W \cdot z \right ) _{  d _{
+			0 }\ldots d _{ n }i } \right ) W _{ ij }\ ,\label{eq_backprop_derivatives}
 \end{align}
-which have shapes \pyinline{(I, J)} and \pyinline{(D0, ..., Dn, I)}, respectively. On the right
+which have shapes \pyinline{(I, J)} and \pyinline{(D0, ..., Dn, J)}, respectively. On the right
 side, $ z $ and $ W \cdot  z $ are cached and the element-wise computation of $ \phi' \left ( W
-\cdot z \right ) $ has negligible FLOPs count, as discussed above. The FLOPs count is instead
+\cdot z \right ) $ has negligible FLOPs count, as discussed above: its contribution is $ \Ocal
+\left( 1/I \right)  $ suppressed relative to the matrix-multiplies. The FLOPs count is instead
 dominated by the broadcast-multiplies, sums, and matrix-products.
 
-Multiplying out the first two factors which are common to each derivative involves a broadcasted
-multiply of a \pyinline{(D0, ... , Dn, J)}-shaped and a \pyinline{(D0, ... , Dn, I, J)}-shaped tensor
-to produce another \pyinline{(D0, ... , Dn, I, J)}-shaped result, which requires $ DIJ $ FLOPs.
-The process of multiplying this factor with either $ z _{ d _{ 0 } \ldots d _{ n }i } $ or $ W _{ ij } $
-and summing over the appropriate indices requires $ 2DIJ $ FLOPs for either operation, bringing the
-total FLOPs to $ 5DIJ$, which is (slightly more than) double the FLOPs for this same
-sub-computation in the forward-direction, hence the rough rule of thumb.
+The two derivatives in \eqref{eq_backprop_derivatives} each have the same first two factors in
+common, and it takes $ DI $ FLOPs to multiply out these two \pyinline{(D0, ... , Dn, J)}-shaped
+tensors into another result with the same shape. This contribution is again $ \Ocal \left( 1/I
+\right)  $ suppressed and hence negligible. Multiplying this factor with either $ z
+_{ d _{ 0 } \ldots d _{ n }i } $ or $ W _{ ij } $ and summing over the appropriate indices requires
+$ 2DIJ $ FLOPs for either operation, bringing the total FLOPs to $ 4DIJ$, which is double the FLOPs
+for this same sub-computation in the forward-direction, hence the rough rule of thumb\footnote{Note
+    also that the very first layer does not need to perform the second term in
+    \eqref{eq_backprop_derivatives}, since we do not need to backpropagate to the inputs, so the
+    total backwards flops is more precisely $ 4DIJ(L-1) + 2DIJ$.}.
 
 
 \paragraph{Backwards Pass: More Precise} \textbf{TODO}
@@ -928,14 +990,14 @@ sub-computation in the forward-direction, hence the rough rule of thumb.
 
 
 The grand sum is then\footnote{With a large vocabulary, the cost of the final language model head
-matrix multiply can also be significant, but we have omitted its $ L $-independent,  $ 2BDSV $
-contribution here. }:
+	matrix multiply can also be significant, but we have omitted its $ L $-independent,  $ 2BDSV $
+	contribution here. }:
 \begin{align}
-C  ^{ {\rm  model}  } &\approx 12 BDLS \left ( S + \left ( 2+E \right )D \right ) \label{eq_model_flops}\ .
+	C  ^{ {\rm  model}  } & \approx 12 BDLS \left ( S + \left ( 2+E \right )D \right ) \label{eq_model_flops}\ .
 \end{align}
 We can also phrase the FLOPs in terms of the number of parameters \eqref{eq_approx_params_tensor_parallel} as
 \begin{align}
- C  ^{ {\rm  model}  } \big| _{ T=1 }  &= 6BS N _{ {\rm  params}  }\times \left ( 1 + \Ocal \left( S/D\right)  \right )
+	C  ^{ {\rm  model}  } \big| _{ T=1 } & = 6BS N _{ {\rm  params}  }\times \left ( 1 + \Ocal \left( S/D\right)  \right )
 \end{align}
 where we took the $ T=1, D \gg S $ limit for simplicity and we note that $ BS $  is the number of
 total tokens in the processed batches.
@@ -949,11 +1011,11 @@ Training is generally compute bound (see App.~\ref{app_compute_mem_bound}) and b
 of Sec.~\ref{sec_flops_training} the quickest one could possibly push a batch of data through the
 model is
 \begin{align}
-  t _{ {\rm  min} }  &= \frac{ C  ^{ {\rm  model}  }  }{   \lambda _{ {\rm FLOP/s} } }\ . \label{eq_tmin_model}
+	t _{ {\rm  min} } & = \frac{ C  ^{ {\rm  model}  }  }{   \lambda _{ {\rm FLOP/s} } }\ . \label{eq_tmin_model}
 \end{align}
 Expanding to the entire training run, then with perfect utilization training will take a time
 \begin{align}
-  t _{ {\rm  total} }  &\approx  \frac{6N _{ {\rm params} } N _{ {\rm tokens} }}{   \lambda _{ {\rm FLOP/s} } }\ . \label{eq_training_rule_of_thumb}
+	t _{ {\rm  total} } & \approx  \frac{6N _{ {\rm params} } N _{ {\rm tokens} }}{   \lambda _{ {\rm FLOP/s} } }\ . \label{eq_training_rule_of_thumb}
 \end{align}
 Adjust $ \lambda _{ {\rm FLOP/s} } $ to the actual achievable FLOP/s in your setup to get a realistic estimate.
 
@@ -961,7 +1023,7 @@ How many tokens should a model of size $ N _{ {\rm params} } $? Scaling laws (Se
 the best known answer, and the Summer 2023 best-guess is that we optimally have $ N _{ {\rm tokens} }\approx 20 N _{ {\rm params} } $.
 So that the above is
 \begin{align}
-t _{ {\rm  total} }  &\approx  \frac{120N _{ {\rm params} } ^{ 2 }}{   \lambda _{ {\rm FLOP/s} } }\ ,
+	t _{ {\rm  total} } & \approx  \frac{120N _{ {\rm params} } ^{ 2 }}{   \lambda _{ {\rm FLOP/s} } }\ ,
 \end{align}
 leading to quadratic growth in training time.
 
@@ -973,7 +1035,7 @@ a distinction between \textbf{hardware FLOPs} and \textbf{model FLOPs}. Two corr
 measures are \textbf{model FLOPs utilization} (MFU) and \textbf{hardware FLOPs utilization}  (HFU).
 If our iterations take actual time $ t _{ {\rm iter} } $, then these are given by
 \begin{align}
-    {\rm MFU} &= \frac{ t _{ {\rm iter} } }{ t _{ {\rm  min} } ^{ {\rm  model} } } \ , \quad {\rm HFU} = \frac{ t _{ {\rm iter} } }{ t _{ {\rm  min} } ^{ {\rm  hardware} } } \ , \label{eq_mfu}
+	{\rm MFU} & = \frac{ t _{ {\rm iter} } }{ t _{ {\rm  min} } ^{ {\rm  model} } } \ , \quad {\rm HFU} = \frac{ t _{ {\rm iter} } }{ t _{ {\rm  min} } ^{ {\rm  hardware} } } \ , \label{eq_mfu}
 \end{align}
 where $ t _{ {\rm min} } ^{ {\rm  model} } $ is \eqref{eq_tmin_model} and $ t _{ {\rm min} } ^{ {\rm  hardware} } $ is similar but using
 $ C  ^{ {\rm  hardware} } $.
@@ -984,23 +1046,23 @@ $ C  ^{ {\rm  hardware} } $.
 
 Empirically-discovered scaling laws have driven the race towards larger and larger models.
 \begin{nicebox}{Essentials}
-Decoder-only model performance improves predictably as a function of the model size, dataset size,
-and the total amount of compute. As of Summer 2023, there is little sign of hitting any kind of wall
-with respect to such scaling improvements.
+	Decoder-only model performance improves predictably as a function of the model size, dataset size,
+	and the total amount of compute. As of Summer 2023, there is little sign of hitting any kind of wall
+	with respect to such scaling improvements.
 \end{nicebox}
 
 
 The central parameters are:
 \begin{itemize}
-    \item The number of non-embedding model parameters, as excising embedding params was found to
-        generate cleaner scaling laws. Because our $ N _{ {\rm params} }$ has already been typically
-        neglecting these parameters, we will just use this symbol in scaling laws and keep the above
-        understanding implicit.\footnote{Presumably, the scaling laws are
-            cleaner with these neglected because these params do not contribute directly to
-FLOPs, unlike most other parameters.} \cite{kaplan2020scaling}.
-    \item $ C $: total compute, often in units like PFLOP/s-days $ \sim 10 ^{ 20 } $ FLOPs
-    \item $ N _{ {\rm tokens} } $: dataset-size in tokens
-    \item $\Lcal$: cross-entropy loss in nats
+	\item The number of non-embedding model parameters, as excising embedding params was found to
+	      generate cleaner scaling laws. Because our $ N _{ {\rm params} }$ has already been typically
+	      neglecting these parameters, we will just use this symbol in scaling laws and keep the above
+	      understanding implicit.\footnote{Presumably, the scaling laws are
+		      cleaner with these neglected because these params do not contribute directly to
+		      FLOPs, unlike most other parameters.} \cite{kaplan2020scaling}.
+	\item $ C $: total compute, often in units like PFLOP/s-days $ \sim 10 ^{ 20 } $ FLOPs
+	\item $ N _{ {\rm tokens} } $: dataset-size in tokens
+	\item $\Lcal$: cross-entropy loss in nats
 \end{itemize}
 The specific form of any given scaling law should also be understood to apply to a pretty narrowly
 defined training procedure, in which choices like the optimizer, learning-rate scheduler,
@@ -1015,32 +1077,32 @@ nice laws of some form are still expected to exist).
 The first scaling-laws were reported in \cite{kaplan2020scaling}.   Their simplest form relates the
 value of the cross-entropy loss \textit{at convergence} (and in nats), $ \Lcal  $,  to the number of non-embedding
 parameter, dataset size in token, and the amount of compute, \textit{in the limit} where only one of
-this factors is limiting\footnote{Unclear to me how you know when this is the case?}. The laws (in our notation):
+this factors is bottlenecking the model\footnote{Unclear to me how you know when this is the case?}. The laws (in our notation):
 \begin{itemize}
-    \item $ \Lcal (N _{ {\rm params} }) \approx  \left ( N _{ {\rm  params} }^{ \star } / N _{ {\rm  params}
-        } \right ) ^{ \alpha _{ N } } $, with $ \alpha _{ N } \approx 0.076 $ and $ N _{ {\rm params} } ^{ \star }  \approx
-        8.8\times 10 ^{ 13 }$
-    \item $ \Lcal (N _{ {\rm  tokens} }) \approx  \left ( N _{ {\rm tokens}} ^{ \star } / N _{ {\rm  tokens}
-        } \right ) ^{ \alpha _{ T } } $, with $ \alpha _{ T } \approx 0.095 $ and $ N _{{\rm  tokens}  } ^{  \star }  \approx
-        5.4\times 10 ^{ 13 }$
-    \item $ \Lcal (C) \approx  \left ( C ^{ \star } /  C
-         \right ) ^{ \alpha _{ C } } $, with $ \alpha _{ C } \approx 0.050  $ and $ C ^{  \star }  \approx
-        3.1\times 10 ^{8} $ PFLOP/s-days, where the batch size was assumed to be chosen to be compute optimal per the criteria they outline
+	\item $ \Lcal (N _{ {\rm params} }) \approx  \left ( N _{ {\rm  params} }^{ \star } / N _{ {\rm  params}
+		      } \right ) ^{ \alpha _{ N } } $, with $ \alpha _{ N } \approx 0.076 $ and $ N _{ {\rm params} } ^{ \star }  \approx
+		      8.8\times 10 ^{ 13 }$
+	\item $ \Lcal (N _{ {\rm  tokens} }) \approx  \left ( N _{ {\rm tokens}} ^{ \star } / N _{ {\rm  tokens}
+		      } \right ) ^{ \alpha _{ T } } $, with $ \alpha _{ T } \approx 0.095 $ and $ N _{{\rm  tokens}  } ^{  \star }  \approx
+		      5.4\times 10 ^{ 13 }$
+	\item $ \Lcal (C) \approx  \left ( C ^{ \star } /  C
+		      \right ) ^{ \alpha _{ C } } $, with $ \alpha _{ C } \approx 0.050  $ and $ C ^{  \star }  \approx
+		      3.1\times 10 ^{8} $ PFLOP/s-days, where the batch size was assumed to be chosen to be compute optimal per the criteria they outline
 \end{itemize}
 
 \begin{figure}[ht]
-    \centering
-    \includegraphics[scale=.5]{figures/SimplePowerLaws.pdf}
-    \caption{Original scaling laws from \cite{kaplan2020scaling}.}
-    \label{fig_scaling_laws_original_1}
+	\centering
+	\includegraphics[scale=.5]{figures/SimplePowerLaws.pdf}
+	\caption{Original scaling laws from \cite{kaplan2020scaling}.}
+	\label{fig_scaling_laws_original_1}
 \end{figure}
 
 
 \begin{figure}[ht]
-    \centering
-    \includegraphics[scale=.5]{figures/EfficiencyIllustration.pdf}
-    \caption{From \cite{kaplan2020scaling}. Larger models are much more sample-efficient (faster).}
-    \label{fig_scaling_laws_original_2}
+	\centering
+	\includegraphics[scale=.5]{figures/EfficiencyIllustration.pdf}
+	\caption{From \cite{kaplan2020scaling}. Larger models are much more sample-efficient (faster).}
+	\label{fig_scaling_laws_original_2}
 \end{figure}
 
 
@@ -1050,38 +1112,38 @@ As of Summer 2023, the Chinchilla scaling laws in \cite{hoffmann2022training} ar
 scaling laws for guiding training. The central difference between \cite{hoffmann2022training} and
 \cite{kaplan2020scaling} is that in the former they adjust their cosine learning-rate schedule to
 reflect the amount of planned training, while in the latter they do not\footnote{The learning-rate
-schedule consist of a linear warm-up stage from a very small $ \eta  $ up to the largest value $ \eta _{ {\rm max} } $, after
-which the cosine bit kicks in: $ \eta (s)= \eta _{ {\rm min} } + \left ( \eta _{ {\rm max} } - \eta  _{ {\rm
-min} } \right ) \times \cos \left (\frac{ \pi s }{ 2 s _{ {\rm max} } }  \right) $ with $ s $ the
-step number. In Fig.~A1 of \cite{hoffmann2022training} they demonstrate that having the planned $ s
-_{ {\rm max} } $ duration of the scheduler be longer than the actual number of training steps is
-detrimental to training (they do not study the opposite regime), which is effectively what was done
-in \cite{kaplan2020scaling}. Probably the more important general point is again that the precise
-form of these scaling laws depend on details of fairly arbitrary training procedure choices, such as
-the choice of learning-rate scheduler.}.
+	schedule consist of a linear warm-up stage from a very small $ \eta  $ up to the largest value $ \eta _{ {\rm max} } $, after
+	which the cosine bit kicks in: $ \eta (s)= \eta _{ {\rm min} } + \left ( \eta _{ {\rm max} } - \eta  _{ {\rm
+				min} } \right ) \times \cos \left (\frac{ \pi s }{ 2 s _{ {\rm max} } }  \right) $ with $ s $ the
+	step number. In Fig.~A1 of \cite{hoffmann2022training} they demonstrate that having the planned $ s
+			_{ {\rm max} } $ duration of the scheduler be longer than the actual number of training steps is
+	detrimental to training (they do not study the opposite regime), which is effectively what was done
+	in \cite{kaplan2020scaling}. Probably the more important general point is again that the precise
+	form of these scaling laws depend on details of fairly arbitrary training procedure choices, such as
+	the choice of learning-rate scheduler.}.
 
 Several different analyses are performed which all give very similar results. The outputs are the optimal values of $ N _{ {\rm params} }, N _{ {\rm tokens} } $ given a compute budget $ C $.
 \begin{itemize}
-\item They fix various buckets of model sizes and train for varying lengths. In their resulting
-    loss-vs-FLOPs plot, they determine the model size which led to the best loss at each given FLOPs value, thereby generating
-    and optimal model size vs compute relation.
-\item They fix various buckets of FLOPs budget and train models of different sizes with that budget,
-    finding the optimal model size in each case. A line can then be fit to the optimal settings across
-    FLOPs budgets in both the parameter-compute and tokens-compute planes.
-\item  They perform a parametric fit to the loss\footnote{In \cite{hoffmann2022training} they model
-the scaling of the test loss, while in \cite{kaplan2020scaling} they use the training loss.}:
-\begin{align}
-    \Lcal (N _{ {\rm params} }, N _{ {\rm tokens} }) &=E + \frac{ A }{ N _{ {\rm  params} } ^{ \alpha  } }  + \frac{ B }{ N _{ {\rm tokens} } ^{ \beta  } } \label{eq_chinchilla} \ ,
-\end{align}
-fit over a large range of parameter and token choices. The best-fit values are:
-\begin{align}
-    E &= 1.69 \ , \quad A = 406.4 \ , \quad B = 410.7 \ , \quad  \alpha = 0.34 \ , \quad \beta =0.28 \ .
-\end{align}
-Using $ C \approx 6 N _{ {\rm params}} N _{ {\rm tokens} } $, the above can be minimized at fixed compute
-either for number of parameter or the size of the dataset.
+	\item They fix various buckets of model sizes and train for varying lengths. In their resulting
+	      loss-vs-FLOPs plot, they determine the model size which led to the best loss at each given FLOPs value, thereby generating
+	      and optimal model size vs compute relation.
+	\item They fix various buckets of FLOPs budget and train models of different sizes with that budget,
+	      finding the optimal model size in each case. A line can then be fit to the optimal settings across
+	      FLOPs budgets in both the parameter-compute and tokens-compute planes.
+	\item  They perform a parametric fit to the loss\footnote{In \cite{hoffmann2022training} they model
+		      the scaling of the test loss, while in \cite{kaplan2020scaling} they use the training loss.}:
+	      \begin{align}
+		      \Lcal (N _{ {\rm params} }, N _{ {\rm tokens} }) & =E + \frac{ A }{ N _{ {\rm  params} } ^{ \alpha  } }  + \frac{ B }{ N _{ {\rm tokens} } ^{ \beta  } } \label{eq_chinchilla} \ ,
+	      \end{align}
+	      fit over a large range of parameter and token choices. The best-fit values are:
+	      \begin{align}
+		      E & = 1.69 \ , \quad A = 406.4 \ , \quad B = 410.7 \ , \quad  \alpha = 0.34 \ , \quad \beta =0.28 \ .
+	      \end{align}
+	      Using $ C \approx 6 N _{ {\rm params}} N _{ {\rm tokens} } $, the above can be minimized at fixed compute
+	      either for number of parameter or the size of the dataset.
 \end{itemize}
 In all cases, the findings are that at optimality  $ N _{ {\rm params} }  \sim N _{ {\rm tokens}
-}\sim C ^{ .5 } $: both the parameter and tokens budget should be scaled in equal measure.
+		}\sim C ^{ .5 } $: both the parameter and tokens budget should be scaled in equal measure.
 
 
 
@@ -1102,11 +1164,11 @@ to create a one-token-longer sequence, and then repeating until desired.
 
 There are various problems that naive implementations of the above face:
 \begin{itemize}
-    \item Repeated computation from processing the same tokens in the same order repeatedly, at least for
-        some sub-slice of $ x _{ bs } $.
-    \item Inherently sequential computation, rather than parallel
-    \item Sub-optimal sampling strategies. Just choosing the most-probably token at each new step, does
-    not guarantee the most-probable overall sequence, for instance.
+	\item Repeated computation from processing the same tokens in the same order repeatedly, at least for
+	      some sub-slice of $ x _{ bs } $.
+	\item Inherently sequential computation, rather than parallel
+	\item Sub-optimal sampling strategies. Just choosing the most-probably token at each new step, does
+	      not guarantee the most-probable overall sequence, for instance.
 \end{itemize}
 
 
@@ -1120,22 +1182,22 @@ A quick tour of generation strategies. A very readable blog post comparing strat
 \subsection{Greedy \label{subsec_greedy_gen}}
 
 The most obvious generation strategy is to take the final, \pyinline{(B, S, V)}-shaped outputs $ z
-_{ bsv } $ and just take the next token to be the most-probable one (for the final position in the
+		_{ bsv } $ and just take the next token to be the most-probable one (for the final position in the
 sequence): \pyinline{next_token = z[:, -1].argmax(dim=-1)}. A very minimal \pyinline{generate} method
 is as below:
 \pyfile[firstline=6, lastline=23]{python/greedy_generate.py}
 
 There are various important, practical considerations which are ignored in the above implementation, including:
 \begin{itemize}
-    \item Since we are taking the prediction from the last (\pyinline{-1}-indexed) element in each
-    sequence, it is crucial that all padding is \textit{left}-padding, so that these final
-    elements are meaningful.
-    \item Models will signal the end of generation by outputting tokenizer-specific codes, and
-    generation must respect these.
+	\item Since we are taking the prediction from the last (\pyinline{-1}-indexed) element in each
+	      sequence, it is crucial that all padding is \textit{left}-padding, so that these final
+	      elements are meaningful.
+	\item Models will signal the end of generation by outputting tokenizer-specific codes, and
+	      generation must respect these.
 \end{itemize}
 See
 \href{https://github.com/huggingface/transformers/blob/04ab5605fbb4ef207b10bf2772d88c53fc242e83/src/transformers/generation/utils.py#L1115}{the
-\texttt{generate} method from the \texttt{transformers} library} for more fully-featured code
+	\texttt{generate} method from the \texttt{transformers} library} for more fully-featured code
 (which, correspondingly, is not always easy to follow).
 
 \subsection{Simple Sampling: Temperature, Top-$ k $, and Top-$ p $ \label{subsec_simple_sampling}}
@@ -1146,7 +1208,7 @@ distribution defined by the $ z _{ bsv } $. There are various refinements of thi
 A one-parameter generalization of this strategy
 introduces a (physics-motivated) \textbf{Temperature} which just adjusts the scale of the logits:
 \begin{py}
-next_token = torch.multinomial((z[:, -1] / temp).softmax(dim=-1), num_samples=1)
+	next_token = torch.multinomial((z[:, -1] / temp).softmax(dim=-1), num_samples=1)
 \end{py}
 assuming \pyinline{z} are the final logits. Larger temperature yields a larger variance in the chosen
 tokens.
@@ -1155,11 +1217,11 @@ With temperature sampling, there is still a non-zero chance of choosing an extre
 which is undesirable if you do not trust the tails of the distribution. Two common truncation
 strategies which guard against this:
 \begin{itemize}
-    \item \textbf{Top-}$ k $: Only choose from the top-$ k $ most-probable examples (re-normalizing
-        the probabilities across those $ k $ samples)
-    \item \textbf{Top-}$  p$: Only choose from the top-however-many most-probable examples whose
-    probabilities sum to $ p $ (again re-normalizing probabilities). This is also sometimes called
-    \textbf{nucleus sampling}.
+	\item \textbf{Top-}$ k $: Only choose from the top-$ k $ most-probable examples (re-normalizing
+	      the probabilities across those $ k $ samples)
+	\item \textbf{Top-}$  p$: Only choose from the top-however-many most-probable examples whose
+	      probabilities sum to $ p $ (again re-normalizing probabilities). This is also sometimes called
+	      \textbf{nucleus sampling}.
 \end{itemize}
 
 
@@ -1186,35 +1248,40 @@ intermediate values we may want to cache for later. We follow \cite{pope2022effi
 In the second, iterative part of generation (the \textbf{decode} stage) we have now appended
 one-or-more tokens to the sequence and we again want the next prediction, i.e. \pyinline{z[:, -1, :]}
 for the last-layer outputs $ z _{ bsd } $. In this stage, we can avoid re-processing the entire $ x
-_{ bs } $ tensor and get away with only processing the final, newly added token, \textit{if} we are
-clever and cache old results.
+		_{ bs } $ tensor and get away with only processing the final, newly added token, \textit{if} we are
+clever and cache old results (and accept a very reasonable approximation).
 
 The important pieces occur in the \pyinline{CausalAttention} layer, as that's the only location in
 which the sequence index is not completely parallelized across operations. Referring back to
 Sec.~\ref{subsubsec_attn_layer}, given the input $ z _{ bsd } $ of the \pyinline{CausalAttention}
 layer, the re-weighted value vectors\footnote{Summed over $ s' $, but concatenating the different $
-a $ values over the $ f $ dimension.} $ w ^{ a }_{ bss'd } v ^{ a } _{ bs'f } $ are the key objects
+		a $ values over the $ f $ dimension.} $ w ^{ a }_{ bss'd } v ^{ a } _{ bs'f } $ are the key objects
 which determine the next-token-prediction, which only depends on the $ s=-1 $ index values.
 Therefore, we can cut out many steps and minimum requirements are:
 \begin{itemize}
-    \item Only the attention weights $ w ^{ a }_{ bss'd }$ with $ s=-1 $ are needed
-    \item The only query values $ q ^{ a }_{ bsd } $ needed to get the above are those with $ s=-1 $
-    \item Every component of the key and value vectors $k ^{ a }_{ bsd }, v ^{ a }_{ bsd } $ is
-        needed, but because of the causal mask, all components except for the last in the sequence
-        dimension ($ s\neq -1 $) are the same as they were in the last iteration, up to a shift
-        by one position\footnote{That is, if we add a label $ t $ which indexes the iteration of generation
-        we are on, then $ z ^{ (t+1) } _{ bsd } = z ^{ (t)} _{ b (s-1)d } $ for every tensor in the network, except for when $ s=-1 $, the last position.}
+	\item Only the attention weights $ w ^{ a }_{ bss'd }$ with $ s=-1 $ are needed
+	\item The only query values $ q ^{ a }_{ bsd } $ needed to get the above are those with $ s=-1 $
+	\item Every component of the key and value vectors $k ^{ a }_{ bsd }, v ^{ a }_{ bsd } $ is
+          needed, but because of the causal mask, all components except for the last in the sequence
+          dimension ($ s\neq -1 $) are the same as they were in the last iteration, up to a shift by
+          one position\footnote{This is where we need to accept an approximation. With an infinite
+          context window, if we add a label $ t $ which indexes the iteration of generation we are
+          on, then we would have that $ z ^{ (t+1) } _{ bsd } = z ^{ (t)} _{ b (s-1)d } $ for every
+          tensor in the network, except for when $ s=-1 $, the last position. The finiteness of the
+          context window makes this statement slightly inaccurate because we can only ever keep $ K
+          $ positions in context and the loss of the early tokens upon sliding the window over will
+          slightly change the values in the residual stream.}
 \end{itemize}
 
 So, we are led to the concept of the \textbf{kv-cache} in which we cache old key and query vectors for generation.
 The cache represents a tradeoff: fewer FLOPs are needed for inference, but the memory costs are potentially
 enormous, since the size of the cache grows with batch size and sequence length:
 \begin{align}
-    M _{ {\rm kv-cache}  } &= 2pBDLS /T\ ,  \label{eq_kv_cache_memory}
+	M _{ {\rm kv-cache}  } & = 2pBDLS /T\ ,  \label{eq_kv_cache_memory}
 \end{align}
 in the general case with tensor-parallelism. This can easily be larger than the memory costs of the
 model parameter: $ M _{ {\rm params}  } ^{ {\rm  inference}  } \sim p N _{ {\rm params}  } \sim p LD
-^{ 2 }  $ (dropping $ \Ocal \left( 1 \right)  $ factors), so that the cache takes up more memory
+		^{ 2 }  $ (dropping $ \Ocal \left( 1 \right)  $ factors), so that the cache takes up more memory
 when $ BS \gtrsim D $. Also, re-processing an entire input sequence every time also exhibits the
 usual $\sim S ^{ 2 }  $ FLOPs dependence, but this is reduced to being \textit{linear} in $ S $
 when the kv-cache is used.
@@ -1231,26 +1298,26 @@ The essentials of inference-time math, much of it based on \cite{kipply_inferenc
 \paragraph{Naive Inference} Processing a single \pyinline{(B, S, D)}-shaped tensor to generate a single
 next input costs the $ 2BSN _{ {\rm params}  } $ FLOPs we found for the forwards-pass in
 Sec.~\ref{sec_flops_training}. Memory costs just come from the parameters themselves: $ M _{ {\rm
-infer}  }^{ {\rm naive}  }=pN _{ {\rm params}  } $. Per the analysis of App.~\ref{app_compute_mem_bound},
+					infer}  }^{ {\rm naive}  }=pN _{ {\rm params}  } $. Per the analysis of App.~\ref{app_compute_mem_bound},
 naive inference is generally compute-bound and so the per-token-latency is approximately\footnote{Assuming we
-do the naive thing here and generate the next token in a similarly naive way, shifting over the
-context window.}  $  2BSN _{ {\rm params}  }/ \lambda _{ {\rm FLOP/s}  } $ where the FLOPs bandwidth
+	do the naive thing here and generate the next token in a similarly naive way, shifting over the
+	context window.}  $  2BSN _{ {\rm params}  }/ \lambda _{ {\rm FLOP/s}  } $ where the FLOPs bandwidth
 in the denominator is again defined in App.~\ref{app_compute_mem_bound}.
 
 \paragraph{kv-Cache Inference}
 The FLOPs requirements for the hidden-dimension matrix multiplies during generation are $2BN _{ {\rm params}  } $,
 since we are only processing a single token, per previous results.   This is in addition to the up-front cost of $ 2BSN _{
-{\rm params}} $ for the prefill. But, the memory requirements are raised to
+			{\rm params}} $ for the prefill. But, the memory requirements are raised to
 \begin{align}
-    M _{ {\rm infer}  }^{ {\rm kv-cache}  } &=pN _{ {\rm params}  } + 2pBDLS/T\ .
+	M _{ {\rm infer}  }^{ {\rm kv-cache}  } & =pN _{ {\rm params}  } + 2pBDLS/T\ .
 \end{align}
 Inference now has a computational-intensity of
 \begin{align}
-    \frac{ C _{ {\rm infer} } ^{ {\rm kv-cache} } }{ M _{ {\rm infer}  }^{ {\rm kv-cache}  } } & \sim \frac{ BD }{ S } \ ,
+	\frac{ C _{ {\rm infer} } ^{ {\rm kv-cache} } }{ M _{ {\rm infer}  }^{ {\rm kv-cache}  } } & \sim \frac{ BD }{ S } \ ,
 \end{align}
 dropping $ \Ocal \left( 1 \right)  $ factors, is now memory-bound (again, see
 App.~\ref{app_compute_mem_bound}), and has per-token-latency of approximately $ M _{ {\rm infer} }/
-\lambda _{ {\rm mem} }$, unless the batch-size is very large.
+	\lambda _{ {\rm mem} }$, unless the batch-size is very large.
 
 
 \paragraph{Intra-Node Communication} For $ T $-way tensor parallelism, two \pyinline{AllReduce}s are
@@ -1258,8 +1325,8 @@ needed, one for each \pyinline{MLP} and each \pyinline{CausalAttention} layer, w
 accelerator is sending $ pBDS  $ bytes of data (see Sec.~\ref{subsec_tensor_parallelism}). This
 requires a total of $ 4\left ( T-1 \right ) pBDS/T \approx 4pBDS $ bytes to be transferred between
 workers in the tensor-parallel group (see Foot.~\ref{foot_all_reduce}), taking a total of $ \sim  4pBDLS/
-\lambda _{ {\rm comms} }  $ time for the model as a whole. For an A100 80GiB, \pyinline{torch.float16} setup, this is $ \sim
-BDS \times  10 ^{ -11 } \ {\rm sec} $
+	\lambda _{ {\rm comms} }  $ time for the model as a whole. For an A100 80GiB, \pyinline{torch.float16} setup, this is $ \sim
+	BDS \times  10 ^{ -11 } \ {\rm sec} $
 
 
 \paragraph{Latency}
@@ -1269,12 +1336,12 @@ BDS \times  10 ^{ -11 } \ {\rm sec} $
 \section{Case Study: \href{https://huggingface.co/tiiuae/falcon-40b-instruct?_sm_vck=j230jZ2ssDkkPfJTfRt6tjQNTQZJ65N7VDWmj5Ff6f3jZ3mhh2Pq}{Falcon-40B}}
 
 Let's work through the details of the kv-cache for Falcon-40B\footnote{Falcon actually uses
-multi-query attention, which changes the computations here, but we will pretend it does not in this
-section for simplicity.} with $ D=8192 $, $ L=60 $, $ S=2048 $.  In half, $ p=2 $ precision, the model weights just about fit on an
+	multi-query attention, which changes the computations here, but we will pretend it does not in this
+	section for simplicity.} with $ D=8192 $, $ L=60 $, $ S=2048 $.  In half, $ p=2 $ precision, the model weights just about fit on an
 80GiB A100, but this leaves no room for the cache, so we parallelize $ T $ ways across $ T $ GPUs,
 assumed to be on the same node. The total memory costs are then
 \begin{align}
-    M _{ {\rm  total} } &\approx  \frac{ {\rm 80GiB} + {\rm 4GiB}\times B }{ T } \ .
+	M _{ {\rm  total} } & \approx  \frac{ {\rm 80GiB} + {\rm 4GiB}\times B }{ T } \ .
 \end{align}
 This means that in order to hit the compute-bound threshold of $ B \sim 200 $ (see
 App.~\ref{app_compute_mem_bound}) we need at least $ T=4 $ way parallelism.  Taking $ T=4 $, and
@@ -1282,7 +1349,7 @@ running at capacity with $ B \sim 200$ so that we are compute-bound, the per-ite
 computation alone is approximately $ \frac{2BN _{ {\rm params} } }{ \lambda _{ {\rm FLOP/s} } T} \sim
 $13ms, i.e. we can give $ \sim $200 customers about $ \sim $75 tokens-per-second at this
 rate\footnote{Average human reading speed is about $ \sim 185$ words/minute, or $ \sim 4
-$tokens/sec.}, if this were the only latency consideration.
+	$tokens/sec.}, if this were the only latency consideration.
 
 
 
@@ -1303,44 +1370,44 @@ $tokens/sec.}, if this were the only latency consideration.
 
 We loosely follow the conventions of \cite{korthikanti2022reducing}.  Common parameters:
 \begin{itemize}
-    \item $ A $: number of attention heads
-    \item $ B $: microbatch size
-    \item $ C $: compute (FLOPs)
-    \item $ D $: the hidden dimension size
-    \item $ E $: expansion factor for MLP layer (usually $ E=4 $)
-    \item $ K $: the block size (maximum sequence length\footnote{In the absence of methods such as         ALiBi \cite{ALiBi}  can be used to extend the sequence length at inference time.})
-    \item $ L $: number of transformer layers
-    \item $ N _{ {\rm params}  } $: total number of model parameters
-    \item $ P $: pipeline parallel size
-    \item $ S $: input sequence length
-    \item $ T $: tensor parallel size
-    \item $ V $: vocabulary size
-    \item $ t $: various timescales
-    \item $ p $: the precision of the elements of a tensor in bytes
-    \item $ \lambda  $: various rates, e.g. $ \lambda _{ {\rm mem}  } $ is memory bandwidth
+	\item $ A $: number of attention heads
+	\item $ B $: microbatch size
+	\item $ C $: compute (FLOPs)
+	\item $ D $: the hidden dimension size
+	\item $ E $: expansion factor for MLP layer (usually $ E=4 $)
+	\item $ K $: the block size (maximum sequence length\footnote{In the absence of methods such as         ALiBi \cite{ALiBi}  can be used to extend the sequence length at inference time.})
+	\item $ L $: number of transformer layers
+	\item $ N _{ {\rm params}  } $: total number of model parameters
+	\item $ P $: pipeline parallel size
+	\item $ S $: input sequence length
+	\item $ T $: tensor parallel size
+	\item $ V $: vocabulary size
+	\item $ t $: various timescales
+	\item $ p $: the precision of the elements of a tensor in bytes
+	\item $ \lambda  $: various rates, e.g. $ \lambda _{ {\rm mem}  } $ is memory bandwidth
 \end{itemize}
 Where it makes sense, we try to use the lower-case versions of these characters to denote the
 corresponding indices on various tensors. For instance, an input tensor with the above batch size,
 sequence length, and vocabulary size would be written as $ x _{ bsv } $, with $ b \in \left \{ 0,
-\ldots, B - 1 \right \} $, $ s \in \left \{ 0, \ldots, S - 1\right \} $, and $  v \in \left \{ 0,
-    \ldots, V -1\right \}$ in math notation, or as \mintinline{python}{x[b, s, v]} in code.  Typical
-    transformers belong to the regime
+	\ldots, B - 1 \right \} $, $ s \in \left \{ 0, \ldots, S - 1\right \} $, and $  v \in \left \{ 0,
+	\ldots, V -1\right \}$ in math notation, or as \mintinline{python}{x[b, s, v]} in code.  Typical
+transformers belong to the regime
 \begin{gather}
-V \gg D, S \gg L, A \gg P, T \ .  \label{app_eq_transformers_approxs}
+	V \gg D, S \gg L, A \gg P, T \ .  \label{app_eq_transformers_approxs}
 \end{gather}
 For instance, GPT-2 and GPT-3 \cite{gpt2radford2019language, gpt3brown2020language} have $ V \sim
-\Ocal \left( 10 ^{ 4 } \right)  $, $ S, L \sim \Ocal \left( 10 ^{ 3 } \right)  $, $ L, A \sim \Ocal
-\left( 10 ^{ 2 } \right)  $. We will often assume also assume that\footnote{This condition ensures
-    that the $ \Ocal \left( S ^{ 2 } \right)  $ FLOPs cost from self-attention is negligible
-compared to $ \Ocal \left( D ^{ 2 } \right)  $ contributions from other matrix multiplies.  It
-should be noted that in Summer 2023 we are steadily pushing into the regime where this condition
-does \textit{not}  hold.} $ S \lesssim D $ or the weaker\footnote{This condition ensures that the
-cost of reading the $ \Ocal \left( D ^{ 2 } \right)  $ weights is more than the cost of reading in
-the $ \Ocal \left( BSD \right)  $ entries of the intermediate representations.} $ BS \lesssim D $.
+	\Ocal \left( 10 ^{ 4 } \right)  $, $ S, L \sim \Ocal \left( 10 ^{ 3 } \right)  $, $ L, A \sim \Ocal
+	\left( 10 ^{ 2 } \right)  $. We will often assume also assume that\footnote{This condition ensures
+	that the $ \Ocal \left( S ^{ 2 } \right)  $ FLOPs cost from self-attention is negligible
+	compared to $ \Ocal \left( D ^{ 2 } \right)  $ contributions from other matrix multiplies.  It
+	should be noted that in Summer 2023 we are steadily pushing into the regime where this condition
+	does \textit{not}  hold.} $ S \lesssim D $ or the weaker\footnote{This condition ensures that the
+	cost of reading the $ \Ocal \left( D ^{ 2 } \right)  $ weights is more than the cost of reading in
+	the $ \Ocal \left( BSD \right)  $ entries of the intermediate representations.} $ BS \lesssim D $.
 
 As indicated above,  we use zero-indexing. We also use \pyinline{python} code
 throughout\footnote{Written in a style conducive to latex, e.g. no type-hints and clarity
-prioritized over optimization.}  and
+	prioritized over optimization.}  and
 write all ML code using standard \pyinline{torch} syntax. To avoid needing to come up with new
 symbols in math expressions we will often use expressions like $ x \leftarrow f(x) $ to refer to performing
 a computation on some argument ($ x $) and assigning the result right back to the variable $ x $
@@ -1350,60 +1417,61 @@ Physicists often joke (half-seriously) that Einstein's greatest contribution to 
 summation notation in which index-sums are implied by the presence of repeated indices and summation
 symbols are entirely omitted. For instance, the dot product between two vectors would be written as
 \begin{align}
-    \vec{x} \cdot \vec{y} &= \sum _{ i } x _{ i } y _{ i } \equiv x _{ i } y _{  i }
-    \label{app_eq_einstein_sum}
+	\vec{x} \cdot \vec{y} & = \sum _{ i } x _{ i } y _{ i } \equiv x _{ i } y _{  i }
+	\label{app_eq_einstein_sum}
 \end{align}
 We use similar notation which is further adapted to the common element-wise deep-learning
 operations.  The general rule is that if a repeated index appears on one side of an equation, but
 not the other, then a sum is implied, but if the same index appears on both sides, then it's an
 element-wise operation. The Hadamard-product between two matrices $ A $ and $ B $ is just
 \begin{align}
-  C _{ ij } &= A _{ ij } B _{ ij }\ .
+	C _{ ij } & = A _{ ij } B _{ ij }\ .
 \end{align}
 Einstein notation also has implementations available for \pyinline{torch}:
 \href{https://rockt.github.io/2018/04/30/einsum}{see this blog post on \pyinline{einsum}} or the
 \href{https://einops.rocks/1-einops-basics/}{\pyinline{einops}} package.
 
- We also put explicit indices on operators such as Softmax to help clarify the relevant
- dimension, e.g. we would write the softmax operation over the $ b $-index of some batched
- tensor $ x _{ bvd\ldots } $ as
- \begin{align}
-     s _{ bvd\ldots } &= \frac{ e^{ x _{ bv d\ldots}  } }{ \sum _{ v = 0 } ^{  v= V-1 } e^{ x _{
-     bvd\ldots } } } \equiv
-     \Sm _{ v } \ x _{ bvd\ldots }
-     \ , \label{app_eq_einstein_softmax}
- \end{align}
- indicating that the sum over the singled-out $ v $-index is gives unity.
+We also put explicit indices on operators such as Softmax to help clarify the relevant
+dimension, e.g. we would write the softmax operation over the $ b $-index of some batched
+tensor $ x _{ bvd\ldots } $ as
+\begin{align}
+	s _{ bvd\ldots } & = \frac{ e^{ x _{ bv d\ldots}  } }{ \sum _{ v = 0 } ^{  v= V-1 } e^{ x _{
+						bvd\ldots } } } \equiv
+	\Sm _{ v } \ x _{ bvd\ldots }
+	\ , \label{app_eq_einstein_softmax}
+\end{align}
+indicating that the sum over the singled-out $ v $-index is gives unity.
 
 \section{Collective Communications \label{app_collective_communications} }
 
 A quick refresher on common distributed
 \href{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html}{communication
-primitives}.  Consider $ N $ workers with tensor data $ x ^{ (n) }  $ of some arbitrary shape
+	primitives}.  Consider $ N $ workers with tensor data $ x ^{ (n) }  $ of some arbitrary shape
 \pyinline{x.shape}, where $ n $ labels the worker and any indices on the data are suppressed. The $
-n=0 $ worker is arbitrarily denoted the \textit{chief}.  Then, the primitive operations are:
+	n=0 $ worker is arbitrarily denoted the \textit{chief}.  Then, the primitive operations are:
 \begin{itemize}
-    \item \pyinline{Broadcast}: all workers receive  the chief's data, $ x ^{ (0) }  $.
-    \item \pyinline{Gather}: all workers communicate their data $ x _{ n } $ to the chief, e.g. in a
-        concatenated array $ [x ^{ 0 }, x ^{ 1 }, \ldots , x ^{ N-1 }] $.
-    \item \pyinline{Reduce}: data is \pyinline{Gather}-ed to the chief, which then performs some
-        operation (\pyinline{sum}, \pyinline{max}, \pyinline{concatenate}, etc.) producing a new tensor $
-        x' $ on the chief worker.
-    \item \pyinline{AllGather}: \pyinline{Gather} followed by \pyinline{Broadcast}, such that all
-        data $ x ^{ (n) } $ is communicated to all workers.
-    \item \pyinline{AllReduce}: generalization of \pyinline{Reduce} where all
-        workers receive the same tensor $ x' $ produced by operating on the $ x ^{ (n) } $.
-        Equivalent to a \pyinline{Reduce} followed by \pyinline{Broadcast}, or a
-        \pyinline{ReduceScatter} followed by a \pyinline{AllGather} (the more efficient
-        choice\footnote{The former strategy scales linearly with the number of worker, while the
-            latter strategy underlies ``ring" \pyinline{AllReduce} which is (nearly) independent of
-            the number of workers: if each worker carries data of size $ D $ which is to be
-            \pyinline{AllReduce}-d, a total of $ \frac{ 2 \left ( N-1 \right )D }{ N } $ elements need to be passed around.
-           \href{https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/}{See this blog
-                post for a nice visualization} or \cite{bandwidthOptimalAllReduce2009} for a
-            relevant paper.\label{foot_all_reduce}}).
-    \item \pyinline{ReduceScatter}: a reducing operation is applied to the $ x ^{ (n) } $ to produce
-        a $ x' $ of the same shape, but each worker only receives a slice $ 1/N $ of the result.
+	\item \pyinline{Broadcast}: all workers receive  the chief's data, $ x ^{ (0) }  $.
+	\item \pyinline{Gather}: all workers communicate their data $ x _{ n } $ to the chief, e.g. in a
+	      concatenated array $ [x ^{ 0 }, x ^{ 1 }, \ldots , x ^{ N-1 }] $.
+	\item \pyinline{Reduce}: data is \pyinline{Gather}-ed to the chief, which then performs some
+	      operation (\pyinline{sum}, \pyinline{max}, \pyinline{concatenate}, etc.) producing a new tensor $
+		      x' $ on the chief worker.
+	\item \pyinline{AllGather}: all data $ x ^{ (n) } $ is communicated to all workers. Functionally
+	      equivalent to a \pyinline{Gather} followed by \pyinline{Broadcast}.
+	\item \pyinline{AllReduce}: all workers receive the same tensor $ x' $ produced by operating on
+	      the $ x ^{ (n) } $ with \pyinline{sum}, \pyinline{mean}, etc. Functionally equivalent to a
+	      \pyinline{Reduce} followed by \pyinline{Broadcast}, or a \pyinline{ReduceScatter} followed
+	      by a \pyinline{AllGather} (the more efficient choice\footnote{The former strategy scales
+		      linearly with the number of worker, while the latter strategy underlies ``ring"
+		      \pyinline{AllReduce} which is (nearly) independent of the number of workers: if each
+		      worker carries data of size $ D $ which is to be \pyinline{AllReduce}-d, a total of $
+			      \frac{ 2 \left ( N-1 \right )D }{ N } $ elements need to be passed around.
+		      \href{https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/}{See this blog
+			      post for a nice visualization} or \cite{bandwidthOptimalAllReduce2009} for a relevant
+		      paper.\label{foot_all_reduce}}).
+	\item \pyinline{ReduceScatter}: a reducing operation (\pyinline{sum}, \pyinline{mean}, etc.) is
+	      applied to the $ x ^{ (n) } $ to produce a $ x' $ of the same shape, but each worker only
+	      receives a slice $ 1/N $ of the result.
 \end{itemize}
 
 
@@ -1412,14 +1480,14 @@ n=0 $ worker is arbitrarily denoted the \textit{chief}.  Then, the primitive ope
 
 Basic information about relevant hardware considerations. Much of the following is from the
 \href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html}{NVIDIA
-docs}.
+	docs}.
 
 
 
 \subsection{NVIDIA GPU Architecture}
 
 NVIDIA GPUs consist of some amount of relatively-slow off-chip DRAM memory\footnote{This is the number usually reported when
-discussing a given GPU, e.g. 32GiB for the top-of-the-line A100}, relatively-fast on-chip SRAM, and
+	discussing a given GPU, e.g. 32GiB for the top-of-the-line A100}, relatively-fast on-chip SRAM, and
 a number of \textbf{streaming multiprocessors} (SMs) which perform the parallel computations.  Inside
 more-recent GPUs, the SMs carry both ``CUDA cores" and "Tensor cores", where the latter are used for matrix-mulitiplies
 and the former for everything else.
@@ -1427,32 +1495,78 @@ and the former for everything else.
 
 A few numbers of primary importance:
 \begin{itemize}
-    \item The rate at which data can be transferred from DRAM to SRAM ($ \lambda _{ {\rm mem} } $)
-    \item The number of FLOP/s, which is more fundamentally computed by multiplying the number of
-    SMs by the FLOPS/cycle of each SM for the specific operation under consideration (see the NVIDIA
-    docs) by the clock rate: $ N _{ {\rm SM} }\cdot  \lambda _{ {\rm FLOPs/cycle} }\cdot  \lambda _{
-    {\rm clock} } $
+	\item The rate at which data can be transferred from DRAM to SRAM ($ \lambda _{ {\rm mem} } $)
+	\item The number of FLOP/s, which is more fundamentally computed by multiplying the number of
+	      SMs by the FLOPS/cycle of each SM for the specific operation under consideration (see the NVIDIA
+	      docs) by the clock rate: $ N _{ {\rm SM} }\cdot  \lambda _{ {\rm FLOPs/cycle} }\cdot  \lambda _{
+			      {\rm clock} } $
 \end{itemize}
 
+The terminology and structure of the memory hierarchy is also important to understand. Types of
+memory, from slowest to fastest:
+\begin{itemize}
+	\item \textbf{Global} memory is the slow, but plentiful, off-chip DRAM. It is the type of memory
+	      typically used as kernel arguments
+	\item \textbf{Constant} memory is read only and accessible by all threads in a given block. The
+	      size of arrays in constant memory must be known at compile time
+	\item \textbf{Local Memory} is similarly slow to global memory, but more plentiful than register
+	      memory, and privately to individual threads and is allocated from within a kernel. When
+	      registers run out, local memory fills the gap
+	\item \textbf{Shared} memory is shared between all threads in a given block. Shared memory is
+	      effectively a user-controlled cache. The size of arrays in shared memory must  be known at
+	      compile time
+	\item \textbf{Registers} hold scalar values and small tensors whose values are known at compile
+	      time. They are local to each thread and they are plentiful since each thread needs its own
+	      set of registers: 65,536 = $ 2 ^{ 16 } $ registers per SM an A100.
+\end{itemize}
+\href{https://www.youtube.com/watch?v=QQceTDjA4f4&t=2124s}{An excellent video overview of CUDA and NVIDIA GPU architecture which covers some of the above is here.}
+
+\subsection{CUDA Programming Model}
+
+The CUDA programming model uses a hierarchy of concepts:
+\begin{itemize}
+	\item \textbf{Threads}  are the fundamental unit of execution which each run the same CUDA
+	      \textbf{Kernel}, or function, on different data inputs in parallel. Threads within the same
+	      block (below) may share resources, like memory, and may communicate with each other.
+	      Individual threads are indexed
+	      through the \textbf{threadIdx} variable, which has
+	      \cudainline{threadIdx.{x, y, z}} attributes with \cudainline{threadIdx.x} in \cudainline{0, ..., blockDim.x -1}
+	      and similar.
+	\item Threads are always launched in \textbf{Warps} which consist of 32 threads.
+	\item Threads (and hence warps) are organized into 3D \textbf{blocks}. The size and indices of
+	      the blocks can be accessed through the \cudainline{blockDim} and \cudainline{blockIdx}
+	      variables, respectively, with \cudainline{blockIdx.x} in \cudainline{0, ..., gridDim.x - 1}.
+	      \cudainline{blockDim.x *blockDim.y * blockDim.z} total threads run in a block.
+	\item Blocks are organized into 3D \textbf{groups}. The size of the gird dimensions can be
+	      accessed through the \cudainline{gridDim} variable, with similar attributes to the above. \\
+	      \cudainline{gridDim.x * gridDim.y * gridDim.z} total blocks run in a grid.
+\end{itemize}
+
+The number of threads which can be launched in a given block is hardware limited; A100 80GiB GPUs
+can run up to 1024 threads in a SM at a time (32 blocks with 32 threads each), for instance. Hence,
+block and grid sizes need to be adjusted to match the problem size. There are also important memory
+access considerations here. The 1024 threads which can be launched can also read sequentially from
+memory and efficient usage implies that choosing the block size such that we are doing these reads
+as often as possible is ideal.
 
 \subsection{NVIDIA GPU Stats \label{app_gpu_stats}}
 
 
 Summary of some relevant NVIDIA GPU statistics:
 \begin{center}
-\begin{tabular}{| c |c| c |c |c| c| }\hline
-    GPU & Memory & $ \lambda _{ {\rm FLOP/s }  } $& $ \lambda _{ {\rm mem}  } $  & $ \lambda _{ {\rm math}  } $  & $ \lambda _{ {\rm comms}  } $\\ \hline
-    \href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf}{A100} & 80GiB&  312  TFLOP/s &   2.0 TiB/s  & 156 FLOPS/B & 300 GiB/s \\ \hline
-    \href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf}{A100}& 40GiB&  312  TFLOP/s &   1.6 TiB/s  & 195 FLOPS/B & 300 GiB/s \\ \hline
-    \href{https://images.nvidia.com/content/technologies/volta/pdf/volta-v100-datasheet-update-us-1165301-r5.pdf}{V100} & 32GiB&  130  TFLOP/s &   1.1 TiB/s  & 118  FLOPS/B & 16 GiB/s \\ \hline
-\end{tabular}
+	\begin{tabular}{| c |c| c |c |c| c| }\hline
+		GPU                                                                                                                                  & Memory & $ \lambda _{ {\rm FLOP/s }  } $ & $ \lambda _{ {\rm mem}  } $ & $ \lambda _{ {\rm math}  } $ & $ \lambda _{ {\rm comms}  } $ \\ \hline
+		\href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf}{A100} & 80GiB  & 312  TFLOP/s                    & 2.0 TiB/s                   & 156 FLOPS/B                  & 300 GiB/s                     \\ \hline
+		\href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf}{A100}                       & 40GiB  & 312  TFLOP/s                    & 1.6 TiB/s                   & 195 FLOPS/B                  & 300 GiB/s                     \\ \hline
+		\href{https://images.nvidia.com/content/technologies/volta/pdf/volta-v100-datasheet-update-us-1165301-r5.pdf}{V100}                  & 32GiB  & 130  TFLOP/s                    & 1.1 TiB/s                   & 118  FLOPS/B                 & 16 GiB/s                      \\ \hline
+	\end{tabular}
 \end{center}
 where
 \begin{itemize}
-    \item $ \lambda _{ {\rm  FLOP/s}  } $ is flops bandwidth (for \pyinline{float16/bfloat16}  multiply-accumulate ops)
-    \item $ \lambda _{ {\rm  mem}  } $ is memory bandwidth
-    \item $ \lambda _{ {\rm  math}  } = \frac{  \lambda _{ {\rm FLOP/s}  } }{ \lambda _{ {\rm mem} } } $ is \href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch}{math bandwidth}
-    \item $ \lambda _{ {\rm  comms}  } $ is one-way communication bandwidth
+	\item $ \lambda _{ {\rm  FLOP/s}  } $ is flops bandwidth (for \pyinline{float16/bfloat16}  multiply-accumulate ops)
+	\item $ \lambda _{ {\rm  mem}  } $ is memory bandwidth
+	\item $ \lambda _{ {\rm  math}  } = \frac{  \lambda _{ {\rm FLOP/s}  } }{ \lambda _{ {\rm mem} } } $ is \href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch}{math bandwidth}
+	\item $ \lambda _{ {\rm  comms}  } $ is one-way communication bandwidth
 \end{itemize}
 A useful approximate conversion rate is that $ 1 \ {\rm TFLOP/s} \approx 100\  {\rm PFLOP/day} $.
 
@@ -1460,21 +1574,6 @@ Important practical note: the $ \lambda _{ {\rm FLOP/s} } $ numbers should be ta
 Out-of-the box, \pyinline{torch.float16} matrix-multiplies in \pyinline{torch} with well-chosen
 dimensions tops out around $ \sim 250 $ FLOPS/s
 
-\subsection{Intra- and Inter-Node Communication}
-
-For intra-node communication, GPUs are connected by either PCIe or NVLink, generally.
-\begin{itemize}
-    \item \href{https://blogs.nvidia.com/blog/2023/03/06/what-is-nvidia-nvlink/}{NVLink}
-        interconnects are continually updated and achieve speeds of $ \lambda _{ {\rm comm} } ^{
-        {\rm intra} } \sim 300$ GiB/s.
-\end{itemize}
-
-
-For inter-node communication, nodes are often connected by:
-\begin{itemize}
-    \item \href{https://en.wikipedia.org/wiki/InfiniBand}{InfiniBand} apparently also achieves speeds $ \lambda _{ {\rm comm} } ^{
-        {\rm intra} } \sim 100$ GiB/s?  Haven't found a clear reference.
-\end{itemize}
 
 
 
@@ -1482,18 +1581,18 @@ For inter-node communication, nodes are often connected by:
 
 If your matrix-multiplies are not sufficiently large on, you are wasting resources
 \cite{he2022brrrrfromfirstprinciples}. The relevant parameters which determine sufficiency are $
-\lambda _{ {\rm FLOP/s}  } $ and $ \lambda _{ {\rm mem}  } $, the FLOPs and memory bandwidth,
+	\lambda _{ {\rm FLOP/s}  } $ and $ \lambda _{ {\rm mem}  } $, the FLOPs and memory bandwidth,
 respectively. The ratio $  \lambda _{ {\rm math}  } \equiv \frac{  \lambda _{ {\rm FLOP/s}  } }{
-\lambda _{ {\rm mem}  } }   $ determines how many FLOPS you must perform for each byte loaded from
+		\lambda _{ {\rm mem}  } }   $ determines how many FLOPS you must perform for each byte loaded from
 memory; see App.~\ref{app_gpu_stats}. If your computations have a FLOPs/B ratio which is larger than
 $ \lambda _{ {\rm math}  } $, then you are compute-bound (which is good, as you're maximizing
 compute), and otherwise you are memory(-bandwidth)-bound (which is bad, since your compute
 capabilities are idling). The FLOPs/B ratio of your computation is sometimes called the
 \textbf{compute intensity} or \textbf{arithmetic intensity}. When compute bound, a process takes
 time $ \sim F/\lambda _{ {\rm FLOP/s} } $, while memory-bound processes take time\footnote{Note that
-the time is not additive, e.g. compute-bound tasks do not take time $ \sim F/\lambda _{ {\rm FLOP/s}
-} +M/\lambda _{ {\rm mem} }$ because they are not sequential: compute and memory-communications can
-be concurrent.} $ \sim M/\lambda _{ {\rm mem} } $.
+	the time is not additive, e.g. compute-bound tasks do not take time $ \sim F/\lambda _{ {\rm FLOP/s}
+		} +M/\lambda _{ {\rm mem} }$ because they are not sequential: compute and memory-communications can
+	be concurrent.} $ \sim M/\lambda _{ {\rm mem} } $.
 
 
 
@@ -1504,7 +1603,7 @@ weight-matrix $ W _{ d d' } $, $ p \left ( BDS +D ^{ 2 } \right ) $ bytes must b
 DRAM to SRAM at a rate $ \lambda _{ {\rm  mem}  } $, after which we perform $ 2BSD ^{ 2 } $ FLOPs,
 and write the \pyinline{(B, S, D)}-shaped  result back to DRAM again, for a ratio of
 \begin{align}
-    \frac{ 1 }{ p } \frac{ BDS }{ 2BS + D } \ \left ( {\rm FLOPs/B} \right )  \ .
+	\frac{ 1 }{ p } \frac{ BDS }{ 2BS + D } \ \left ( {\rm FLOPs/B} \right )  \ .
 \end{align}
 We want to compare this against $ \lambda _{ {\rm math}  } $, which from
 App.~\ref{app_gpu_stats} we take to be $ \Ocal \left( 100\  {\rm FLOPs/B} \right)  $, and plugging
@@ -1528,30 +1627,46 @@ arithmetic intensity is therefore $ \Ocal \left( BS \right)  $ and so training i
 usual scenario, even at small $B \sim \Ocal \left( 1 \right)  $ batch sizes (as long as individual operations in the network don't suffer from outlandish
 memory-boundedness). The problem during inference is that (if using the kv-cache; see
 Sec.~\ref{sec_kv_cache}) we only need to process a \textit{single} token at a time and so $ S
-\longrightarrow 1 $ in the numerator in the preceding, while the denominator is also weighed down by
+	\longrightarrow 1 $ in the numerator in the preceding, while the denominator is also weighed down by
 the  kv-cache in the attention layers.
 
 In more detail, the \pyinline{MLP} layers just process $ S=1 $ length tensors during generation, but
 are insensitive to the kv-cache, so their intensity comes from just setting $ S=1 $ in the above,
 \begin{align}
-   \sim \frac{ BD  }{ B + D } \ ,
+	\sim \frac{ BD  }{ B + D } \ ,
 \end{align}
 dropping $\Ocal \left( 1 \right)  $ factors now, while the attention layers have a ratio of the form
 \begin{align}
-    \sim \frac{ BDS+BD ^{ 2 } }{ BD + D ^{ 2 }+BDS }\ ,
+	\sim \frac{ BDS+BD ^{ 2 } }{ BD + D ^{ 2 }+BDS }\ ,
 \end{align}
 where the last term in the denominator is due to the cache. Now at small $B \sim \Ocal \left( 1
-\right)  $ batch sizes, both intensities reduce to $ \Ocal \left( B \right)  $, which is
+	\right)  $ batch sizes, both intensities reduce to $ \Ocal \left( B \right)  $, which is
 insufficient to be compute-bound.  In the large $ B \gtrsim D/S $ limit, they at least become $ \Ocal \left( D
-\right)  $ and $ \Ocal \left( 1 + \frac{ D }{ S } \right)  $, respectively, which may be enough to be
+	\right)  $ and $ \Ocal \left( 1 + \frac{ D }{ S } \right)  $, respectively, which may be enough to be
 compute-bound, but it's hard to even get into this regime. Note, the importance of the ratio $ D/S
 $. The hidden dimension fixes the context length scale at which inference can never be
 compute-bound, in the absence of additional tricks not considered here\footnote{One such trick: the
-    multi-query attention of Sec.~\ref{subsec_multi_query_attn} improves everything a factor of $
-A $: the large batch regime is $ B \gtrsim \frac{ D }{ AS }$ and the intensity ratio becomes
-$ \Ocal \left( 1 + \frac{ D }{ AS } \right)  $. An analysis equivalent to the one performed here can be found in the original paper
-\cite{shazeer2019fast}.}.
+	multi-query attention of Sec.~\ref{subsec_multi_query_attn} improves everything a factor of $
+		A $: the large batch regime is $ B \gtrsim \frac{ D }{ AS }$ and the intensity ratio becomes
+	$ \Ocal \left( 1 + \frac{ D }{ AS } \right)  $. An analysis equivalent to the one performed here can be found in the original paper
+	\cite{shazeer2019fast}.}.
 
+\subsection{Intra- and Inter-Node Communication}
+
+For intra-node communication, GPUs are connected by either PCIe or NVLink, generally.
+\begin{itemize}
+	\item \href{https://blogs.nvidia.com/blog/2023/03/06/what-is-nvidia-nvlink/}{NVLink}
+	      interconnects are continually updated and achieve speeds of $ \lambda _{ {\rm comm} } ^{
+			      {\rm intra} } \sim 300$ GiB/s.
+\end{itemize}
+
+
+For inter-node communication, nodes are often connected by:
+\begin{itemize}
+	\item \href{https://en.wikipedia.org/wiki/InfiniBand}{InfiniBand} apparently also achieves speeds $ \lambda _{ {\rm comm} } ^{
+			      {\rm intra} } \sim 100$ GiB/s?  Haven't found a clear reference. But in any case, the
+	      bandwidth is divided amongst the GPUs in the node, leading to a reduction by $ \sim 8 $.
+\end{itemize}
 
 \section{Batch Size, Compute, and Training Time \label{app_batch_size}}
 
@@ -1565,30 +1680,30 @@ and a balance between the two concerns should be struck.
 
 Consider vanilla SGD and study how the training loss changes with each step.  We randomly sample $ B
 $ datapoints $ x \in \Dcal$ from the dataset through some i.i.d. process\footnote{The below uses
-sampling with replacement, while in practice we sample without replacement, but the different is
-negligible for all practical cases.}. Each corresponding gradient $ \bfg (x) = \partial _{ w} \Lcal
-\left ( w, x \right ) $ is itself a random variable whose average is the true gradient across the
+	sampling with replacement, while in practice we sample without replacement, but the different is
+	negligible for all practical cases.}. Each corresponding gradient $ \bfg (x) = \partial _{ w} \Lcal
+	\left ( w, x \right ) $ is itself a random variable whose average is the true gradient across the
 entire dataset $ \bar{\bfg} $ and we take the variance to be
 \begin{align}
-    {\rm Var}[\bfg (x), \bfg (x')]&=\Sigma
+	{\rm Var}[\bfg (x), \bfg (x')] & =\Sigma
 \end{align}
 for some matrix $ \Sigma  $ with (supressed) indices spanning the space of model weights. Taking instead the mean
 of a sum of such estimates, $ \bfg _{ B }\equiv \frac{ 1 }{ B } \sum _{ x \in \Bcal} \bfg (x) $,
 the mean stays the same, but the variance reduces in the usual way: $ {\rm Var}[\bfg _{ B } (x),
-\bfg _{ B }(x')]=\Sigma /B$.
+			\bfg _{ B }(x')]=\Sigma /B$.
 
 Study the mean loss across the entire dataset: $ \Lcal \left ( w \right ) = \langle
-\Lcal \left ( w, x \right) \rangle$. Using SGD we take a step $ w \longrightarrow w -\eta \bfg _{ B }   $
+	\Lcal \left ( w, x \right) \rangle$. Using SGD we take a step $ w \longrightarrow w -\eta \bfg _{ B }   $
 and change the loss as
 \begin{align}
-    \Lcal \left ( w -\eta \bfg _{ B } \right )  = \Lcal \left ( w  \right ) -\eta \bar{\bfg }\cdot
-    \bfg _{ B } + \frac{ 1 }{ 2 } \bfg _{ B }\cdot  H \cdot  \bfg _{ B } + \Ocal \left( \bfg _{ B }
-    ^{ 3 } \right)\ ,
+	\Lcal \left ( w -\eta \bfg _{ B } \right )  = \Lcal \left ( w  \right ) -\eta \bar{\bfg }\cdot
+	\bfg _{ B } + \frac{ 1 }{ 2 } \bfg _{ B }\cdot  H \cdot  \bfg _{ B } + \Ocal \left( \bfg _{ B }
+	^{ 3 } \right)\ ,
 \end{align}
 where $ H $ is the true hessian of the loss over the entire dataset at this value of the weights.
 Taking the expectation value and minimizing the results  over $ \eta  $ gives the optimal choice:
 \begin{align}
-    \eta _{ \star } &= \frac{ \eta _{ {\rm  max} } }{ 1 + \frac{ B _{ {\rm  noise} } }{ B } }\ , \quad  \eta _{ {\rm  max} }\equiv \frac{ \bar{\bfg } ^{ 2 } }{ \bar{\bfg }\cdot  H \cdot  \bar{\bfg } } , \quad  B _{ {\rm  noise} } \equiv \frac{ \Tr H \cdot \Sigma  }{  \bar{\bfg }\cdot  H \cdot  \bar{\bfg }}\ .
+	\eta _{ \star } & = \frac{ \eta _{ {\rm  max} } }{ 1 + \frac{ B _{ {\rm  noise} } }{ B } }\ , \quad  \eta _{ {\rm  max} }\equiv \frac{ \bar{\bfg } ^{ 2 } }{ \bar{\bfg }\cdot  H \cdot  \bar{\bfg } } , \quad  B _{ {\rm  noise} } \equiv \frac{ \Tr H \cdot \Sigma  }{  \bar{\bfg }\cdot  H \cdot  \bar{\bfg }}\ .
 \end{align}
 Notably, the above supports the usual rule of thumb that the learning rate should be increased
 proportionally to the batch size, at least whenever $ B \ll B _{ {\rm  noise} } $. The diminishing
@@ -1596,62 +1711,62 @@ returns of pushing batch sizes past $ B _{ {\rm noise} } $ are also evident. In 
 expensive to compute the Hessian, but thankfully the entirely unjustified approximation in which the
 Hessian is multiple of the identity such that
 \begin{align}
-    B _{ {\rm noise} } &\approx B _{ {\rm  simple} } \equiv \frac{ \Tr \Sigma  }{ \bar{\bfg } ^{ 2 } }\ ,
+	B _{ {\rm noise} } & \approx B _{ {\rm  simple} } \equiv \frac{ \Tr \Sigma  }{ \bar{\bfg } ^{ 2 } }\ ,
 \end{align}
 is somehow a decent approximation empirically, and an estimator can be created for $ B _{ {\rm noise} } $
 in a data-parallel setup; see \cite{mccandlish2018empirical} or
 \href{https://github.com/crowsonkb/k-diffusion/blob/ab527a9a6d347f364e3d185ba6d714e22d80cb3c/k_diffusion/gns.py#L1}{Katherine
-Crowson's implementation} or \href{https://github.com/EleutherAI/gpt-neox/blob/408e29d9c746a02d842917bb7447c5c4be0b42d4/megatron/gradient_noise_scale/gradient_noise_scale.py#L1}{neox} for more.
+	Crowson's implementation} or \href{https://github.com/EleutherAI/gpt-neox/blob/408e29d9c746a02d842917bb7447c5c4be0b42d4/megatron/gradient_noise_scale/gradient_noise_scale.py#L1}{neox} for more.
 
 
 We can further characterize the trade-off between compute and optimization steps. The expected
 decrease in loss per update is then
 \begin{align}
-\langle \delta \Lcal \rangle  &\approx \frac{ \eta _{ {\rm  max} } }{ 1 + \frac{ B _{ {\rm  noise} } }{ B } } \bar{\bfg } ^{2 } + \Ocal \left( \eta _{ {\rm max} } ^{ 2 } \right) \ ,
+	\langle \delta \Lcal \rangle & \approx \frac{ \eta _{ {\rm  max} } }{ 1 + \frac{ B _{ {\rm  noise} } }{ B } } \bar{\bfg } ^{2 } + \Ocal \left( \eta _{ {\rm max} } ^{ 2 } \right) \ ,
 \end{align}
 that is, we would need $ 1 + \frac{ B _{ {\rm noise} } }{ B } $ times as many SGD steps to make the
 same progress we would have as compared to full-batch SGD. If $ S _{ {\rm  min} } $ is the number of
 steps that would have been needed for full-batch SGD, we would need $ S=S _{ {\rm  min} } + S _{
-{\rm  min} } \frac{ B _{ {\rm noise} } }{ B } $ steps for minibatch SGD.  The total number of
+			{\rm  min} } \frac{ B _{ {\rm noise} } }{ B } $ steps for minibatch SGD.  The total number of
 examples seen is correspondingly $ E = S _{ {\rm  min} } \times  \left ( B _{ {\rm  noise} } +B
-\right)\equiv E _{ {\rm min} }+ S _{ {\rm  min} }B $, and so we see the trade-off between SGD steps
+	\right)\equiv E _{ {\rm min} }+ S _{ {\rm  min} }B $, and so we see the trade-off between SGD steps
 $ S $ and compute $ E $ alluded to above.  These relations can be written as\footnote{The analysis
-here is simplified in that it assumes that the noise scale and the chosen batch size are both
-time-independent. There is confusing logic treating the more general case where both
-$ B _{ {\rm noise} } $ and $ B $ vary with step in \cite{mccandlish2018empirical}, but in any case,
-the ultimate relations they use are effectively the same.}
+	here is simplified in that it assumes that the noise scale and the chosen batch size are both
+	time-independent. There is confusing logic treating the more general case where both
+	$ B _{ {\rm noise} } $ and $ B $ vary with step in \cite{mccandlish2018empirical}, but in any case,
+	the ultimate relations they use are effectively the same.}
 \begin{align}
-    \left ( \frac{ S }{ S _{ {\rm  min} } }-1 \right )\left ( \frac{ E }{ E _{ {\rm min} } }-1 \right ) &=1
+	\left ( \frac{ S }{ S _{ {\rm  min} } }-1 \right )\left ( \frac{ E }{ E _{ {\rm min} } }-1 \right ) & =1
 \end{align}
 which represent hyperbolic Pareto frontier curves. So, solutions are of the form $ S=\left ( \alpha
-+1 \right )S _{ {\rm  min} } $, $ E=\left ( \frac{ 1 }{ \alpha  } +1 \right )E _{ {\rm  min} } $
+	+1 \right )S _{ {\rm  min} } $, $ E=\left ( \frac{ 1 }{ \alpha  } +1 \right )E _{ {\rm  min} } $
 and since $E=BS $ the corresponding batch size is $ B _{ {\rm crit} } \equiv  \frac{ 1 }{ \alpha  }
-B _{ {\rm noise} }$. The parameter $ \alpha $ characterizes how much you value the trade-off between
+	B _{ {\rm noise} }$. The parameter $ \alpha $ characterizes how much you value the trade-off between
 these two factors and a reasonable balance is the $ \alpha =1 $ solution for which $S = 2S _{ {\rm
-min} } $, $ E=2E _{ {\rm min} } $ and $ B _{ {\rm crit} }= B _{ {\rm  noise} } $ exactly.
+					min} } $, $ E=2E _{ {\rm min} } $ and $ B _{ {\rm crit} }= B _{ {\rm  noise} } $ exactly.
 
 Correspondingly, in \cite{mccandlish2018empirical} they suggest training at precisely this batch
 size.  But it seems much more relevant to balance time against compute directly, rather than
 optimization steps vs compute. Modeling the total training time by $ T\approx S \left ( \kappa B + \sigma  \right)$
 for some $ \kappa ,\sigma  $ to model compute costs\footnote{Computation and communication costs
-each scale with $ B $, the optimizer step does not (and maybe some overhead?), for instance.}, then
+	each scale with $ B $, the optimizer step does not (and maybe some overhead?), for instance.}, then
 the above is equivalent to
 \begin{align}
-    T &= \frac{\left ( E _{ {\rm min} } + S _{ {\rm min} } B \right) \left ( \kappa B+ \sigma   \right ) }{  B  }\ .
+	T & = \frac{\left ( E _{ {\rm min} } + S _{ {\rm min} } B \right) \left ( \kappa B+ \sigma   \right ) }{  B  }\ .
 \end{align}
 which has a minimum at
 \begin{align}
-    B &= \sqrt{\frac{ \sigma E _{ {\rm min} } }{ \kappa S _{ {\rm min} }   }}\ .
+	B & = \sqrt{\frac{ \sigma E _{ {\rm min} } }{ \kappa S _{ {\rm min} }   }}\ .
 \end{align}
 for which the total time is
 \begin{align}
-    T _{ {\rm  min} } &= \left ( \sqrt{\kappa E _{ {\rm  min} }} - \sqrt{\sigma S _{ {\rm min} }} \right ) ^{ 2 }\ .
+	T _{ {\rm  min} } & = \left ( \sqrt{\kappa E _{ {\rm  min} }} - \sqrt{\sigma S _{ {\rm min} }} \right ) ^{ 2 }\ .
 \end{align}
 In comparison, the total time for the $ B _{ {\rm  crit} } = \frac{ E _{ {\rm min} } }{ S _{ {\rm
-min} } } $ strategy of \cite{mccandlish2018empirical} gives $ T _{ {\rm  min} } = 2 \left ( \kappa E
-_{ {\rm min} } + \sigma S _{ {\rm min} } \right ) $ which is a factor of $ \frac{ 2 }{ 1- \frac{
-    \sqrt{\sigma \kappa B _{ {\rm noise} } } }{ \kappa B _{ {\rm noise}  } + \sigma } } $ larger.
-    So, this seems like a better choice of optimal batch size, if you value your time.
+						min} } } $ strategy of \cite{mccandlish2018empirical} gives $ T _{ {\rm  min} } = 2 \left ( \kappa E
+	_{ {\rm min} } + \sigma S _{ {\rm min} } \right ) $ which is a factor of $ \frac{ 2 }{ 1- \frac{
+			\sqrt{\sigma \kappa B _{ {\rm noise} } } }{ \kappa B _{ {\rm noise}  } + \sigma } } $ larger.
+So, this seems like a better choice of optimal batch size, if you value your time.
 
 
 \section{Cheat Sheet \label{app_cheat_sheet}}
@@ -1660,7 +1775,7 @@ Collecting all of the most fundamental equations, given to various degrees of ac
 
 Number of model parameters:
 \begin{align}
-    N _{ {\rm params} } &=   (4+2E)LD ^{ 2 } + VD+ \Ocal \left( DL \right) \approx   \left ( 4+2E \right )LD ^{ 2 }\ ,
+	N _{ {\rm params} } & =   (4+2E)LD ^{ 2 } + VD+ \Ocal \left( DL \right) \approx   \left ( 4+2E \right )LD ^{ 2 }\ ,
 \end{align}
 assuming no sharding of the embedding matrix.
 
@@ -1669,29 +1784,29 @@ assuming no sharding of the embedding matrix.
 
 Memory costs for mixed-precision training:
 \begin{align}
-    M _{ {\rm model} } &=p _{ {\rm model} } N _{ {\rm params} } \nn
-    M _{ {\rm optim} }  &=  \left ( s _{ {\rm states} }+1 \right) \times p _{ {\rm master } } N _{ {\rm params} } \nn
-    M _{ {\rm act}  } ^{ {\rm  total}  } & =\frac{ 2BDLS   \left ( p(E+4) + 1   \right ) }{ T }
-    + \frac{ ABLS ^{ 2 } \left ( 2p+1\right ) }{ T }  + \Ocal \left( BSV \right)
+	M _{ {\rm model} }                   & =p _{ {\rm model} } N _{ {\rm params} } \nn
+	M _{ {\rm optim} }                   & =  \left ( s _{ {\rm states} }+1 \right) \times p _{ {\rm master } } N _{ {\rm params} } \nn
+	M _{ {\rm act}  } ^{ {\rm  total}  } & =\frac{ 2BDLS   \left ( p(E+4) + 1   \right ) }{ T }
+	+ \frac{ ABLS ^{ 2 } \left ( 2p+1\right ) }{ T }  + \Ocal \left( BSV \right)
 \end{align}
-where $ s _{ {\rm  optim} } $ is the number of optimizer states, e.g. $ s=0 $ for SGD and $ s=2 $
+where $ s _{ {\rm  states} } $ is the number of optimizer states, e.g. $ s=0 $ for SGD and $ s=2 $
 for Adam. FLOPs total:
 \begin{align}
-    F _{ {\rm total}  } ^{ {\rm  model}  } &\approx 12 BDLS \left ( S + \left ( 2+E \right )D \right ) .
+	F _{ {\rm total}  } ^{ {\rm  model}  } & \approx 12 BDLS \left ( S + \left ( 2+E \right )D \right ) .
 \end{align}
 
 
- \section{TODO}
+\section{TODO}
 
- \begin{itemize}
- \item Tokenizers
- \item Activations
- \item Flash attention
- \item BERT family
- \item Residual stream
- \item Scaling laws
- \item Cheat sheet
- \end{itemize}
+\begin{itemize}
+	\item Tokenizers
+	\item Activations
+	\item Flash attention
+	\item BERT family
+	\item Residual stream
+	\item Scaling laws
+	\item Cheat sheet
+\end{itemize}
 
 \bibliographystyle{latex_goon/utphys}
 \bibliography{bibliography}
