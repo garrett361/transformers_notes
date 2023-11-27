@@ -396,8 +396,95 @@ where
 \end{align}
 
 
+\subsection{Flash Attention \label{subsed_flash_attention}}
 
 
+Flash Attention \cite{dao2022flashattention, dao2023flashattention2} optimizes the self attention
+computation by never materializing the $ \Ocal \left( S ^{ 2 } \right)  $ attention scores in
+off-chip memory. This increases the arithmetic intensity of the computation and reduces the
+activation memory required, at the expense of needing recomputation in the backwards pass.
+
+
+The central idea is to decompose the attention computation in the following way. Dropping the batch
+index, let $ q _{ sd }, k _{ sd }, v _{ sd } $ be the queries, keys, and values, and $ z _{ sd } $
+be the final output. Splitting into attention heads as in $ q _{ sd } = q _{ s(ah) }\longrightarrow q _{ sah } $
+and similar the computation is
+\begin{align}
+    z _{ sah } &= \Sm _{ s' } \left ( q _{ sah' } k _{ s'ah' } \right ) v _{ s'ah }
+\end{align}
+which is the concatenated as $ z _{ s(d) }\longrightarrow  z _{ sd } $ to get the result.
+
+The $ \Ocal \left( A S ^{ 2 } \right)  $ attention scores $ \Sm _{ s' } \left ( q _{ sah' } k _{
+s'ah' } \right ) $ are expensive to shuttle back and forth from off-chip to on-chip memory and are a
+costly activation memory component. To this end, Flash Attention functions by further splitting $ q,
+z $ as in $ q _{ sd }= q _{ (ir)(ah) }\longrightarrow  q _{ airh }  $, and similar for $ z $, and $ k,v
+$ where $ k _{ sd }= k _{ (jc)(ah) }\longrightarrow  k _{ ajch }  $, and similar for $ v $, so that
+the above reads
+\begin{align}
+    z _{ airh } &= \Sm _{ j'c' } \left ( q _{ airh' } k _{ j'c'ah' } \right ) v _{ j'c'ah } \nn
+     &= P _{ airj'c' } v _{ jc'ah }
+\end{align}
+where range of the new indices is dictated by the available on-chip memory and is analyzed below.
+
+The algorithm functions by performing the sums over $ j, c', h' $  on-chip. We will jump
+right to the second version of the algorithm.  The algorithm operates on each attention head
+independently and we omit the head index $ a $ (and batch index $ b $) for clarity, and also change
+the notation from \cite{dao2023flashattention2} somewhat. In addition to the final outputs $ z _{ irh } $,
+the algorithm saves the $ S $-shaped Softmax denominators $ \ell _{ ir } $  which are related to the
+softmax probabilities as in
+\begin{align}
+    P _{ irjc } &= \frac{  \exp \left (   q _{ irh } k _{ jch }\right)}{ \ell _{ ir } } \ .
+\end{align}
+Because only the Softmax outputs are needed to compute the Softmax derivative \eqref{eq_softmax_derivative},
+this is sufficient data to perform the backwards pass, at the cost of a little recomputation in the form
+of $ q, k $ matrix-multiplies.
+
+
+
+The entire forward-pass algorithm is as follows. We capitalize on-chip tensors and leave off-chip
+tensors lower-cased.
+
+\begin{algo}{Flash Attention Version Two (Forward)}
+\State Initialize off-chip tensors $ z _{ irh },  \ell _{ ir }$ to zeros
+\For{ $ i \in \ldots  $}
+    \State Move  $ q _{ irh }$ on-chip, instantiate $Z _{ ijrh }, L _{ ijr }$ to zeros and $M _{ ijr }$ to $ -\infty $ on-chip.
+\For{ $ j \in \ldots  $}
+    \State Move  $ k_{ jch },v _{ jch }$ on-chip
+    \State $ S _{ ijrc } \gets q _{ irh } k _{ jch } $  \Comment $ S _{ ijrc } $ is a temp, only needed for one $ i,j $ iter
+    \State $ M _{ ijr }  \gets \max(M _{ i(j-1)r },  \max _{ c } S _{ ijrc } ) $
+    \State $ \tilde{P} _{ ijrc} \gets \exp \left ( S _{ ijrc } - M _{ ijr } \right ) $
+    \State $ L _{ ijr }  \gets e^{ M _{ i(j-1)r } - M _{ ijr }}L _{ ijr } + \sum _{ c }\tilde{P} _{ ijrc }$ \Comment Correct, update denominators
+    \State $ Z _{ ijrh } \gets   e^{ M _{ i(j-1)r } - M _{ ijr } }Z _{ ijrh } +\tilde{P} _{ ijrc}v _{ jch }$ \Comment Correct, update numerators
+\EndFor
+\State $ z _{ irh } \gets \frac{1}{L _{ i(-1)r }} Z _{ i(-1)rh }$ \Comment Divide $ z $ by last $ j  $ value of $ L _{ ijc } $
+    \State $ \ell _{ ir } \gets M _{ i(-1)r }+\ln L _{ i(-1)r }$ \Comment Store sufficient statistics
+    \State Write  $z _{ irh } ,  \ell _{ ir }$ to off-chip memory
+\EndFor
+
+\label{algo_fa_v2}
+\end{algo}
+
+
+
+Essentially, one just computes partial values for each term in the softmax sum, correcting old
+results and adding new terms to the sum with each iteration. Whereas vanilla attention requires $
+\Ocal \left( S ^{ 2 }+ DS \right)  $ memory accesses per attention head, flash attention requires
+fewer. Let $ M $ be the amount of on-chip memory in bytes and let $ R  $ be the range of $ r \in
+\left \{ 0, \ldots , R-1 \right \} $ and similar for other indices. Being able to to fit all of the
+above tensors in memory requires $ CH + RH + RC \lesssim \Ocal \left( M \right)  $ most of the memory
+accesses above come from the $ q, z $ accesses in the inner loop, which access $ \Ocal \left( \frac{
+HS ^{ 2 } }{ C } \right)  \lesssim \Ocal \left(\frac{ H ^{ 2}S ^{ 2 } }{ M }  \right) $ bytes of
+memory, using the inequality on memory. Since $ M \sim 10 ^{ 5 } $ bytes on 2023 GPUs, this is a win
+for typical values of $ H \sim 10 ^{ 2 } $.
+
+
+Flash attention is also a big win for activation memory: a naive algorithm has a $ \Ocal \left( ABS
+^{ 2 } \right)  $ per-layer contribution to activation memory due to needing to save the attention
+weights, but these are discarded and re-computed for flash attention.  The only additional memory
+cost comes from the $ \Ocal \left( ABS \right)  $ elements in the $ \ell _{ abs } $ statistics, which are
+dominated by the $ \Ocal \left( BSD \right)  $ costs from needing to save inputs, and hence negligible.
+
+\newpage
 
 \part{Training}
 
