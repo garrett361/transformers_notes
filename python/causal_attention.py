@@ -50,6 +50,10 @@ class CausalAttention(nn.Module):
         S = queries[0].shape[1]
         norm = math.sqrt(self.head_dim)
         non_causal_attn_scores = [(q @ k.transpose(-2, -1)) / norm for q, k in zip(queries, keys)]
+        # Note: this mask shape is a bit of a hack to make generation from the KV cache work without
+        # specifying an extra boolean. When queries and keys have different sequence lengths and the
+        # queries are of seq_len == 1,p the query attends to all of the keys; effectively there is
+        # no mask at all.
         causal_attn_scores = [
             a.masked_fill(self.causal_mask[:, :S, :S] == 0, float("-inf"))
             for a in non_causal_attn_scores

@@ -235,7 +235,7 @@ chunked is more efficient} sample code for such a  \pyinline{CausalAttention} la
 	using sequence-parallelism, it will be more natural to separate out the final \pyinline{Dropout} layer
 	and combine it with the subsequent \pyinline{LayerNorm}, as they are sharded together; see
 	Sec.~\ref{subsec_seq_parallelism}. The same is true for the \pyinline{MLP} layer below.}:
-\pyfile[firstline=8,lastline=68]{python/causal_attention.py}
+\pyfile[firstline=8,lastline=72]{python/causal_attention.py}
 
 The parameter count is dominated by the weight matrices which carry $ 4 D ^{ 2 } $ total parameters per layer.
 
