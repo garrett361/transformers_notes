@@ -4,8 +4,6 @@
 \title{Decoder-Only Transformers}
 \author{Garrett Goon}
 \begin{document}
-%
-%\maketitle
 
 \vspace{1truecm}
 %
@@ -18,7 +16,8 @@
 
 \begin{abstract}
 
-	Notes on various aspects of Decoder-Only Transformers.
+    Notes on various aspects of Decoder-Only Transformers. Conventions are in
+    App.~\ref{app_conventions}.
 
 \end{abstract}
 
@@ -47,10 +46,11 @@ parameters which define the network can be found in App.~\ref{app_conventions}.
 \end{figure}
 
 
-At a high level, decoder-only transformers take in a series of word-like objects, called tokens, and
-are trained to predict the next token in the sequence. Equivalently, given some initial text,
-transformers can be used to give a prediction for the likelihood of any possible continuation of that
-text. An outline of the mechanics:
+At a high level, decoder-only transformers take in an ordered series of word-like objects, called
+tokens, and are trained to predict the next token in the sequence. Given some initial
+text, transformers can be used to give a prediction for the likelihood of any possible continuation
+of that text. An outline of the mechanics\footnote{This describes the vanilla architecture; almost
+every component is modified in the available variants.}:
 \begin{enumerate}
 	\item Raw text is \textbf{tokenized} and turned into a series of integers\footnote{There are
 		      about \href{https://github.com/ray-project/llm-numbers}{1.3 tokens per word}, on average.} whose values lie in \pyinline{range(V)}, with $ V $ the vocabulary
@@ -73,15 +73,17 @@ text. An outline of the mechanics:
 	      \end{enumerate}
 	      Importantly, there are \textbf{residual connections} around each of these\footnote{This
 		      gives rise to the concept of the \textbf{residual stream} which each transformer block reads
-		      from and writes back to repeatedly.} (the arrows in Fig.~\ref{fig_transformers_architecture}).
+              from and writes back to repeatedly.} (the arrows in
+              Fig.~\ref{fig_transformers_architecture}), meaning that the output of each block is
+              added back to its original input.
 	\item Finally, we convert the \pyinline{(B, S, D)}-shaped
 	      tensors to \pyinline{(B, S, V)}-shaped ones, $ y _{ bsv } $. This is the role of
 	      the \textbf{language model head} (which is often just the embedding layer used in an inverse
 	      manner.)
 	\item  The $ y _{ bsv } $ predict what the next token will be, i.e. $ x _{ bs+1 } $, having seen the \textbf{context}
           of the first $ s $ tokens in the sequence. Specifically, removing the batch index for
-          simplicity, a \pyinline{Softmax}  of $ y _{ bsv } $ gives the conditional probability $ p _{ bsv
-          } = P(t _{ s+1 }:t _{ s } \ldots t _ {}) $ for the indicated series of tokens. Because of
+          simplicity, a \pyinline{Softmax}  of $ y _{ sv } $ gives the conditional probability $ p _{ sv
+          } = P(t _{ s+1 }|t _{ s } \ldots t _ {0}) $ for the indicated series of tokens. Because of
           the chain rule of probability, these individual probabilities can be combined to form the
           probability that any sequence of tokens follows a given initial seed\footnote{In more
           detail, these probabilities are created by products: $ P(t _{ s+n } \ldots t _{ s+1}| t _{
@@ -95,7 +97,6 @@ Each batch (the $ b $-index) is processed independently. We omitted \pyinline{La
 through the architecture in more detail.
 
 
-We break down the various components below in detail.
 
 \subsection{Embedding Layer and Positional Encodings \label{subsubsec_embedding_and_pe} }
 
@@ -115,7 +116,7 @@ hopefully make it easier for the architecture to pick up on the relative positio
 	the $ s $-index of each such input in the absence of positional encodings. } This layer maps $ z _{
 			bsd} \leftarrow z _{ bsd } + p _{ sd } $, with $ p _{ sd } $ the positional encoding tensor.
 
-The above components require $ (V+S)D \approx VD $ parameters per layer.
+The above components require $ (V+S)D \approx VD $ parameters per model.
 
 
 
@@ -135,55 +136,59 @@ input tensor $ z _{ bsd } $ whose mean and variance over the $ s $-index are $ \
 \end{align}
 where $ \gamma _{ d }, \beta  _{ d } $ are the trainable scale and bias parameters. In
 \pyinline{torch}, this is a \pyinline{nn.LayerNorm(D)} instance.
-
 Since there are two \pyinline{LayerNorm} instances in each transformer block, these components require
 $ 2D $ parameters per layer.
 
 We will continue discussing \pyinline{LayerNorm} instances in what follows in order to adhere to the
 usual construction and to discuss methods like sequence-parallelism in their original form (see
-Sec.~\ref{subsec_seq_parallelism}), but note: the  $ \gamma _{ d }, \beta _{ d } $ parameters are
-\textit{totally redundant} if \pyinline{LayerNorm} is immediately followed by a \pyinline{Linear}
-layer, as it is in the standard transformers architecture. Explicitly, we have the equivalence:
+Sec.~\ref{subsec_seq_parallelism}), but note: the data-independent \pyinline{LayerNorm}
+transformations are completely redundant when immediately followed by a \pyinline{Linear} layer,
+since both act linearly on their inputs and \pyinline{Linear} is already the most general
+data-independent linear transformation. Explicitly, the  $ \gamma _{ d }, \beta _{ d } $ parameters
+can be absorbed into the linear parameters as in
 \begin{align}
-	\left (     x _{ bsd } \gamma _{ d } + \beta _{ d } \right )  W _{d d'}    + b _{ d' } & = x _{ bsd }
+	\left (     z _{ bsd } \gamma _{ d } + \beta _{ d } \right )  W _{d d'}    + b _{ d' } & = z _{ bsd }
 	W' _{ d d' } + b' _{ d' } \ , \quad W' _{ d d' } \equiv  \gamma _{  d} W _{ d d' } \ , \quad b' _{
 	d' } \equiv b _{ d' } + \beta _{ d }W _{ d d' } \ .
 \end{align}
-The scaling the biases performed by these
-parameters can be equivalently performed by the weight matrix and bias (if included) in
-\pyinline{Linear} layer.
+That is, these transformations can be equivalently performed by the weight matrix and bias (if
+included) in \pyinline{Linear} layer\footnote{Note the importance of data-independence here: the
+data-dependent subtraction of the mean and division by the standard deviation cannot be absorbed
+for all elements in a batch.  Note that because the usual training algorithms are not covariant
+under parameter redefinitions, the above unfortunately does not imply that removing
+\pyinline{LayerNorm}s will have no effect on training dynamics.}.
 
 \subsection{Causal Attention \label{subsubsec_attn_layer} }
 
-The \textbf{causal attention} layer is the most complex layer. It features $ A $  triplets\footnote{
-	We assume throughout that $ A $ divides the hidden dimension $ D $ evenly.} of weight
+\textbf{Causal attention} is the most complex layer. It features $ A $  sets of weight
 matrices\footnote{There are also bias terms, but we will often neglect to write them explicitly or
-	account for their (negligible)
-	parameter count.}  $ Q ^{ a } _{ d f }, K ^{ a } _{ df }, V ^{ a } _{ df }  $
-where $ a \in \left \{ 0, \ldots, H-1 \right \} $ and $ f \in \left \{ 0, \ldots, D/A \right \} $.
+    account for their (negligible)
+	parameter count.}  $ Q  _{ d e a}, K  _{ de a}, V  _{ dea }  $
+where $ a \in \left \{ 0, \ldots, A-1 \right \} $ and $ e \in \left \{ 0, \ldots, D/A \right \} $,
+where $ D $ is assumed perfectly divisible by $ A $.
 From these, we form three different vectors:
 \begin{align}
-	q ^{ a }_{ bsf } & = z _{ bsd } Q ^{ a }_{ df } \ , \quad
-	k ^{ a }_{ bsf } = z _{ bsd } K ^{ a }_{ df }  \ , \quad
-	v ^{ a }_{ bsf } = z _{ bsd } V ^{ a }_{ df }
+	q _{ bsea } & = z _{ bsd } Q _{ dea } \ , \quad
+	k _{ bsea } = z _{ bsd } K _{ dea }  \ , \quad
+	v _{ bsea } = z _{ bsd } V _{ dea }
 \end{align}
 These are the \textbf{query, key, and value} tensors, respectively \footnote{There are of course
 	many variants of the architecture and one variant which is popular in Summer 2023 is multi-query
 	attention \cite{shazeer2019fast} in which all heads share \textit{the same} key and value vectors
 	and only the query changes across heads, as this greatly reduces inference costs.}.
 
-Using the above tensors, we will then build up an \textbf{attention map}  $ w ^{ a }_{ bss' } $
+Using the above tensors, we will then build up an \textbf{attention map}  $ w _{ bss'a } $
 which corresponds to how much attention the token at position $ s $ pays to the token at
 position $ s' $.  Because we have the goal of predicting the
 next token in the sequence, we need these weights to be causal: the final prediction $ y _{ bsv } $
 should only have access to information propagated from positions $ x _{ bs'v } $ with $ s' \le s $.
-This corresponds to the condition that $ w ^{ a }_{ bss' } = 0  $ if  $ s' > s  $.
+This corresponds to the condition that $ w _{ bss'a} = 0  $ if  $ s' > s  $.
 
 These weights come from \pyinline{Softmax}-ed attention scores, which are just a normalized
 dot-product over the hidden dimension:
 \begin{align}
-	w ^{ a }_{ bss'd } & =\Sm _{ s' } \left (m _{ s s' }+\ q ^{ a }_{ bsf }k ^{ a }_{ bs'f } / \sqrt{D/A} \right
-	)\ ,  \quad {\rm s.t.} \quad \sum_{s'}w ^{ a }_{ bdss' } =1
+    w _{ bss'da } & =\Sm _{ s' } \left (m _{ s s' }+\frac{q _{ bse }k _{ bs'ea } }{ \sqrt{D/A}}  \right
+	)\ ,  \quad {\rm s.t.} \quad \sum_{s'}w _{ bdss'a } =1
 \end{align}
 The tensor $ m _{  s s' } $ is the causal mask which zeroes out the relevant attention map
 components above
@@ -193,7 +198,7 @@ components above
 		                -\infty & = s > s'
 	                \end{cases}\ ,
 \end{align}
-forcing $ w ^{ a  } _{ bss'd } =0$ for $ s> s' $. In other words, the causal mask ensures that a
+forcing $ w  _{ bss'da } =0$ for $ s> s' $. In other words, the causal mask ensures that a
 given tensor, say $ z _{ bsd } $, only has dependence on other tensors whose sequence index, say $
 	s' $, obeys $ s' \le s $.  This is crucial for inference-time optimizations, in particular the use
 of the \textbf{kv-cache} in which key-value pairs do not need to be re-computed.
@@ -206,15 +211,16 @@ normal distribution \footnote{However, in \cite{yang2022tensor} it is instead ar
 
 The weights above are then passed through a dropout layer and used to re-weigh the \textbf{value} vectors and form the tensors
 \begin{align}
-	t ^{ a }_{ bsf } & =\Dr  \left (w ^{ a }_{ bdss' } \right ) v ^{ a }_{ bs'f }
+	y _{ bse a} & =\Dr  \left (w _{ bdss' a} \right ) v _{ bs'ea }
 	\label{eq_reweighted_values}
 \end{align}
-and these $ A $ different \pyinline{(B, S, D/A)}-shaped tensors
-are then concatenated along the $ f $-direction to re-form a \pyinline{(B, S, D)}-shaped
-tensor\footnote{It is hard to come up with good index-notation for concatenation.}
+and these \pyinline{(B, S, D/A, A)}-shaped tensors
+are then concatenated along the $ e $-direction to re-form a \pyinline{(B, S, D)}-shaped
+tensor $ u _{ bsd } $
 \begin{align}
-	u _{ bsd } & = {\rm Concat}^{ a }_{ fd } \left ( t ^{ a }_{ bsf }\right )\ .
+    u _{ bsd } & = y _{ bs(e a) }
 \end{align}
+in \href{https://einops.rocks/1-einops-basics/}{\pyinline{einops}}-like notation for concatenation.
 Finally, another weight matrix $ O _{d' d } $ and dropout layer transform the output once again to get the final
 output
 \begin{align}
@@ -223,21 +229,22 @@ output
 
 For completeness, the entire operation in condensed notation with indices left implicit is:
 \begin{align}
-	z & \leftarrow \Dr \left ({\rm Concat} \ \left ( \Dr \left (\Sm  \left ( \frac{ \left ( z \cdot Q ^{ a } \right )\cdot \left ( z \cdot K ^{ a } \right )}{ \sqrt{D/A} }
-		\right)\right )\cdot z \cdot V ^{ a } \right ) \cdot O \right ) \label{eq_causal_attn}
+	z & \leftarrow \Dr \left ({\rm Concat} \ \left ( \Dr \left (\Sm  \left ( \frac{ \left ( z \cdot Q _{ a } \right )\cdot \left ( z \cdot K _{ a } \right )}{ \sqrt{D/A} }
+		\right)\right )\cdot z \cdot V _{ a } \right ) \cdot O \right ) \label{eq_causal_attn}
 \end{align}
 where all of the dot-products are over feature dimensions (those of size $ D $ or $ D/A $).
 
 Below is pedagogical\footnote{The
 code is written for clarity, not speed. An example optimization missing here: there is no need to
-form separate $ Q ^{ a },K ^{ a },V ^{ a} $ \pyinline{Linear} layers, one large layer which is later
+form separate $ Q _{ a },K _{ a },V _{ a} $ \pyinline{Linear} layers, one large layer which is later
 chunked is more efficient} sample code for such a  \pyinline{CausalAttention} layer\footnote{When
 	using sequence-parallelism, it will be more natural to separate out the final \pyinline{Dropout} layer
 	and combine it with the subsequent \pyinline{LayerNorm}, as they are sharded together; see
 	Sec.~\ref{subsec_seq_parallelism}. The same is true for the \pyinline{MLP} layer below.}:
 \pyfile[firstline=8,lastline=72]{python/causal_attention.py}
 
-The parameter count is dominated by the weight matrices which carry $ 4 D ^{ 2 } $ total parameters per layer.
+The parameter count is dominated by the weight matrices which carry $ 4 D ^{ 2 } $ total parameters
+per layer.
 
 
 \subsection{MLP \label{subsubsec_mlp} }
@@ -320,14 +327,21 @@ summarized here.
 In \cite{shazeer2019fast}, the $ A $ different key and value matrices are replaced by a single
 matrix each, while $ A$ different query-heads remain. The mechanisms are otherwise unchanged: where
 there were previously distinct key and value tensors used across different heads, we just use the same
-tensors everywhere\footnote{TODO: understand how this changes tensor-parallelism, since it naively
-	introduces $ A $-fold redundancy}.
+tensors everywhere. This is \textbf{Multi-Query Attention} (MQA).
 
 
 The primary reason for multi-query attention is that it vastly reduces the size of the kv-cache (see
 Sec.~\ref{sec_kv_cache}) during inference time, decreasing the memory-burden of the cache by a
 factor of $ A $. This strategy also reduces activation memory during training, but that is more of a
 side-effect.
+
+\subsection{Grouped Attention \label{subsec_grouped_attn}}
+
+\textbf{Grouped Query Attention} (GQA) \cite{ainslie2023gqa} is the natural extension of
+multi-query-attention to using $ 1<G<A $ matrices for key and value generation. Each of the $G$
+different keys gets matched up with $A/G$ heads (nice divisibility assumed)\footnote{Llama-2
+    \cite{touvron2023llama2} uses GQA with $ G=8 $, seemingly chosen so that each group can be
+sharded and put on its own GPU within a standard 8-GPU node.}.
 
 
 \subsection{Parallel \pyinline{MLP} and \pyinline{CausalAttention} Layers}
@@ -352,7 +366,7 @@ Note that a \pyinline{LayerNorm} instance is also removed.
 A shortcoming of traditional embeddings $ x _{ bsd } \longrightarrow x _{ bsd } + p _{ sd } $ is
 that they do not generalize very well: a model trained on such embeddings with a maximum sequence
 length $ K $ will do very poorly when evaluated on longer sequences. RoPE (Rotary Position
-Embedding) and variants thereof can extend the viable context length by more clever mechanisms with
+Embedding) \cite{su2022roformer} and variants thereof can extend the viable context length by more clever mechanisms with
 stronger implicit biases.
 
 RoPE and its variants can be motivated by a few natural conditions.  Given the queries and keys for
@@ -396,7 +410,7 @@ where
 \end{align}
 
 
-\subsection{Flash Attention \label{subsed_flash_attention}}
+\subsection{Flash Attention \label{subsec_flash_attention}}
 
 
 Flash Attention \cite{dao2022flashattention, dao2023flashattention2} optimizes the self attention
@@ -441,8 +455,8 @@ of $ q, k $ matrix-multiplies.
 
 
 
-The entire forward-pass algorithm is as follows. We capitalize on-chip tensors and leave off-chip
-tensors lower-cased.
+The entire forward-pass algorithm is as follows. We capitalize tensors which only exist on-chip and
+leave tensors which come from off-chip lower-cased.
 
 \begin{algo}{Flash Attention Version Two (Forward)}
 \State Initialize off-chip tensors $ z _{ irh },  \ell _{ ir }$ to zeros
@@ -514,7 +528,7 @@ Because the activation counting is a little more involved, it is in its own sect
 	$ \Ocal \left ( N _{ {\rm params}  } \right ) \sim \Ocal \left ( L D ^{ 2 } \right )$, only counting
 	the dominant contributions from weight matrices. Activation memory scales with the latter,
 	which for a \pyinline{(B, S, D)}-shaped input gives $ \Ocal \left ( BDLS  \right ) $ contributions
-	from tensors which preserve the input shape, as well as $ \Ocal \left( BHLS ^{ 2 } \right)  $
+	from tensors which preserve the input shape, as well as $ \Ocal \left( ABLS ^{ 2 } \right)  $
 	factors from attention matrices.
 \end{nicebox}
 
@@ -563,7 +577,19 @@ factors.  The optimizer states cost double the model itself.
 
 
 The situation is more complicated when mixed-precision is used \cite{micikevicius2018mixed}.
-The pertinent components of mixed-precision:
+The pertinent components of mixed-precision\footnote{A note on the implementation of mixed-precision
+in \pyinline{torch}: usually mixed-precision occurs by wrapping the forward pass in a context
+manager, \pyinline{torch.autocast}. The default behavior is to then create copies of some tensors
+in lower-precision and do the forward pass with those. For instance, this is done with
+matrix-multiplies whose arguments and outputs will be in \pyinline{torch.float16}, but for sums
+the inputs and outputs will all be \pyinline{torch.float32}, for vanilla mixed-precision usage.
+Consequently, any such \pyinline{torch.float16} versions of tensor will often persist effectively
+as contributors to activation memory, since the backwards pass will need those same tensors. This
+can be verified by inspecting the saved tensors: if \pyinline{z} is the output of a
+matrix-multiply in such an autocast context, \pyinline{z.grad_fn._saved_mat2} will be a
+\pyinline{torch.float16} copy of the weights used to perform the matrix-multiply. In effect, the
+cost of the model weights which are used for the actual forward pass are only materialized within
+the lifetime of the context manager.}:
 \begin{itemize}
 	\item A half-precision ($ p=2 $ bytes) copy of the model is used to perform the forwards and
 	      backwards passes
@@ -632,24 +658,28 @@ Given this, the total memory cost from activations is
 \paragraph{MLP Activations}
 
 First we pass the \pyinline{(B, S, D)}-shaped inputs into the first MLP layer. These turn into the
-\pyinline{(B, S, ED)} inputs of the non-linearity, which are then passed into the last
-\pyinline{Linear} layer, summing to $ (2E+1)BDS $ total elements thus far. Adding in the dropout
-mask, the total memory requirement across all \pyinline{MLP} layers is:
+\pyinline{(B, S, E*D)} inputs of the non-linearity, whose same-shaped outputs are then passed into
+the last \pyinline{Linear} layer, summing to $ (2E+1)BDS $ total elements thus far. Adding in the
+dropout mask, the total memory requirement across all \pyinline{MLP} layers is:
 \begin{align}
 	M _{ \rm act  } ^\texttt{MLP} & = (2Ep+p+1)BDLS\ .
 	\label{eq_mlp_actmem_vanilla}
 \end{align}
 
 
+
+
 \paragraph{LayerNorm, Residual Connections, and Other Contributions}
 
 Then the last remaining components. The \pyinline{LayerNorm} instances each have $ BDS $ inputs and
 there are two per transformer block, so $ M _{ {\rm  act}  } ^\texttt{LayerNorm} = 2pBDLS $, and
-there is an additional instance at the end of the architecture. There are two residual connections
-per block, but their inputs do not require caching (since their derivatives are independent of
-inputs). Then, there are additional contributions from pushing the last layer's outputs through the
-language-model head and computing the loss function, but these do no scale with $ L $ and are
-ultimately $ \sim \Ocal \left( \frac{ V }{ DL } \right)  $ suppressed, so we neglect them.
+there is an additional instance at the end of the architecture\footnote{Following
+\cite{korthikanti2022reducing} we will neglect this in the below sum, an $ \Ocal \left( 1/L
+\right) $ error}. There are two residual connections per block, but their inputs do not require
+caching (since their derivatives are independent of inputs). Then, there are additional
+contributions from pushing the last layer's outputs through the language-model head and
+computing the loss function, but these do not scale with $ L $ and are ultimately $ \sim \Ocal
+\left( \frac{ V }{ DL } \right)  $ suppressed, so we neglect them.
 
 
 
@@ -687,24 +717,64 @@ Plugging in numbers for the typical $ \Ocal \left( 40 \ {\rm GiB} \right)$ model
 savings at such typical scales.
 
 
+
+\begin{commentbox}{Side Note: Optimizations}
+
+The above analysis is conservative and accounts for more tensors than are actually saved in
+practice.\newline
+
+For instance, both the input and outputs of all non-linearities were counted, but there are many
+activations whose derivatives can be reconstructed from its outputs alone: $ \phi'(z)=F \left (
+\phi(z) \right ) $ for some $ F $. Examples:
+\begin{itemize}
+    \item \pyinline{ReLU}: since $ \phi(z)= z\theta(z) $, then (defining the derivative at zero to
+        be zero) $ \phi'(z) =\theta(z) = \theta \left ( \phi(z) \right) $. Correspondingly, torch
+        only uses the \pyinline{ReLU} outputs \href{https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/tools/autograd/derivatives.yaml#L2009-L2011}{to compute the derivative}
+        (there is no self arg in the \pyinline{threshold_backward(grad, result, 0)} line).
+    \item  \pyinline{tanh}: since $ \tanh'(z)=1-\tanh(z) ^{ 2 } $.
+\end{itemize}
+Other cases do not have this nice property, in which case both the inputs and outputs need to
+be stored:
+\begin{itemize}
+    \item \pyinline{GeLU} \cite{hendrycks2023gaussian}: $ \phi(z)=z\Phi(z) $ here and the derivative
+        $ \phi'(z)= \Phi(z) + \frac{ z e^{ -z ^{ 2 } /2 } }{\sqrt{2\pi}  } $, both the inputs and
+        outputs \href{https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/tools/autograd/derivatives.yaml#L2041-L2044}{must be used in the backwards pass.}.
+
+        The explicit CUDA kernel \href{https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/aten/src/ATen/native/cuda/ActivationGeluKernel.cu#L70-L84}{is here}.
+\end{itemize}
+If the inputs in each of these cases are not needed for any other part of the backwards pass, they
+are garbage collected in \pyinline{torch} soon after creation.
+
+\newline
+
+\pyinline{Softmax} is another instance where this occurs, since
+\begin{align}
+     \partial _{ i } \Sm \left ( x _{ j } \right )  &= \delta _{ ij }\Sm \left ( x _{ j } \right ) -   \Sm \left ( x _{ i } \right )  \Sm \left ( x _{ j } \right ) \label{eq_softmax_derivative}
+\end{align}
+Because of this, the actual amount of activation memory due to the attention layer after the
+forwards pass is \eqref{eq_att_actmem_vanilla} with $ 2p \longrightarrow p $ in the $ \Ocal \left( S
+^{ 2 } \right)  $ term, though the above expression better reflects the necessary peak memory.
+
+\end{commentbox}
+
 \subsection{Tensor Parallelism \label{subsec_tensor_parallelism} }
 
 
 In \textbf{Tensor Parallelism}, sometimes also called \textbf{Model Parallelism}, individual weight
 matrices are split across devices \cite{shoeybi2020megatronlm}. We consider the \pyinline{MLP} and
 \pyinline{CausalAttention} layers in turn. Assume $ T $-way parallelism such that we split some
-hidden dimension into $ T $-equal parts. The total number of workers is some $ N \ge T $ which is
-evenly divisible by $ T $. With $ N >T $ workers, the workers are partitioned into $ N/T $ groups
-and collective communications will be required within, but not across, groups\footnote{Ideally, all
-	the workers in a group reside on the same node.}. The members of a given group need to all process
-the same batch of data; data-parallelism must span different groups.
+hidden dimension into $ T $-equal parts across $ T $ workers\footnote{All $ T $ workers work on
+    processing the same batch collectively.  With $ N>T $ workers, with $ N $ perfectly divisible by
+    $ T $, there are $ N/T $ different data parallel groups. Critical-path TP communications occur
+    within each data parallel group and gradients are synced across groups. Ideally, all the workers
+    in a group reside on the same node, hence the usual $ T=8 $.}
 
 
 \begin{nicebox}{Essentials}
 	The cost of large weights can be amortized by first sharding its output dimension, resulting in
 	differing activations across group members. Later, the activations are brought back in sync via
-	an \pyinline{AllReduce}. Weights which act on the sharded-activations can also be sharded in their
-	input dimension.
+	a \pyinline{AllReduce}. Weights which act on the sharded-activations can also be sharded in their
+	input dimension. In the backwards pass, another \pyinline{AllReduce} is required.
 \end{nicebox}
 
 \paragraph{MLP}
@@ -712,28 +782,43 @@ It is straightforward to find the reasonable ways in which the weights can be pa
 suppress all indices apart from those of the hidden dimension for clarity.
 
 The first matrix multiply $ z _{ d }W ^{ 0 } _{ d e } $ is naturally partitioned across the output
-index, which spans the expanded hidden dimension $ e\in \left \{ 0, \ldots , EH-1 \right \} $. This
+index, which spans the expanded hidden dimension $ e\in \left \{ 0, \ldots , ED-1 \right \} $. This
 functions by splitting the weight matrix across its output indices across $ T $ devices:  $ W ^{ 0 }
-		_{ d e } \longrightarrow W ^{ 0t } _{ d e }$, where in the split weights $ t\in \left \{ 0,
-	\ldots , T-1  \right \} $, and $ e \in \left \{ t\frac{  EH}{ T } ,
-	\ldots ,\left ( t+1 \right ) \frac{ EH }{ T } \right \} $. Note that each worker will have to store
-all components of the input $ z $ for their backward pass, and an \pyinline{AllReduce} operation
-(see App.~\ref{app_collective_communications}) will be needed to collect gradient shards from other
-workers.
+_{ d e }= W ^{ 0 }_{ d (f t) } \equiv  \bar{W} ^{ 0 } _{ d f \bar{t} }$ (again in \pyinline{einops}-like
+notation, with bars denoting that the tensor and particular indices are sharded; see
+App.~\ref{app_conventions}), where in the split weights $ \bar{t}\in \left \{ 0, \ldots , T-1
+\right \} $, and $ f \in \left \{ 0, \ldots , \frac{ ED }{ T } -1\right \} $. Each of the $ T  $
+workers compute one shard of $ z _{ d }\bar{W} ^{ 0 }_{ df \bar{t} } $, i.e. each has a different
+value of $ \bar{t} $. Note that each worker will have to store all components of the input $ z $ for
+their backward pass, and in the backwards pass \pyinline{AllReduce} operation (see
+App.~\ref{app_collective_communications}) will be needed\footnote{This is needed at the step of
+computing the gradient with respect to the original input. At the first step of a sharded
+computation when each worker gets $ y _{ e \bar{t} } = z _{ d } W _{ de\bar{t} } $ for one value of
+$ \bar{t} $, they only hold this slice of the activations. In order to compute $ \partial _{ z _{ d } }
+\Lcal=  \partial _{ y _{ e \bar{t} } } \Lcal \times W _{ de \bar{t} }$, the $ \bar{t} $ sum must be
+computed by an \pyinline{AllReduce} } to collect gradient shards from other.
 
+Let the partial outputs from the previous step be $ \bar{z} _{ ft }  $ (batch-index suppressed),
+which are \pyinline{(B, S, E*D/T, T)}-shaped, with the final dimension sharded across workers. The
+non-linearity $ \phi $ acts element wise, and using the updated $ \bar{z} _{ f \bar{t} }   $ to
+compute the second matrix multiply requires a splitting the weights as in $ W ^{ 1 } _{ e d' }= W ^{
+1 }_{ (ft)d' } \equiv \bar{W} ^{ 1 } _{  f \bar{t} d'}$ (dividing up the incoming $ e $ dimension),
+such that the desired output is computed as in $  \bar{z} _{ f \bar{t} }\cdot \bar{W} ^{ 1 }_{ f
+\bar{t}d' }$, sum over $ \bar{t} $ implied. Each device has only $\bar{t} $ component in the sum (a
+\pyinline{(B, S, D)}-shaped tensor) and an \pyinline{AllReduce} is used to give all workers the
+final result. This \pyinline{AllReduce} is the only forward-pass collective
+communication\footnote{The amount of communicated data is $ \Ocal \left( BSD \right)$.}.
 
-Let the partial outputs from the previous step again be $ z _{ e } ^{ t } $, which are
-\pyinline{(B, S, E*A/T)}-shaped. The non-linearity $ \phi $ acts element wise, and using the subsequent
-$ z _{ e } ^{ t }  $ to compute the second matrix multiply requires a splitting the weights as in $ W ^{ 1 }
-		_{ e d } \longrightarrow W ^{ 1t } _{  e d}$ (dividing up the $ e $ dimension), such that the desired output is computed as in
+One-line summary of the parallel decomposition:
 \begin{align}
-	z _{ e }\cdot W ^{ 1 }_{ ed } & =z _{ e }^{ t }\cdot W ^{ 1t }_{ ed } \ ,
+ z _{ sd' } \leftarrow   \phi \left (z _{ d }W ^{ 0 }_{ de }\right )W ^{ 1 } _{ ed' } &=\phi \left (z _{ d }\bar{W} ^{ 0 }_{ df \bar{t} }\right )\bar{W} ^{ 1 } _{ f \bar{t}d' } \ .
 \end{align}
-sum over $ t $ implied, with each device computing one term in the sum over $ t $. Every device is thus
-left holding a \pyinline{(B, S, D)}-shaped tensor which must be \pyinline{AllReduce}-d over the
-\pyinline{D}-dimension. Note that no \pyinline{AllReduce} is needed for the
-backwards pass, however.
-
+The progression of tensor shapes held by any single worker is
+\begin{enumerate}
+    \item \pyinline{(B, S, D)}
+    \item \pyinline{(B, S, E*D/T)}
+    \item \pyinline {(B, S, D)}
+\end{enumerate}
 
 
 \begin{figure}[ht]
@@ -747,27 +832,60 @@ backwards pass, however.
 \end{figure}
 
 
-\paragraph{Attention} The computations for each the $ A $ individual attention heads, which result
-in the various re-weighted values $ t ^{ a }_{ bsf } $ \eqref{eq_reweighted_values}, can be
-partitioned arbitrarily across workers without incurring any collective communications costs.  Each
-worker then holds some subset of these $ a \in \left \{ 0, \ldots , H-1 \right \} $ activations and
-the final output matrix multiply can be schematically broken up as in \begin{align}
-& {\rm Concat} \left ( \left [ t ^{ 0 }, \ldots , t ^{ H-1 } \right ] \right ) \cdot
-O \nn & = {\rm Concat} \left ( \left [ {\rm Concat}\left ( \left [ t ^{ 0 },
-        \ldots , t ^{ \frac{ A }{ T }-1 } \right ] \right ) \cdot O ^{
-        (0) }, \ldots ,{\rm Concat}\left ( \left [ t ^{ H-\frac{ A }{ T
-                } }, \ldots , t ^{ A} \right ] \right ) \cdot O ^{ (T-1)
-} \right ] \right ) \ ,\end{align} where matrix products and
-concatenation both occur along the hidden dimension. That is, each
-worker in a group has $ A/T $ different \pyinline{(B, S, D/A)}-shaped
-activations $ t ^{ a } $, which can be concatenated into a \pyinline{(B,
-S, D/T)}-shaped tensor and multiplied into the \pyinline{(D/T,
-D)}-shaped shard of $ O $, such that every worker is again left with a
-\pyinline{(B, S, D)}-shaped shard which much be \pyinline{AllReduce}-d,
-exactly as in the \pyinline{MLP} case above, to get the final result.
-Hence, the collective communication costs for both layers are the same.
-The backwards pass requires similar collective communications to the
-\pyinline{MLP} case above.
+\paragraph{Attention} Because the individual attention head computations are independent, they can
+be partitioned across $ T $ workers without collectively communications.  An \pyinline{AllReduce} is
+needed for the final projection, however, which results in the various re-weighted values $ y _{
+bsea } $ \eqref{eq_reweighted_values}.
+
+Explicitly, let the input be the full $ z _{ sd }$-shaped tensor (batch-index suppressed here and
+when convenient below). The \pyinline{(D, D/A, A)} query, key, and value weight matrices $ Q _{ dea
+} $ are sharded across the attention-head dimension via $ Q _{ dea } = Q _{ de(c t) } \equiv
+\bar{Q}_{ dec \bar{t} } $ with $ c \in \left \{ 0, \ldots , A/T-1 \right \} $, $ \bar{t}\in
+\left \{ 0, \ldots , T-1 \right \} $ and similar for other weight matrices. Each worker then
+initially computes $ \bar{q} _{ sec \bar{t} }= z _{ sd }\bar{Q}_{ dec \bar{t} } $, and similar,
+for one value of $ \bar{t} $, performs the usual self-attention computation and is left with a
+\pyinline{(B, S, D/A, A/T)}-shaped slice of the \pyinline{(B, S,D/A,A/T,T)}-shaped re-weighted
+value tensor $\bar{z} _{ bsec \bar{t} } $. This tensor is related to
+\eqref{eq_reweighted_values} by concatenation: $ y _{ bsea }=\bar{z} _{ bse(c \bar{t}) }
+$\footnote{A collective operation would bee needed to actually perform this concatenation.}.
+
+We then need to apply the final projection by $ O _{ d d' } $ which is mathematically a concatenation
+$ z _{ sd }  \leftarrow \bar{z} _{ s(ect) } $ followed by a matrix-multiply $ z _{ sd }O _{ d d' }
+$. Tensor parallelism performs this computation by splitting output matrix along its
+incoming dimension as in $ O _{ d d'  } = O _{ (ect) d' } = \bar{O} _{ e c \bar{t} d' }$ and the workers
+collectively compute
+\begin{align}
+z _{ sd' }&\equiv  z _{ sd }O _{ d d' } = \bar{z} _{ sec \bar{t} } \bar{O} _{ ec \bar{t}d' }
+\end{align}
+where each worker computes one term in the $ \bar{t} $-sum which is then
+\pyinline{AllReduce}-d\footnote{The amount of communicated data is again $ \Ocal \left( BSD
+\right)$. } to give every worker the full result above, $z _{ sd'}$. We neglected
+\pyinline{Dropout} here for simplicity. The collective communications story is essentially
+equivalent to that of the \pyinline{MLP} layers: one \pyinline{AllReduce} is needed in the forwards pass
+and one \pyinline{AllReduce} in the backwards-pass.
+
+The one-line summary:
+\begin{align}
+    z _{ sd' }  &= {\rm  MHA}(q _{ sea }, k _{ sea }, v _{ sea }) O _{ ead }
+\end{align}
+The progression of tensor shapes held by any single worker is
+\begin{enumerate}
+    \item \pyinline{(B, S, D)}
+    \item \pyinline{(B, S, D/A, A/T)}
+    \item \pyinline {(B, S, D)}
+\end{enumerate}
+
+
+It is worth comparing the communications and FLOPs costs of these sharded layers. Each layer costs
+$ \Ocal \left(    BS \left ( 4+2E \right )  D ^{ 2 }/T \right)$ FLOPs and communicates
+$ \Ocal \left( BSD \right)  $ bytes and so the communication-to-compute-time ratio is
+\begin{align}
+  \frac{ t _{ {\rm  compute} } }{ t _{ {\rm  comms} } } & \sim  \frac{ \left ( 4+2E \right) D }{ T }\times \frac{ \lambda _{ {\rm comms} }  }{ \lambda _{ {\rm FLOP/s} }} \ .
+\end{align}
+Since\footnote{Assuming $ \lambda _{ FLOP/s }\sim  $100 TFLOP/s and $ \lambda _{ {\rm comms} } \sim
+$ 100 GiB/s.} $ \frac{ \lambda _{ {\rm comms} }  }{ \lambda _{ {\rm FLOP/s} }} \sim 10 ^{ -3 }
+$FLOPs/B we just need $ D \sim \Ocal \left( 10 ^{ 3 } \right)   $ for typical setups with $ T \sim
+\Ocal \left( 10 \right)  $.
 
 
 \begin{figure}[ht]
@@ -883,12 +1001,32 @@ activation memory is then reduced to:
 	+ \frac{ ABLS ^{ 2 } \left ( 2p+1\right ) }{ T }  + \Ocal \left( BSV \right) \label{eq_act_mem_total_seq_parallel}\ .
 \end{align}
 
+In more detail:
+\begin{itemize}
+    \item The \pyinline{LayerNorm}s can act on $ z _{ sd } $ sharded across the sequence dimension
+        as $ z _{ r \bar{t}d } $
+    \item The self-attention layers require coalescing the previous
+        output back $ z _{ r \bar{t}d }\longrightarrow z _{ sd } $ via an
+        \pyinline{AllGather}\footnote{A small memory optimization is to have each rank free all but
+        one shard of this activation after using it and then re-materialize it with an
+    \pyinline{AllGather} in the backwards-pass.}. This is also convenient to do before the MLP layers,
+    but other options are possible.
+    \item Rather than \pyinline{AllReduce} the self-attention and MLP outputs over the sharded
+    dimension as in the case of pure tensor-parallelism, where, e.g.,  we compute a sum like $ y _{
+    sd } = z _{ se \bar{t} } W _{ e \bar{t}d }$ for the MLP layer we can keep the outputs sharded,
+    as in $ y _{ sd \bar{t} } = z _{ se \bar{t} } W _{ e \bar{t}d }$ and \pyinline{ReduceScatter}
+    over the sharded dimension to create $ w _{ r \bar{t}d } $ (with $ r \in \left \{ 0, \ldots ,
+S/T-1 \right \} $, a sequence-dimension sharded portion of the  $ \bar{t} $ sum which is exactly
+what the next  \pyinline{LayerNorm} expects.
+\end{itemize}
+The pattern continues from there.
 
 \begin{figure}[ht]
 	\centering
 	\includegraphics[scale=.25]{figures/transformer-tensor-sequence-parallel.jpg}
-	\caption{Interleaved sequence and tensor parallel sections. Graphic from
-		\cite{shoeybi2020megatronlm}. }
+    \caption{Interleaved sequence and tensor parallel sections. $ g $ and $ \bar{g} $ are
+    \pyinline{AllGather} and  \pyinline{ReduceScatter} in the forward pass, respectively, and swap
+roles in the backwards pass. Graphic from \cite{shoeybi2020megatronlm}. }
 	\label{fig_tensor_seq_parallel}
 \end{figure}
 
@@ -1094,7 +1232,7 @@ where we took the $ T=1, D \gg S $ limit for simplicity and we note that $ BS $ 
 total tokens in the processed batches.
 
 
-\section{Training Training \label{sec_train_time} }
+\section{Training Time \label{sec_train_time} }
 
 
 
@@ -1355,13 +1493,14 @@ Therefore, we can cut out many steps and minimum requirements are:
 	\item Every component of the key and value vectors $k ^{ a }_{ bsd }, v ^{ a }_{ bsd } $ is
           needed, but because of the causal mask, all components except for the last in the sequence
           dimension ($ s\neq -1 $) are the same as they were in the last iteration, up to a shift by
-          one position\footnote{This is where we need to accept an approximation. With an infinite
-          context window, if we add a label $ t $ which indexes the iteration of generation we are
-          on, then we would have that $ z ^{ (t+1) } _{ bsd } = z ^{ (t)} _{ b (s-1)d } $ for every
-          tensor in the network, except for when $ s=-1 $, the last position. The finiteness of the
-          context window makes this statement slightly inaccurate because we can only ever keep $ K
-          $ positions in context and the loss of the early tokens upon sliding the window over will
-          slightly change the values in the residual stream.}
+          one position\footnote{This is where we need to accept a mild approximation, if using a
+              sliding attention window. With an infinite context window, if we add a label $ t $
+              which indexes the iteration of generation we are on, then we would have that $ z ^{
+              (t+1) } _{ bsd } = z ^{ (t)} _{ b (s-1)d } $ for every tensor in the network, except
+              for when $ s=-1 $, the last position. The finiteness of the context window makes this
+              statement slightly inaccurate because we can only ever keep $ K $ positions in context
+              and the loss of the early tokens upon sliding the window over will slightly change the
+          values in the residual stream.}
 \end{itemize}
 
 So, we are led to the concept of the \textbf{kv-cache} in which we cache old key and query vectors for generation.
@@ -1378,7 +1517,7 @@ usual $\sim S ^{ 2 }  $ FLOPs dependence, but this is reduced to being \textit{l
 when the kv-cache is used.
 
 
-A very minimal implementation is below:
+A very minimal implementation\footnote{Warning: very non-optimized code! Purely pedagogical.} is below:
 \pyfile[firstline=6, lastline=37]{python/causal_attention_kv_cache.py}
 
 
@@ -1466,6 +1605,7 @@ We loosely follow the conventions of \cite{korthikanti2022reducing}.  Common par
 	\item $ C $: compute (FLOPs)
 	\item $ D $: the hidden dimension size
 	\item $ E $: expansion factor for MLP layer (usually $ E=4 $)
+	\item $ H $: $ D/A $, the head dimension size
 	\item $ K $: the block size (maximum sequence length\footnote{In the absence of methods such as         ALiBi \cite{ALiBi}  can be used to extend the sequence length at inference time.})
 	\item $ L $: number of transformer layers
 	\item $ N _{ {\rm params}  } $: total number of model parameters
@@ -1498,11 +1638,10 @@ For instance, GPT-2 and GPT-3 \cite{gpt2radford2019language, gpt3brown2020langua
 
 As indicated above,  we use zero-indexing. We also use \pyinline{python} code
 throughout\footnote{Written in a style conducive to latex, e.g. no type-hints and clarity
-	prioritized over optimization.}  and
-write all ML code using standard \pyinline{torch} syntax. To avoid needing to come up with new
-symbols in math expressions we will often use expressions like $ x \leftarrow f(x) $ to refer to performing
-a computation on some argument ($ x $) and assigning the result right back to the variable $ x $
-again.
+prioritized over optimization.}  and write all ML code using standard \pyinline{torch} syntax. To
+avoid needing to come up with new symbols in math expressions we will often use expressions like $ x
+\leftarrow f(x) $ to refer to performing a computation on some argument ($ x $) and assigning the
+result right back to the variable $ x $ again.
 
 Physicists often joke (half-seriously) that Einstein's greatest contribution to physics was his
 summation notation in which index-sums are implied by the presence of repeated indices and summation
@@ -1522,6 +1661,21 @@ Einstein notation also has implementations available for \pyinline{torch}:
 \href{https://rockt.github.io/2018/04/30/einsum}{see this blog post on \pyinline{einsum}} or the
 \href{https://einops.rocks/1-einops-basics/}{\pyinline{einops}} package.
 
+In particular, we use \pyinline{einops} notation for concatenation and splitting: $ A _{ c } = A _{
+    (de) }= B _{ de } $\footnote{The indexing is all row-major: if $ A _{ i } $ is $
+        I$-dimensional, $ i \in \{0, \ldots, I-1\} $, then if we split this index as $ A _{ i } = A
+        _{ (jk) } \equiv \bar{A} _{ jk } $, then the indices $ j, k $ will range over $ j \in \{0,
+    \ldots , J\} $, $ k\in \{0, \ldots , K\} $ with $ I =J \times K $ and where numerically $ i = j
+\times K + k $. More complex cases follow by induction.}. We will sometimes use a bar to indicate
+tensors which  are derived from other tensors through such splitting operations, usually in the
+context of tensor-sharding where devices only locally hold some shard of the tensor. In this
+context, only some of the dimensions will be sharded across devices, and we may also put a bar over
+the corresponding sharded index. For instance, consider a two-dimensional tensor $ M _{ ab } $ of
+shape \pyinline{M.shape=(A, 2)}: sharding this tensor across two devices across the final index
+results in a tensor $ \bar{M}_{ a \bar{b} } $ which is of shape \pyinline{M_bar.shape=(A, 1)} on
+each device. As here, we will sometimes use bars to denote indices which are sharded over different
+devices.
+
 We also put explicit indices on operators such as Softmax to help clarify the relevant
 dimension, e.g. we would write the softmax operation over the $ b $-index of some batched
 tensor $ x _{ bvd\ldots } $ as
@@ -1537,9 +1691,10 @@ indicating that the sum over the singled-out $ v $-index is gives unity.
 
 A quick refresher on common distributed
 \href{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html}{communication
-	primitives}.  Consider $ N $ workers with tensor data $ x ^{ (n) }  $ of some arbitrary shape
-\pyinline{x.shape}, where $ n $ labels the worker and any indices on the data are suppressed. The $
-	n=0 $ worker is arbitrarily denoted the \textit{chief}.  Then, the primitive operations are:
+    primitives}.  Consider $ N $ workers with tensor data $ x ^{ (n) }  $ of some arbitrary shape
+    \pyinline{x.shape}, which takes up $ M $ bytes of memory, where $ n $ labels the worker and any
+    indices on the data are suppressed. The $ n=0 $ worker is arbitrarily denoted the
+    \textit{chief}.  Then, the primitive operations are:
 \begin{itemize}
 	\item \pyinline{Broadcast}: all workers receive  the chief's data, $ x ^{ (0) }  $.
 	\item \pyinline{Gather}: all workers communicate their data $ x _{ n } $ to the chief, e.g. in a
@@ -1547,8 +1702,20 @@ A quick refresher on common distributed
 	\item \pyinline{Reduce}: data is \pyinline{Gather}-ed to the chief, which then performs some
 	      operation (\pyinline{sum}, \pyinline{max}, \pyinline{concatenate}, etc.) producing a new tensor $
 		      x' $ on the chief worker.
-	\item \pyinline{AllGather}: all data $ x ^{ (n) } $ is communicated to all workers. Functionally
-	      equivalent to a \pyinline{Gather} followed by \pyinline{Broadcast}.
+    \item \pyinline{ReduceScatter}: a reducing operation (e.g. \pyinline{sum}) is applied to the $ x
+        ^{ (n) } $ to produce a $ x' $ of the same shape (e.g. $ x'= \sum x ^{ (n) } $) and each
+        worker only receives a $ 1/N $ slice (and hence $ M/N $ byte) of the result\footnote{Note that \pyinline{AllGather}
+            and \pyinline{ReduceScatter} are morally conjugate to each other. In the former, each
+            worker ends up with $ N $ times as much data as they started with, while in
+        \pyinline{ReduceScatter} they end up with $ 1/N $ of their initial data. One is nearly a
+        time-reversed version of the other, which is a way of remembering that they have the came
+        communication cost. They also compose to produce an output of the same initial size, as in
+        \pyinline{AllReduce}.}. A ring implementation sends $ M \times \frac{ N-1 }{ N } $ bytes
+        over each link in the ring.
+    \item \pyinline{AllGather}: all data $ x ^{ (n) } $ is communicated to all workers; each worker
+        ends up with the array $ [x ^{ 0 }, x ^{ 1 }, \ldots , x ^{ N-1 }] $. Functionally
+        equivalent to a \pyinline{Gather} followed by \pyinline{Broadcast}. A ring implementation
+        sends $ M \times \left ( N-1 \right ) $ bytes over each link in the ring.
 	\item \pyinline{AllReduce}: all workers receive the same tensor $ x' $ produced by operating on
 	      the $ x ^{ (n) } $ with \pyinline{sum}, \pyinline{mean}, etc. Functionally equivalent to a
 	      \pyinline{Reduce} followed by \pyinline{Broadcast}, or a \pyinline{ReduceScatter} followed
@@ -1559,10 +1726,9 @@ A quick refresher on common distributed
 			      \frac{ 2 \left ( N-1 \right )D }{ N } $ elements need to be passed around.
 		      \href{https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/}{See this blog
 			      post for a nice visualization} or \cite{bandwidthOptimalAllReduce2009} for a relevant
-		      paper.\label{foot_all_reduce}}).
-	\item \pyinline{ReduceScatter}: a reducing operation (\pyinline{sum}, \pyinline{mean}, etc.) is
-	      applied to the $ x ^{ (n) } $ to produce a $ x' $ of the same shape, but each worker only
-	      receives a slice $ 1/N $ of the result.
+              paper.\label{foot_all_reduce}}). In the latter case, the total cost is $ 2M \times
+              \frac{ N-1 }{ N } $, due to \pyinline{AllReduce}-ing the initial $ M $-sized data, and
+              then \pyinline{AllGather}-ing the $ M/N $-sized reductions.
 \end{itemize}
 
 
@@ -1616,14 +1782,14 @@ memory, from slowest to fastest:
 
 The CUDA programming model uses a hierarchy of concepts:
 \begin{itemize}
-	\item \textbf{Threads}  are the fundamental unit of execution which each run the same CUDA
-	      \textbf{Kernel}, or function, on different data inputs in parallel. Threads within the same
-	      block (below) may share resources, like memory, and may communicate with each other.
-	      Individual threads are indexed
-	      through the \textbf{threadIdx} variable, which has
-	      \cudainline{threadIdx.{x, y, z}} attributes with \cudainline{threadIdx.x} in \cudainline{0, ..., blockDim.x -1}
-	      and similar.
-	\item Threads are always launched in \textbf{Warps} which consist of 32 threads.
+    \item \textbf{Threads}  are the fundamental unit of execution\footnote{Threads are always
+        physically launched in \textbf{Warps} which consist of 32 threads.} which each run the same
+        CUDA \textbf{Kernel}, or function, on different data inputs in parallel. Threads within the
+        same block (below) may share resources, like memory, and may communicate with each other.
+        Individual threads are indexed through the \textbf{threadIdx} variable, which has
+        \cudainline{threadIdx.{x, y, z}} attributes with \cudainline{threadIdx.x} in
+        \cudainline{0, ..., blockDim.x -1} and similar.
+
 	\item Threads (and hence warps) are organized into 3D \textbf{blocks}. The size and indices of
 	      the blocks can be accessed through the \cudainline{blockDim} and \cudainline{blockIdx}
 	      variables, respectively, with \cudainline{blockIdx.x} in \cudainline{0, ..., gridDim.x - 1}.
