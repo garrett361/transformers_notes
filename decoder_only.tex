@@ -745,9 +745,8 @@ be stored:
 If the inputs in each of these cases are not needed for any other part of the backwards pass, they
 are garbage collected in \pyinline{torch} soon after creation.
 
-\newline
 
-\pyinline{Softmax} is another instance where this occurs, since
+\paragraph{Example}: \pyinline{Softmax} is another instance where this occurs, since
 \begin{align}
      \partial _{ i } \Sm \left ( x _{ j } \right )  &= \delta _{ ij }\Sm \left ( x _{ j } \right ) -   \Sm \left ( x _{ i } \right )  \Sm \left ( x _{ j } \right ) \label{eq_softmax_derivative}
 \end{align}
@@ -837,37 +836,34 @@ be partitioned across $ T $ workers without collectively communications.  An \py
 needed for the final projection, however, which results in the various re-weighted values $ y _{
 bsea } $ \eqref{eq_reweighted_values}.
 
-Explicitly, let the input be the full $ z _{ sd }$-shaped tensor (batch-index suppressed here and
-when convenient below). The \pyinline{(D, D/A, A)} query, key, and value weight matrices $ Q _{ dea
-} $ are sharded across the attention-head dimension via $ Q _{ dea } = Q _{ de(c t) } \equiv
-\bar{Q}_{ dec \bar{t} } $ with $ c \in \left \{ 0, \ldots , A/T-1 \right \} $, $ \bar{t}\in
-\left \{ 0, \ldots , T-1 \right \} $ and similar for other weight matrices. Each worker then
-initially computes $ \bar{q} _{ sec \bar{t} }= z _{ sd }\bar{Q}_{ dec \bar{t} } $, and similar,
-for one value of $ \bar{t} $, performs the usual self-attention computation and is left with a
-\pyinline{(B, S, D/A, A/T)}-shaped slice of the \pyinline{(B, S,D/A,A/T,T)}-shaped re-weighted
-value tensor $\bar{z} _{ bsec \bar{t} } $. This tensor is related to
-\eqref{eq_reweighted_values} by concatenation: $ y _{ bsea }=\bar{z} _{ bse(c \bar{t}) }
-$\footnote{A collective operation would bee needed to actually perform this concatenation.}.
-
-We then need to apply the final projection by $ O _{ d d' } $ which is mathematically a concatenation
-$ z _{ sd }  \leftarrow \bar{z} _{ s(ect) } $ followed by a matrix-multiply $ z _{ sd }O _{ d d' }
-$. Tensor parallelism performs this computation by splitting output matrix along its
-incoming dimension as in $ O _{ d d'  } = O _{ (ect) d' } = \bar{O} _{ e c \bar{t} d' }$ and the workers
-collectively compute
+To review, the attention outputs $ z' _{ sd } $ generated from inputs $ z_{ sd } $ can be expressed
+as
 \begin{align}
-z _{ sd' }&\equiv  z _{ sd }O _{ d d' } = \bar{z} _{ sec \bar{t} } \bar{O} _{ ec \bar{t}d' }
+    z' _{ sea }  &= {\rm  MHA}(q _{ sea }, k _{ sea }, v _{ sea }) O _{ ead }\nn
 \end{align}
-where each worker computes one term in the $ \bar{t} $-sum which is then
-\pyinline{AllReduce}-d\footnote{The amount of communicated data is again $ \Ocal \left( BSD
-\right)$. } to give every worker the full result above, $z _{ sd'}$. We neglected
-\pyinline{Dropout} here for simplicity. The collective communications story is essentially
-equivalent to that of the \pyinline{MLP} layers: one \pyinline{AllReduce} is needed in the forwards pass
+where:
+\begin{itemize}
+    \item  We have split the $ d $-index as in $ z _{ sd }\longrightarrow z _{ s (ea) } $ with $ e $ and
+$ a $ the head-dimension and head-index
+    \item $ q _{ sea }, k _{ sea }, v _{ sea }
+$ are the query, keys and values derived from the inputs
+    \item ${\rm
+    MHA } $ is the multi-head attention function, whose outputs are the same shape as its value inputs
+    \item The dual sum over head-dimension index ($ e $) and attention-head-index ($ a $) is the
+    sum-and-concatenate step from the more explicit description in Sec.~\ref{subsubsec_attn_layer}
+    \item \pyinline{Dropout} and biases were ignored for simplicity
+\end{itemize}
+
+In order to parallelize the above $ T $-ways, we simply shard across the dimension $ a $  which
+indexes the different attention heads.  The $ {\rm MHA} $ computations all process in
+embarassingly-parallel fashion, and an all-reduce is needed to complete the sum over the $ a $-index
+across devices.
+
+The collective communications story is essentially
+equivalent to that of the \pyinline{MLP} layers\footnote{The amount of communicated data is again $ \Ocal \left( BSD
+\right)$. }: one \pyinline{AllReduce} is needed in the forwards pass
 and one \pyinline{AllReduce} in the backwards-pass.
 
-The one-line summary:
-\begin{align}
-    z _{ sd' }  &= {\rm  MHA}(q _{ sea }, k _{ sea }, v _{ sea }) O _{ ead }
-\end{align}
 The progression of tensor shapes held by any single worker is
 \begin{enumerate}
     \item \pyinline{(B, S, D)}
@@ -882,10 +878,11 @@ $ \Ocal \left( BSD \right)  $ bytes and so the communication-to-compute-time rat
 \begin{align}
   \frac{ t _{ {\rm  compute} } }{ t _{ {\rm  comms} } } & \sim  \frac{ \left ( 4+2E \right) D }{ T }\times \frac{ \lambda _{ {\rm comms} }  }{ \lambda _{ {\rm FLOP/s} }} \ .
 \end{align}
-Since\footnote{Assuming $ \lambda _{ FLOP/s }\sim  $100 TFLOP/s and $ \lambda _{ {\rm comms} } \sim
-$ 100 GiB/s.} $ \frac{ \lambda _{ {\rm comms} }  }{ \lambda _{ {\rm FLOP/s} }} \sim 10 ^{ -3 }
-$FLOPs/B we just need $ D \sim \Ocal \left( 10 ^{ 3 } \right)   $ for typical setups with $ T \sim
-\Ocal \left( 10 \right)  $.
+Since\footnote{Assuming $ \lambda _{\rm  FLOP/s }\sim  $100 TFLOP/s and $ \lambda _{ {\rm comms} }
+\sim $ 100 GiB/s.} $ \frac{ \lambda _{ {\rm comms} }  }{ \lambda _{ {\rm FLOP/s} }} \sim 10 ^{ -3 }
+$FLOPs/B, communication and compute take similar times when  $ D \sim \Ocal \left( 10 ^{ 3 } \right)
+$ for typical setups with $ T \sim \Ocal \left( 10 \right)  $ and so tensor-parallelism requires
+$ D \gtrsim 10 ^{ 4 } $ to reach similar efficiency to the non-tensor-parallel implementations.
 
 
 \begin{figure}[ht]
@@ -1003,23 +1000,27 @@ activation memory is then reduced to:
 
 In more detail:
 \begin{itemize}
-    \item The \pyinline{LayerNorm}s can act on $ z _{ sd } $ sharded across the sequence dimension
-        as $ z _{ r \bar{t}d } $
-    \item The self-attention layers require coalescing the previous
-        output back $ z _{ r \bar{t}d }\longrightarrow z _{ sd } $ via an
-        \pyinline{AllGather}\footnote{A small memory optimization is to have each rank free all but
-        one shard of this activation after using it and then re-materialize it with an
-    \pyinline{AllGather} in the backwards-pass.}. This is also convenient to do before the MLP layers,
-    but other options are possible.
-    \item Rather than \pyinline{AllReduce} the self-attention and MLP outputs over the sharded
-    dimension as in the case of pure tensor-parallelism, where, e.g.,  we compute a sum like $ y _{
-    sd } = z _{ se \bar{t} } W _{ e \bar{t}d }$ for the MLP layer we can keep the outputs sharded,
-    as in $ y _{ sd \bar{t} } = z _{ se \bar{t} } W _{ e \bar{t}d }$ and \pyinline{ReduceScatter}
-    over the sharded dimension to create $ w _{ r \bar{t}d } $ (with $ r \in \left \{ 0, \ldots ,
-S/T-1 \right \} $, a sequence-dimension sharded portion of the  $ \bar{t} $ sum which is exactly
-what the next  \pyinline{LayerNorm} expects.
+    \item The norms are just linear operations on the $ z _{ sd }  $, $ z' _{ sd } =
+{\rm Norm}\left ( z _{ sd } \right ) $, and so we split and shard cross the sequence dimension $ z
+_{ sd } \longrightarrow  z _{ (tr) d }  \equiv  \bar{z}_{ \bar{t}rd }$ with the TP-index $ t $
+sharded across devices.
+\item The residual stream is also sharded across the sequence dimension.
+\item The sharded outputs $ \bar{z}_{ \bar{t}rd } $ must be re-formed to create the
+attention and MLP inputs via an \pyinline{AllGather}. There is an optimization choice here:
+either the re-formed tensors can be saved for the backward pass (negating the $ 1/T $ memory
+savings) or they can be re-formed via an \pyinline{AllGather}, at the cost of extra communication.
+\item Both the MLP and attention layers need to produce final sums of the form $ \bar{y} _{ s
+    \bar{y} e } \bar{O} _{ \bar{t} ed } $ for some intermediate $ \bar{y} $ and weight $ \bar{O} $
+    sharded across the TP-dimension $ \bar{t} $. The outputs are added to the sequence-sharded residual
+    stream, and so sum is optimally computed through an \pyinline{ReduceScatter} with final shape $
+    \bar{z} _{ \bar{t}'rd } = z _{ (t'r)d } = z _{  sd } =\bar{y} _{ s \bar{t} e } \bar{O} _{ \bar{t}
+    ed } $. This \pyinline{ReduceScatter} (along with the \pyinline{AllGather} mentioned above)
+    replace the \pyinline{AllReduce}s from the tensor-parallel case and have the overall
+    communication cost.
 \end{itemize}
-The pattern continues from there.
+
+
+
 
 \begin{figure}[ht]
 	\centering
