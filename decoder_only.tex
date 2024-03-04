@@ -751,19 +751,23 @@ backwards pass, however.
 in the various re-weighted values $ t ^{ a }_{ bsf } $ \eqref{eq_reweighted_values}, can be
 partitioned arbitrarily across workers without incurring any collective communications costs.  Each
 worker then holds some subset of these $ a \in \left \{ 0, \ldots , H-1 \right \} $ activations and
-the final output matrix multiply can be schematically broken up as in \begin{align}                                                                                                                                                                                                                                                                                                                 & {\rm Concat}
-                                                                                                                                                                                                                                                  \left ( \left [ t ^{ 0 }, \ldots , t ^{ H-1 } \right ] \right ) \cdot O \nn & = {\rm Concat}
-                                                                                                                                                                                                                                                  \left ( \left [ {\rm Concat}\left ( \left [ t ^{ 0 }, \ldots , t ^{ \frac{ A }{ T }-1 } \right
-	                                                                                                                                                                                                                                                  ] \right ) \cdot O ^{ (0) }, \ldots ,{\rm Concat}\left ( \left [ t ^{ H-\frac{ A }{ T } },
-		                                                                                                                                                                                                                                                  \ldots , t ^{ A} \right ] \right ) \cdot O ^{ (T-1) } \right ] \right ) \ ,\end{align} where matrix
-products and concatenation both occur along the hidden dimension. That is, each worker in a group
-has $ A/T $ different \pyinline{(B, S, D/A)}-shaped activations $ t ^{ a } $, which can be
-concatenated into a \pyinline{(B, S, D/T)}-shaped tensor and multiplied into the
-\pyinline{(D/T, D)}-shaped shard of $ O $, such that every worker is again left with a
-\pyinline{(B, S, D)}-shaped shard which much be \pyinline{AllReduce}-d, exactly as in the
-\pyinline{MLP} case above, to get the final result.  Hence, the collective communication costs for both layers are the same.
-The backwards pass requires similar collective communications to the \pyinline{MLP}
-case above.
+the final output matrix multiply can be schematically broken up as in \begin{align}
+& {\rm Concat} \left ( \left [ t ^{ 0 }, \ldots , t ^{ H-1 } \right ] \right ) \cdot
+O \nn & = {\rm Concat} \left ( \left [ {\rm Concat}\left ( \left [ t ^{ 0 },
+        \ldots , t ^{ \frac{ A }{ T }-1 } \right ] \right ) \cdot O ^{
+        (0) }, \ldots ,{\rm Concat}\left ( \left [ t ^{ H-\frac{ A }{ T
+                } }, \ldots , t ^{ A} \right ] \right ) \cdot O ^{ (T-1)
+} \right ] \right ) \ ,\end{align} where matrix products and
+concatenation both occur along the hidden dimension. That is, each
+worker in a group has $ A/T $ different \pyinline{(B, S, D/A)}-shaped
+activations $ t ^{ a } $, which can be concatenated into a \pyinline{(B,
+S, D/T)}-shaped tensor and multiplied into the \pyinline{(D/T,
+D)}-shaped shard of $ O $, such that every worker is again left with a
+\pyinline{(B, S, D)}-shaped shard which much be \pyinline{AllReduce}-d,
+exactly as in the \pyinline{MLP} case above, to get the final result.
+Hence, the collective communication costs for both layers are the same.
+The backwards pass requires similar collective communications to the
+\pyinline{MLP} case above.
 
 
 \begin{figure}[ht]
