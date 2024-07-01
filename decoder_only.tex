@@ -45,7 +45,6 @@ parameters which define the network can be found in App.~\ref{app_conventions}.
 	\label{fig_transformers_architecture}
 \end{figure}
 
-
 At a high level, decoder-only transformers take in an ordered series of word-like objects, called
 tokens, and are trained to predict the next token in the sequence. Given some initial
 text, transformers can be used to give a prediction for the likelihood of any possible continuation
@@ -316,7 +315,7 @@ code, the loss computation might look like the following (using fake data):
 \pyfile[firstline=7, lastline=22]{python/loss.py}
 
 
-\section{Architecture Variants}
+\section{Architecture and Algorithm Variants}
 
 There are, of course, many variants on the basic architecture. Some particularly important ones are
 summarized here.
@@ -1015,7 +1014,7 @@ savings) or they can be re-formed via an \pyinline{AllGather}, at the cost of ex
     stream, and so sum is optimally computed through an \pyinline{ReduceScatter} with final shape $
     \bar{z} _{ \bar{t}'rd } = z _{ (t'r)d } = z _{  sd } =\bar{y} _{ s \bar{t} e } \bar{O} _{ \bar{t}
     ed } $. This \pyinline{ReduceScatter} (along with the \pyinline{AllGather} mentioned above)
-    replace the \pyinline{AllReduce}s from the tensor-parallel case and have the overall
+    replace the \pyinline{AllReduce}s from the tensor-parallel case and have the same overall
     communication cost.
 \end{itemize}
 
