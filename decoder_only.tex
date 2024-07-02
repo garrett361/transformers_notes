@@ -87,7 +87,7 @@ every component is modified in the available variants.}:
           probability that any sequence of tokens follows a given initial seed\footnote{In more
           detail, these probabilities are created by products: $ P(t _{ s+n } \ldots t _{ s+1}| t _{
           s } \ldots  t _{ 0 }) =P(t _{ s+n }| t _{ s+n - 1} \ldots  t _{ s } \ldots  t _{ 0}) \times
-      \ldots  \times P(t _{ s+1 } | t _{ s } \ldots  t _{ 0 }) $..}.
+      \ldots  \times P(t _{ s+1 } | t _{ s } \ldots  t _{ 0 }) $.}.
 \end{enumerate}
 
 
@@ -107,7 +107,7 @@ an \pyinline{nn.Embedding(V, D)} instance.
 To each item in a batch, we add identical \textbf{positional encodings} to the vectors above with
 the goal of adding fixed, position-dependent correlations in the sequence dimension which will
 hopefully make it easier for the architecture to pick up on the relative positions of the inputs
-\footnote{Positional encodings and the causal mask are the only components in the transformers
+\footnote{Positional encodings and the causal mask are the only components in the vanilla transformers
 	architecture which carry weights with a dimension of size $ S $; i.e. they are the only parts that
 	have explicit sequence-length dependence. A related though experiment: you can convince yourself
 	that if the inputs $ z_{ bsd } $
@@ -269,7 +269,7 @@ weights.
 
 The layer which converts the \pyinline{(B, S, D)}-shaped outputs, $ z _{ bsd } $, to \pyinline{(B, S, V)}-shaped
 predictions over the vocabulary, $  y _{ bsv } $, is the \textbf{Language Model Head}. It
-is a linear layer, whose weights are usually tied to be exactly those of the initial embedding
+is a linear layer, whose weights are often tied to be exactly those of the initial embedding
 layer of Sec.~\ref{subsubsec_embedding_and_pe}.
 
 
@@ -289,7 +289,7 @@ And then the entire architecture: \pyfile[firstline=7, lastline=56]{python/decod
 
 \subsection{The Loss Function}
 
-The last necessary component is the loss function. The training loop data is canonically the
+The last necessary component is the loss function. The training loop data is the
 \pyinline{(B, K)}-shaped\footnote{\pyinline{K} is the block size, the maximum sequence-length for
 	the model. See App.~\ref{app_conventions}.}  token inputs ($ x _{ bs } $) along with their shifted-by-one relatives $ y
 		_{ bs }$ where \pyinline{x[:, s + 1] == y[:, s]}.  The \pyinline{(B, K, V)}-shaped
@@ -301,14 +301,15 @@ predict the value of the next token, given the present context:
 \end{align}
 and so the model is trained using the usual cross-entropy/maximum-likelihood loss
 \begin{align}
-	\Lcal & = -\frac{ 1 }{ BK }\sum _{ b,s }\ln p(x _{ b (s+1) }=| x _{ b s }, x _{ b (s-1) },
+	\Lcal & = -\frac{ 1 }{ BK }\sum _{ b,s }\ln p(x _{ b (s+1) }=y _{ b(s+1) }| x _{ b s }, x _{ b (s-1) },
 	\ldots, x _{ b 0 })\nn
-	      & = \frac{- 1 }{ BK }\sum _{ b,s }\Sm _{ v }\ z _{ bsv}\big| _{ v=y _{ bs } } \ .
+	      & = \frac{- 1 }{ BK }\sum _{ b,s }\Sm _{ v }\ z _{ bsv}\big| _{ v=y _{ b(s+1) } } \ .
 \end{align}
-Note that the losses for all possible context lengths are included in the sum\footnote{In Natural Language Processing (NLP),
-	the \pyinline{perplexity} is often reported instead of the loss, which is just the exponential of the loss, a geometric-mean over the
-	gold-answer probabilities: $ {\rm perplexity} = e^{ \Lcal } =\left (\prod _{ b, s }p(x _{ b (s+1) }=| x _{ b s }, x _{ b (s-1) },
-		\ldots, x _{ b 0 })\right ) ^{ \frac{ -1 }{ BK } }$.}.
+Note that the losses for all possible context lengths are included in the sum, equally
+weighted\footnote{In Natural Language Processing (NLP), the \pyinline{perplexity} is often reported
+    instead of the loss, which is just the exponential of the loss, a geometric-mean over the
+    gold-answer probabilities: $ {\rm perplexity} = e^{ \Lcal } =\left (\prod _{ b, s }p(x _{ b
+        (s+1) }=| x _{ b s }, x _{ b (s-1) }, \ldots, x _{ b 0 })\right ) ^{ \frac{ -1 }{ BK } }$.}.
 
 In \pyinline{torch}
 code, the loss computation might look like the following (using fake data):
@@ -360,17 +361,19 @@ we instead have\footnote{This alternative layer was also used in PaLM \cite{chow
 \end{align}
 Note that a \pyinline{LayerNorm} instance is also removed.
 
+
+
 \subsection{RoPE Embeddings}
 
 A shortcoming of traditional embeddings $ x _{ bsd } \longrightarrow x _{ bsd } + p _{ sd } $ is
 that they do not generalize very well: a model trained on such embeddings with a maximum sequence
 length $ K $ will do very poorly when evaluated on longer sequences. RoPE (Rotary Position
-Embedding) \cite{su2022roformer} and variants thereof can extend the viable context length by more clever mechanisms with
-stronger implicit biases.
+Embedding) \cite{su2022roformer} and variants thereof can extend the viable context length by more
+clever mechanisms with stronger implicit biases.
 
 RoPE and its variants can be motivated by a few natural conditions.  Given the queries and keys for
-an input $ q _{ sd }, k _{ sd } $ (suppressing batch indices), the corresponding attention scores computation $ a _{ ss' }\left ( q _{ s },
-	k _{ s' } \right ) $ should reasonably satisfy the below:
+an input $ q _{ sd }, k _{ sd } $ (suppressing batch indices), the corresponding attention scores
+computation $ a _{ ss' }\left ( q _{ s }, k _{ s' } \right ) $ should reasonably satisfy the below:
 \begin{enumerate}
 	\item The attention score should only depend on the position indices $ s, s' $ through their difference
 	      $ s-s' $, i.e., through their relative distance to each other.
@@ -383,7 +386,7 @@ element of $ SO(d) $ with a generator proportional to the position index, and ro
 the conjugate element,
 \begin{align}
 	q _{ sd } & \longrightarrow \left [e^{ i s \hat{n}\cdot T }\right ]_{ d d' } q _{ sd' } \equiv R(s) _{ d d' } q _{ sd' } \nn
-	k _{ sd } & \longrightarrow \left [e^{ -i s \hat{n}\cdot T }\right ]_{ d d' } k _{ sd' } \equiv  R(s)^{ \dagger } _{ d d' } \ . \label{eq_rope}
+	k _{ sd } & \longrightarrow \left [e^{ -i s \hat{n}\cdot T }\right ]_{ d d' } k _{ sd' } \equiv  R(s)^{ \dagger } _{ d d' } k _{ sd' } \ . \label{eq_rope}
 \end{align}
 
 Performing the above computation with a dense element of $ SO(D) $ is infeasible, as it would require
@@ -407,6 +410,10 @@ where
 \begin{align}
 	\theta _{ d } & = 10 ^{ -8d/D   } \ .
 \end{align}
+The RoPE memory costs are thus $ \Ocal \left( K D \right)  $. The sparsity present in this
+constrained form of the RoPE matrices means that \eqref{eq_rope} can be computed in $ \Ocal \left(
+BSD \right)  $ time, rather than $ \Ocal \left( BSD ^{ 2 } \right)$, as it would be for a general
+rotation matrix. See the paper for explicit expressions.
 
 
 \subsection{Flash Attention \label{subsec_flash_attention}}
