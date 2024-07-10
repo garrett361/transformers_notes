@@ -410,10 +410,11 @@ where
 \begin{align}
 	\theta _{ d } & = 10 ^{ -8d/D   } \ .
 \end{align}
-The RoPE memory costs are thus $ \Ocal \left( K D \right)  $. The sparsity present in this
-constrained form of the RoPE matrices means that \eqref{eq_rope} can be computed in $ \Ocal \left(
-BSD \right)  $ time, rather than $ \Ocal \left( BSD ^{ 2 } \right)$, as it would be for a general
-rotation matrix. See the paper for explicit expressions.
+The RoPE memory costs are thus $ \Ocal \left( K D \right)  $\footnote{A single RoPE buffer can be
+shared amongst all attention layers, amortizing the memory costs.}. The sparsity present in this constrained form of the RoPE matrices means that
+\eqref{eq_rope} can be computed in $ \Ocal \left( BSD \right)  $ time, rather than $ \Ocal \left(
+BSD ^{ 2 } \right)$, as it would be for a general rotation matrix. See the paper for explicit
+expressions.
 
 
 \subsection{Flash Attention \label{subsec_flash_attention}}
@@ -432,70 +433,75 @@ and similar the computation is
 \begin{align}
     z _{ sah } &= \Sm _{ s' } \left ( q _{ sah' } k _{ s'ah' } \right ) v _{ s'ah }
 \end{align}
-which is the concatenated as $ z _{ s(d) }\longrightarrow  z _{ sd } $ to get the result.
+which is then concatenated as $ z _{ s(ah) }\longrightarrow  z _{ sd } $ to get the result.
 
 The $ \Ocal \left( A S ^{ 2 } \right)  $ attention scores $ \Sm _{ s' } \left ( q _{ sah' } k _{
 s'ah' } \right ) $ are expensive to shuttle back and forth from off-chip to on-chip memory and are a
-costly activation memory component. To this end, Flash Attention functions by further splitting $ q,
-z $ as in $ q _{ sd }= q _{ (ir)(ah) }\longrightarrow  q _{ airh }  $, and similar for $ z $, and $ k,v
-$ where $ k _{ sd }= k _{ (jc)(ah) }\longrightarrow  k _{ ajch }  $, and similar for $ v $, so that
-the above reads
+costly activation memory component. To this end, Flash Attention functions by further chunking $ q,
+z $ over the sequence dimension as in $ q _{ sd }= q _{ (ir)(ah) }\longrightarrow  q _{ airh }  $,
+and similar for $ z $, and $ k,v $ where $ k _{ sd }= k _{ (jc)(ah) }\longrightarrow  k _{ ajch }
+$, and similar for $ v $. The chunk sizes are such that the attention scores for each chunk can be
+computed with minimal off-chip operations (by using shared memory), which is where the performance
+gains come from. With this splitting, the above reads
 \begin{align}
-    z _{ airh } &= \Sm _{ j'c' } \left ( q _{ airh' } k _{ j'c'ah' } \right ) v _{ j'c'ah } \nn
-     &= P _{ airj'c' } v _{ jc'ah }
+    z _{ irah } &= \Sm _{ j'c' } \left ( q _{ irah' } k _{ j'c'ah' } \right ) v _{ j'c'ah } \nn
+     &= P _{ irj'c'a } v _{ jc'ah } \label{eq_flash_attn_sums}
 \end{align}
 where range of the new indices is dictated by the available on-chip memory and is analyzed below.
 
-The algorithm functions by performing the sums over $ j, c', h' $  on-chip. We will jump
-right to the second version of the algorithm.  The algorithm operates on each attention head
-independently and we omit the head index $ a $ (and batch index $ b $) for clarity, and also change
-the notation from \cite{dao2023flashattention2} somewhat. In addition to the final outputs $ z _{ irh } $,
-the algorithm saves the $ S $-shaped Softmax denominators $ \ell _{ ir } $  which are related to the
-softmax probabilities as in
+The algorithm functions by performing the sums in \eqref{eq_flash_attn_sums} on-chip, meaning that
+neither the attention scores (Softmax inputs) nor the probabilities ever need to be shuttled back
+and forth. We will jump right to the second version of the algorithm.   In addition to
+the final outputs $ z _{ irah } $, the algorithm saves the Softmax denominators $ \ell
+_{ ira } $ ($ AS $ total elements) which are related to the softmax probabilities as in
 \begin{align}
-    P _{ irjc } &= \frac{  \exp \left (   q _{ irh } k _{ jch }\right)}{ \ell _{ ir } } \ .
+    P _{ irjca } &= \frac{  \exp \left (   q _{ irah } k _{ jcah }\right)}{ \ell _{ ira } } \ .
 \end{align}
-Because only the Softmax outputs are needed to compute the Softmax derivative \eqref{eq_softmax_derivative},
-this is sufficient data to perform the backwards pass, at the cost of a little recomputation in the form
-of $ q, k $ matrix-multiplies.
+Because only the Softmax outputs $ P $ are needed to compute the Softmax derivative
+\eqref{eq_softmax_derivative}, we can use the $ \ell _{ ira} $ to compute the backwards pass if we
+also recompute the exponential term.
 
 
-
-The entire forward-pass algorithm is as follows. We capitalize tensors which only exist on-chip and
-leave tensors which come from off-chip lower-cased.
-
+The entire forward-pass algorithm is as follows. Essentially, one just computes partial values for
+each term in the softmax sum, correcting old results and adding new terms to the sum with each
+iteration. We capitalize tensors which only exist on-chip and leave tensors which come from off-chip
+lower-cased. The entire $ z _{ irah } $ tensor is then computed as (we omit the attention head $ a
+$-index for clarity):
 \begin{algo}{Flash Attention Version Two (Forward)}
-\State Initialize off-chip tensors $ z _{ irh },  \ell _{ ir }$ to zeros
 \For{ $ i \in \ldots  $}
-    \State Move  $ q _{ irh }$ on-chip, instantiate $Z _{ ijrh }, L _{ ijr }$ to zeros and $M _{ ijr }$ to $ -\infty $ on-chip.
+\State Initialize off-chip tensors $ z _{ irh },  \ell _{ ir }$ to zeros
+\State Move  $ q _{ irh }$ on-chip, instantiate $Z _{ ijrh }, L _{ ijr }$ to zeros and $M _{ ijr }$ to $ -\infty $ on-chip.
 \For{ $ j \in \ldots  $}
-    \State Move  $ k_{ jch },v _{ jch }$ on-chip
-    \State $ S _{ ijrc } \gets q _{ irh } k _{ jch } $  \Comment $ S _{ ijrc } $ is a temp, only needed for one $ i,j $ iter
-    \State $ M _{ ijr }  \gets \max(M _{ i(j-1)r },  \max _{ c } S _{ ijrc } ) $
-    \State $ \tilde{P} _{ ijrc} \gets \exp \left ( S _{ ijrc } - M _{ ijr } \right ) $
-    \State $ L _{ ijr }  \gets e^{ M _{ i(j-1)r } - M _{ ijr }}L _{ ijr } + \sum _{ c }\tilde{P} _{ ijrc }$ \Comment Correct, update denominators
-    \State $ Z _{ ijrh } \gets   e^{ M _{ i(j-1)r } - M _{ ijr } }Z _{ ijrh } +\tilde{P} _{ ijrc}v _{ jch }$ \Comment Correct, update numerators
+    \State Move  $ k_{ jch' },v _{ jch' }$ on-chip
+    \State $ S _{ irjc } \gets q _{ irh' } k _{ jch' } $  \Comment $ S _{ irjc } $ is a temp, only needed for one $ i,j $ iter
+    \State $ M _{ irj }  \gets \max(M _{ i(j-1)r },  \max _{ c } S _{ irjc } ) $ \Comment Get max attention score seen so far
+    \State $ \tilde{P} _{ irjc} \gets \exp \left ( S _{ irjc } - M _{ irj } \right ) $
+    \State $ L _{ irj }  \gets e^{ M _{ i(j-1)r } - M _{ irj }}L _{ irj } + \sum _{ c }\tilde{P} _{ irjc }$ \Comment Correct, update denominators
+    \State $ Z _{ irjh } \gets   e^{ M _{ i(j-1)r } - M _{ irj } }Z _{ irjh } +\tilde{P} _{ irjc}v _{ jch }$ \Comment Correct, update numerators
 \EndFor
 \State $ z _{ irh } \gets \frac{1}{L _{ i(-1)r }} Z _{ i(-1)rh }$ \Comment Divide $ z $ by last $ j  $ value of $ L _{ ijc } $
-    \State $ \ell _{ ir } \gets M _{ i(-1)r }+\ln L _{ i(-1)r }$ \Comment Store sufficient statistics
+    \State $ \ell _{ ir } \gets M _{ i(-1)r }+\ln L _{ i(-1)r }$ \Comment Store statistics for bwd
     \State Write  $z _{ irh } ,  \ell _{ ir }$ to off-chip memory
 \EndFor
-
 \label{algo_fa_v2}
 \end{algo}
 
+The application of the causal mask is not shown. The for-loop just unrolls the $ j' $ sum in
+\eqref{eq_flash_attn_sums}.
 
 
-Essentially, one just computes partial values for each term in the softmax sum, correcting old
-results and adding new terms to the sum with each iteration. Whereas vanilla attention requires $
-\Ocal \left( S ^{ 2 }+ DS \right)  $ memory accesses per attention head, flash attention requires
-fewer. Let $ M $ be the amount of on-chip memory in bytes and let $ R  $ be the range of $ r \in
-\left \{ 0, \ldots , R-1 \right \} $ and similar for other indices. Being able to to fit all of the
-above tensors in memory requires $ CH + RH + RC \lesssim \Ocal \left( M \right)  $ most of the memory
-accesses above come from the $ q, z $ accesses in the inner loop, which access $ \Ocal \left( \frac{
-HS ^{ 2 } }{ C } \right)  \lesssim \Ocal \left(\frac{ H ^{ 2}S ^{ 2 } }{ M }  \right) $ bytes of
-memory, using the inequality on memory. Since $ M \sim 10 ^{ 5 } $ bytes on 2023 GPUs, this is a win
-for typical values of $ H \sim 10 ^{ 2 } $.
+
+ Whereas vanilla attention requires $ \Ocal \left( S ^{ 2 }+ DS \right)  $ memory transfers per
+ attention head, flash attention requires fewer. Let $ M $ be the amount of on-chip memory in bytes
+ and let $ R  $ be the range of $ r \in \left \{ 0, \ldots , R-1 \right \} $ and similar for other
+ indices. Being able to to fit all of the necessary tensors in on-chip memory requires $ CH + RH +
+ RC \lesssim \Ocal \left( M \right)  $.  Most of the memory transfers above come from the $k, v$
+ accesses in the inner loop, which access $ \Ocal \left( \frac{ HS ^{ 2 } }{ R } \right)$ elements
+ over the lifetime of the algorithm. Assuming the chunks were chosen to maximize on-chip memory
+ usage, such that $ RH \sim \Ocal \left( M \right)  $, this is  $  \Ocal \left(\frac{ H ^{ 2}S ^{ 2
+ } }{ M }  \right) $ bytes of memory. Since $ M \sim 10 ^{ 5 } $ bytes on 2023 GPUs, this is fewer
+ than $ \Ocal \left( S ^{ 2 } \right) $ access for the typical  head dimensions  $ H \lesssim 10 ^{ 2 }
+ $.
 
 
 Flash attention is also a big win for activation memory: a naive algorithm has a $ \Ocal \left( ABS
@@ -764,6 +770,10 @@ forwards pass is \eqref{eq_att_actmem_vanilla} with $ 2p \longrightarrow p $ in 
 
 \subsection{Tensor Parallelism \label{subsec_tensor_parallelism} }
 
+\begin{commentbox}{Side Note: }
+    I wrote a blog post on this \href{https://www.determined.ai/blog/tp}{here.}
+\end{commentbox}
+
 
 In \textbf{Tensor Parallelism}, sometimes also called \textbf{Model Parallelism}, individual weight
 matrices are split across devices \cite{shoeybi2020megatronlm}. We consider the \pyinline{MLP} and
@@ -789,19 +799,13 @@ suppress all indices apart from those of the hidden dimension for clarity.
 The first matrix multiply $ z _{ d }W ^{ 0 } _{ d e } $ is naturally partitioned across the output
 index, which spans the expanded hidden dimension $ e\in \left \{ 0, \ldots , ED-1 \right \} $. This
 functions by splitting the weight matrix across its output indices across $ T $ devices:  $ W ^{ 0 }
-_{ d e }= W ^{ 0 }_{ d (f t) } \equiv  \bar{W} ^{ 0 } _{ d f \bar{t} }$ (again in \pyinline{einops}-like
-notation, with bars denoting that the tensor and particular indices are sharded; see
-App.~\ref{app_conventions}), where in the split weights $ \bar{t}\in \left \{ 0, \ldots , T-1
-\right \} $, and $ f \in \left \{ 0, \ldots , \frac{ ED }{ T } -1\right \} $. Each of the $ T  $
-workers compute one shard of $ z _{ d }\bar{W} ^{ 0 }_{ df \bar{t} } $, i.e. each has a different
-value of $ \bar{t} $. Note that each worker will have to store all components of the input $ z $ for
-their backward pass, and in the backwards pass \pyinline{AllReduce} operation (see
-App.~\ref{app_collective_communications}) will be needed\footnote{This is needed at the step of
-computing the gradient with respect to the original input. At the first step of a sharded
-computation when each worker gets $ y _{ e \bar{t} } = z _{ d } W _{ de\bar{t} } $ for one value of
-$ \bar{t} $, they only hold this slice of the activations. In order to compute $ \partial _{ z _{ d } }
-\Lcal=  \partial _{ y _{ e \bar{t} } } \Lcal \times W _{ de \bar{t} }$, the $ \bar{t} $ sum must be
-computed by an \pyinline{AllReduce} } to collect gradient shards from other.
+_{ d e }= W ^{ 0 }_{ d (f t) } \equiv  \bar{W} ^{ 0 } _{ d f \bar{t} }$ (again in
+\pyinline{einops}-like notation, with bars denoting that the tensor and particular indices are
+sharded; see App.~\ref{app_conventions}), where in the split weights $ \bar{t}\in \left \{ 0, \ldots
+, T-1 \right \} $, and $ f \in \left \{ 0, \ldots , \frac{ ED }{ T } -1\right \} $. Each of the $ T
+$ workers compute one shard of $ z _{ d }\bar{W} ^{ 0 }_{ df \bar{t} } $, i.e. each has a different
+value of $ \bar{t} $.
+
 
 Let the partial outputs from the previous step be $ \bar{z} _{ ft }  $ (batch-index suppressed),
 which are \pyinline{(B, S, E*D/T, T)}-shaped, with the final dimension sharded across workers. The
@@ -824,6 +828,16 @@ The progression of tensor shapes held by any single worker is
     \item \pyinline{(B, S, E*D/T)}
     \item \pyinline {(B, S, D)}
 \end{enumerate}
+
+In the backwards pass, another \pyinline{AllReduce} (see App.~\ref{app_collective_communications})
+is needed for proper gradient computations with respect to the first \pyinline{Linear} layer's
+outputs. This is true whenever an operation producing a sharded output involved non-sharded tensors:
+if an operation $ \bar{y}_{ \bar{r} }  = F(x, \ldots) $ produces a sharded output from an unsharded
+in put $ x $ (all other indices suppressed), the derivative with respect to $ x $ requires a sum
+over ranks, $ \frac{ \partial \Lcal }{ \partial x } = \frac{ \partial \Lcal }{ \partial \bar{y} _{
+\bar{r} }  } \frac{ \partial \bar{y} _{ \bar{y} } }{ \partial x  }$. Note that each worker will have
+to store all components of the input $ z $ for the backward pass.
+
 
 
 \begin{figure}[ht]
@@ -1493,7 +1507,7 @@ Sec.~\ref{subsubsec_attn_layer}, given the input $ z _{ bsd } $ of the \pyinline
 layer, the re-weighted value vectors\footnote{Summed over $ s' $, but concatenating the different $
 		a $ values over the $ f $ dimension.} $ w ^{ a }_{ bss'd } v ^{ a } _{ bs'f } $ are the key objects
 which determine the next-token-prediction, which only depends on the $ s=-1 $ index values.
-Therefore, we can cut out many steps and minimum requirements are:
+Therefore, we can cut out many steps and the minimum requirements are:
 \begin{itemize}
 	\item Only the attention weights $ w ^{ a }_{ bss'd }$ with $ s=-1 $ are needed
 	\item The only query values $ q ^{ a }_{ bsd } $ needed to get the above are those with $ s=-1 $
@@ -1518,10 +1532,10 @@ enormous, since the size of the cache grows with batch size and sequence length:
 \end{align}
 in the general case with tensor-parallelism. This can easily be larger than the memory costs of the
 model parameter: $ M _{ {\rm params}  } ^{ {\rm  inference}  } \sim p N _{ {\rm params}  } \sim p LD
-		^{ 2 }  $ (dropping $ \Ocal \left( 1 \right)  $ factors), so that the cache takes up more memory
-when $ BS \gtrsim D $. Also, re-processing an entire input sequence every time also exhibits the
-usual $\sim S ^{ 2 }  $ FLOPs dependence, but this is reduced to being \textit{linear} in $ S $
-when the kv-cache is used.
+^{ 2 }  $ (dropping $ \Ocal \left( 1 \right)  $ factors), so that the cache takes up more memory
+when $ BS \gtrsim D $, i.e. when the total number of token exceeds the hidden dimension. Using the
+kv-cache eliminates a would-be $ \Ocal \left( S ^{ 2 } \right)  $ factor in the FLOPs needed to
+compute a new token, reducing it to linear-in-$ S $ dependence everywhere.
 
 
 A very minimal implementation\footnote{Warning: very non-optimized code! Purely pedagogical.} is below:
@@ -1532,14 +1546,15 @@ A very minimal implementation\footnote{Warning: very non-optimized code! Purely 
 
 The essentials of inference-time math, much of it based on \cite{kipply_inference_math}.
 
-\paragraph{Naive Inference} Processing a single \pyinline{(B, S, D)}-shaped tensor to generate a single
-next input costs the $ 2BSN _{ {\rm params}  } $ FLOPs we found for the forwards-pass in
-Sec.~\ref{sec_flops_training}. Memory costs just come from the parameters themselves: $ M _{ {\rm
-					infer}  }^{ {\rm naive}  }=pN _{ {\rm params}  } $. Per the analysis of App.~\ref{app_compute_mem_bound},
-naive inference is generally compute-bound and so the per-token-latency is approximately\footnote{Assuming we
-	do the naive thing here and generate the next token in a similarly naive way, shifting over the
-	context window.}  $  2BSN _{ {\rm params}  }/ \lambda _{ {\rm FLOP/s}  } $ where the FLOPs bandwidth
-in the denominator is again defined in App.~\ref{app_compute_mem_bound}.
+\paragraph{Naive Inference} Processing a single \pyinline{(B, S, D)}-shaped tensor to generate a
+single next input costs the $ 2BSN _{ {\rm params}  } $ FLOPs we found for the forwards-pass in
+Sec.~\ref{sec_flops_training} (assuming $ S \lessim D $). Memory costs just come from the parameters
+themselves: $ M _{ {\rm infer}  }^{ {\rm naive}  }=pN _{ {\rm params}  } $. Per the analysis of
+App.~\ref{app_compute_mem_bound}, naive inference is generally compute-bound and so the
+per-token-latency is approximately\footnote{Assuming we do the naive thing here and generate the
+    next token in a similarly naive way, shifting over the context window.}  $  2BSN _{ {\rm params}
+    }/ \lambda _{ {\rm FLOP/s}  } $ where the FLOPs bandwidth in the denominator is again defined in
+    App.~\ref{app_compute_mem_bound}.
 
 \paragraph{kv-Cache Inference}
 The FLOPs requirements for the hidden-dimension matrix multiplies during generation are $2BN _{ {\rm params}  } $,
@@ -1566,7 +1581,7 @@ workers in the tensor-parallel group (see Foot.~\ref{foot_all_reduce}), taking a
 	BDS \times  10 ^{ -11 } \ {\rm sec} $
 
 
-\paragraph{Latency}
+\paragraph{Latency} TODO
 
 
 
@@ -1678,8 +1693,8 @@ tensors which  are derived from other tensors through such splitting operations,
 context of tensor-sharding where devices only locally hold some shard of the tensor. In this
 context, only some of the dimensions will be sharded across devices, and we may also put a bar over
 the corresponding sharded index. For instance, consider a two-dimensional tensor $ M _{ ab } $ of
-shape \pyinline{M.shape=(A, 2)}: sharding this tensor across two devices across the final index
-results in a tensor $ \bar{M}_{ a \bar{b} } $ which is of shape \pyinline{M_bar.shape=(A, 1)} on
+shape \pyinline{M.shape=(A, B)}: sharding this tensor across two devices across the final index
+results in a tensor $ \bar{M}_{ a \bar{b} } $ which is of shape \pyinline{M_bar.shape=(A, B/2)} on
 each device. As here, we will sometimes use bars to denote indices which are sharded over different
 devices.
 
@@ -1736,6 +1751,15 @@ A quick refresher on common distributed
               paper.\label{foot_all_reduce}}). In the latter case, the total cost is $ 2M \times
               \frac{ N-1 }{ N } $, due to \pyinline{AllReduce}-ing the initial $ M $-sized data, and
               then \pyinline{AllGather}-ing the $ M/N $-sized reductions.
+      \item  \pyinline{Scatter}: One worker gives shards of a tensor to all workers. If the worker
+          is scattering tensor $ T _{ x } $ over the given index, a \pyinline{Scatter}
+          effectively shards this as $ T _{ x } \longrightarrow T _{ (\bar{r}y) } $, each worker
+          getting a $ \bar{r} $-shard.
+      \item  \pyinline{AllToAll}: All workers receive shards of all others worker's tensors.  If
+          every worker has a tensor $ T _{ \bar{r}y } $, for one value of $ \bar{r} $, which we
+          imagine came from a sharding a tensor $ T _{ x } = T _{ (\bar{r}y) } $, then an
+          \pyinline{AllToAll} over the $ y $ index produces produces the tensor $ T _{ z \bar{r} }$
+          defined by$ T _{ z \bar{r} }= T _{ x } $ on all workers.
 \end{itemize}
 
 
