@@ -428,81 +428,74 @@ activation memory required, at the expense of needing recomputation in the backw
 
 The central idea is to decompose the attention computation in the following way. Dropping the batch
 index, let $ q _{ sd }, k _{ sd }, v _{ sd } $ be the queries, keys, and values, and $ z _{ sd } $
-be the final output. Splitting into attention heads as in $ q _{ sd } = q _{ s(ah) }\longrightarrow q _{ sah } $
-and similar the computation is
+be the final output. Splitting into attention heads as in $ q _{ sd } = q _{ s(ah) }\longrightarrow
+q _{ sah } $ and similar the computation is
 \begin{align}
     z _{ sah } &= \Sm _{ s' } \left ( q _{ sah' } k _{ s'ah' } \right ) v _{ s'ah }
 \end{align}
-which is then concatenated as $ z _{ s(ah) }\longrightarrow  z _{ sd } $ to get the result.
+which is then concatenated as $ z _{ s(ah) }\longrightarrow  z _{ sd } $ to get the result. We are
+omitting the (very important) causal mask for clarity of presentation.  Because each attention head
+computation is identical, we also omit the $ a $-index going forward in this section.
 
-The $ \Ocal \left( A S ^{ 2 } \right)  $ attention scores $ \Sm _{ s' } \left ( q _{ sah' } k _{
-s'ah' } \right ) $ are expensive to shuttle back and forth from off-chip to on-chip memory and are a
-costly activation memory component. To this end, Flash Attention functions by further chunking $ q,
-z $ over the sequence dimension as in $ q _{ sd }= q _{ (ir)(ah) }\longrightarrow  q _{ airh }  $,
-and similar for $ z $, and $ k,v $ where $ k _{ sd }= k _{ (jc)(ah) }\longrightarrow  k _{ ajch }
-$, and similar for $ v $. The chunk sizes are such that the attention scores for each chunk can be
-computed with minimal off-chip operations (by using shared memory), which is where the performance
-gains come from. With this splitting, the above reads
+The issue is that a naive computation would compute all $ \Ocal \left( S ^{ 2 } \right)  $
+components of the attention scores $ q _{ sh' } k _{ s'h' } $ for each attention head and their
+exponential all at once, which incurs a penalty of shuttling back and forth $ \Ocal \left( S ^{ 2 }
+\right)  $ elements to and from on-chip memory multiple times in order to get the final $ z _{ sh }
+$ outputs. Flash Attentions functions by instead computing the exponentials in stages with fewer
+memory transfers, never populating the attention scores or exponentials on off-chip memory.
+
+This works by first chunking all of the inputs along their sequence dimensions as in:
+\begin{itemize}
+    \item $  q _{ sh } =q _{ (ir)h }\longrightarrow  q _{ irh }  $ where $ i \in \left \{ 0, \ldots
+        , I-1 \right \} $ and $ r \in \left \{ 0, \ldots , R-1 \right \} $ with $ S=RI $
+    \item $ k _{ sh } = k _{ (jc)h } \longrightarrow  k _{jch} , v _{ sh } = v _{ (jc)h }
+        \longrightarrow  v _{jch} $ where $ j \in \left \{ 0, \ldots , J-1 \right \} $ and $ c \in
+        \left \{ 0, \ldots , C-1 \right \} $ with $ S=JC $
+\end{itemize}
+The chunk sizes are determined by memory constraints, as discussed below.  Then, the
+per-attention-head computation is equivalently written as
 \begin{align}
-    z _{ irah } &= \Sm _{ j'c' } \left ( q _{ irah' } k _{ j'c'ah' } \right ) v _{ j'c'ah } \nn
-     &= P _{ irj'c'a } v _{ jc'ah } \label{eq_flash_attn_sums}
+    z _{irh} &= \Sm _{jc} \left ( q _{ irh' } k _{ jch' } \right ) v _{ jch } \nn
+             &= \frac{ \exp \left (  q _{ irh' } k _{ jch' } \right ) }{ \sum _{ jc } q _{ irh'' } k _{ jch'' } } v _{ jch }\nn
+             &\equiv \frac{\sum _{ j } Z _{ irjh } }{   \sum _{ j'c } q _{ irh'' } k _{ j'ch'' } }\nn
+             &\equiv \frac{\sum _{ j } Z _{ irjh } }{\sum _{ j' }L _{ ij'r }}\nn
+             &\equiv \frac{ Z _{ irh } }{L _{ ir }}\nn
 \end{align}
-where range of the new indices is dictated by the available on-chip memory and is analyzed below.
+where we introduced the notation which will be used in the algorithm below. The algorithm proceeds
+similarly to how it's outlined above: we compute in chunks, looping over $ i $ and an inner $ j$
+loop which is used to compute the numerator and denominator simultaneously.
 
-The algorithm functions by performing the sums in \eqref{eq_flash_attn_sums} on-chip, meaning that
-neither the attention scores (Softmax inputs) nor the probabilities ever need to be shuttled back
-and forth. We will jump right to the second version of the algorithm.   In addition to
-the final outputs $ z _{ irah } $, the algorithm saves the Softmax denominators $ \ell
-_{ ira } $ ($ AS $ total elements) which are related to the softmax probabilities as in
-\begin{align}
-    P _{ irjca } &= \frac{  \exp \left (   q _{ irah } k _{ jcah }\right)}{ \ell _{ ira } } \ .
-\end{align}
-Because only the Softmax outputs $ P $ are needed to compute the Softmax derivative
-\eqref{eq_softmax_derivative}, we can use the $ \ell _{ ira} $ to compute the backwards pass if we
-also recompute the exponential term.
-
-
-The entire forward-pass algorithm is as follows. Essentially, one just computes partial values for
-each term in the softmax sum, correcting old results and adding new terms to the sum with each
-iteration. We capitalize tensors which only exist on-chip and leave tensors which come from off-chip
-lower-cased. The entire $ z _{ irah } $ tensor is then computed as (we omit the attention head $ a
-$-index for clarity):
-\begin{algo}{Flash Attention Version Two (Forward)}
+Ignoring the important causal mask and not tracking the maximum logits (which we should do for
+numerical) stability, the basic version of the algorithm is as in the below. The full
+algorithm again uses the causal mask, tracks maximum attention scores, and stores more statistics
+for the backwards pass, but this captures the essentials. Additional recomputation is needed for the
+backwards pass.
+\begin{algo}{Flash Attention (Naive - Missing causal mask/max tracking.)}
 \For{ $ i \in \ldots  $} \Comment Computing outputs $ z _{ irh } $ $ \forall r, h $
 \State Initialize off-chip tensors $ z _{ irh },  \ell _{ ir }$ to zeros
-\State Move  $ q _{ irh }$ on-chip, instantiate temps $Z _{ irjh }, L _{ irj }$ to zeros and $M _{ irj }$ to $ -\infty $ on-chip.
-\For{ $ j \in \ldots  $}
-    \State Move  $ k_{ jch' },v _{ jch' }$ on-chip
-    \State $ S _{ irjc } \gets q _{ irh' } k _{ jch' } $  \Comment $ S _{ irjc } $ is a temp, only needed for one $ i,j $ iter
-    \State $ M _{ irj }  \gets \max(M _{ ir(j-1) },  \max _{ c } S _{ irjc } ) $ \Comment Get max attention score seen so far
-    \State $ \tilde{P} _{ irjc} \gets \exp \left ( S _{ irjc } - M _{ irj } \right ) $
-    \State $ L _{ irj }  \gets e^{ M _{ i(j-1)r } - M _{ irj }}L _{ irj } + \sum _{ c }\tilde{P} _{ irjc }$ \Comment Correct, update denominators
-    \State $ Z _{ irjh } \gets   e^{ M _{ ir } - M _{ irj } }Z _{ irjh } +\tilde{P} _{ irjc}v _{ jch }$ \Comment Correct, update numerators
+\State Move  $ q _{ irh }$ on-chip, instantiate temp $Z _{ irh }$ to zeros on-chip.
+\For{ $ j \in \ldots  $} \Comment All on-chip computations
+    \State Move  $ k_{ jch },v _{ jch }$ on-chip
+    \State $ Z _{ irh } \gets   Z _{ irh } +\exp \left ( q _{ irh' } k _{ jch' }  \right ) v _{ jch }$ \Comment Update numerator
+    \State $ L _{ ir } \gets   L _{ ir } +\sum _{ j }\exp \left ( q _{ irh' } k _{ jch' }  \right ) $ \Comment Update denominator
 \EndFor
-\State $ z _{ irh } \gets \frac{1}{L _{ ir(-1) }} Z _{ ir(-1)h }$ \Comment Divide $ z $ by last $ j  $ value of $ L _{ irj } $
-    \State $ \ell _{ ir } \gets M _{ ir(-1) }+\ln L _{ ir(-1) }$ \Comment Store statistics for bwd
-    \State Write  $z _{ irh } ,  \ell _{ ir }$ to off-chip memory
+\State $ z _{ irh } \gets \frac{Z _{ irj }}{L _{ ir }}$ \Comment Write result off-chip
 \EndFor
-\label{algo_fa_v2}
+\label{algo_fa_basic}
 \end{algo}
 
-The application of the causal mask is not shown. The for-loop just unrolls the $ j' $ sum in
-\eqref{eq_flash_attn_sums}.
-
-
-
- Whereas vanilla attention requires $ \Ocal \left( S ^{ 2 }+ DS \right)  $ memory transfers per
- attention head, flash attention requires fewer. Let $ M $ be the amount of on-chip memory in bytes
- and let $ R  $ be the range of $ r \in \left \{ 0, \ldots , R-1 \right \} $ and similar for other
- indices. Being able to to fit all of the necessary tensors in on-chip memory requires $ CH + RH +
- RC \lesssim \Ocal \left( M \right)  $.  Most of the memory transfers above come from the $k, v$
- accesses in the inner loop, which access $ \Ocal \left( \frac{ HS ^{ 2 } }{ R } \right)$ elements
- over the lifetime of the algorithm. Assuming the chunks were chosen to maximize on-chip memory
- usage, such that $ RH \sim \Ocal \left( M \right)  $, this is  $  \Ocal \left(\frac{ H ^{ 2}S ^{ 2
- } }{ M }  \right) $ bytes of memory. Since $ M \sim 10 ^{ 5 } $ bytes on 2023 GPUs, this is fewer
- than $ \Ocal \left( S ^{ 2 } \right) $ access for the typical  head dimensions  $ H \lesssim 10 ^{ 2 }
- $.
-
+We now analyze the memory transfer costs. As a baseline, vanilla attention requires $ \Ocal \left( S
+^{ 2 }+ DS \right)  $ memory transfers per attention head.   For flash attention, most of the memory
+transfers above come from the $k, v$ accesses in the inner loop, which access $ \Ocal \left( IJCH
+\right) \sim  \Ocal \left( \frac{ HS ^{ 2 } }{ R } \right)$ elements over the lifetime of the
+algorithm (per attention head). The factor $ H/R $ determines the memory-access advantage, and this
+number is bound by the on-chip memory size. The on-chip bytes from the queries, keys, and vectors
+take $ \Ocal \left( CH + RH \right)  $ memory and the temporaries from attention scores and
+exponentials require $ \Ocal \left( RC \right)$. If we have $ M $ bytes of on-chip memory, then we
+have the constraint $ CH + RH + RC \lesssim  M  $, and assuming assuming the chunks were chosen to
+maximize on-chip memory usage, $ \frac{ H }{ R } \sim  \frac{ H ^{ 2 } }{ M } $. Since $ M \sim 10
+^{ 5 } $ bytes on 2023 GPUs, this is a small factor for the typical head dimensions  $ H \sim 64 $,
+as desired.
 
 Flash attention is also a big win for activation memory: a naive algorithm has a $ \Ocal \left( ABS
 ^{ 2 } \right)  $ per-layer contribution to activation memory due to needing to save the attention
@@ -512,261 +505,10 @@ dominated by the $ \Ocal \left( BSD \right)  $ costs from needing to save inputs
 
 \newpage
 
-\part{Training}
+\part{Parallelism}
 
-\section{Memory \label{sec_memory_training}}
-
-In this section we summarize the train-time memory costs of Transformers under various training
-strategies\footnote{A nice related blog post is \href{https://blog.eleuther.ai/transformer-math/}{here}. \label{foot_eleuther_math_101} }.
-
-The memory cost is much more than simply the cost of the model
-parameters. Significant factors include:
-\begin{itemize}
-	\item Optimizer states, like those of \pyinline{Adam}
-	\item Mixed precision training costs, due to keeping multiple model copies.
-	\item Gradients
-	\item Activation memory\footnote{Activations refers to any intermediate value which needs to be
-		      cached in order to compute backpropagation. We will be conservative and assume that the inputs
-		      of all operations need to be stored, though in practice gradient checkpointing and recomputation
-		      allow one to trade caching for redundant compute. In particular, flash attention
-		      \cite{dao2022flashattention} makes use of this strategy.} , needed for backpropagation.
-\end{itemize}
-Because the activation counting is a little more involved, it is in its own section.
-
-
-\begin{nicebox}{Essentials}
-	Memory costs count the elements of all tensors in some fashion, both from model parameters and
-	intermediate representations. The gradient and optimizer state costs scale with the former quantity:
-	$ \Ocal \left ( N _{ {\rm params}  } \right ) \sim \Ocal \left ( L D ^{ 2 } \right )$, only counting
-	the dominant contributions from weight matrices. Activation memory scales with the latter,
-	which for a \pyinline{(B, S, D)}-shaped input gives $ \Ocal \left ( BDLS  \right ) $ contributions
-	from tensors which preserve the input shape, as well as $ \Ocal \left( ABLS ^{ 2 } \right)  $
-	factors from attention matrices.
-\end{nicebox}
-
-
-\subsection{No Sharding}
-
-Start with the simplest case where there is no sharding of the model states. Handling the different
-parallelism strategies later will be relatively straightforward, as it involves inserting just a few
-factors here and there.
-
-\subsubsection{Parameters, Gradients, Optimizer States, and Mixed Precision
-	\label{sec_params_grads_optim_mem}}
-
-
-Memory from the bare parameter cost, gradients, and optimizer states are fixed costs independent of
-batch size and sequence-length (unlike activation memory), so we discuss them all together here. The
-parameter and optimizer costs are also sensitive to whether or not mixed-precision is used, hence we
-also address that topic, briefly.  We will assume the use of \pyinline{Adam}\footnote{Which stores
-	\href{https://pytorch.org/docs/stable/generated/torch.optim.Adam.html}{two different running
-		averages} per-model parameter.} throughout, for simplicity and concreteness. It will sometimes be
-useful below to let $ p $ to denote the precision in bytes that any given element is stored in, so
-\pyinline{torch.float32} corresponds to $ p=4 $, for instance. Ultimately, we primarily consider
-vanilla training in $ p=4 $ precision and \pyinline{torch.float32}/\pyinline{torch.float16} ($ p=4
-$/ $ p=2 $)  mixed-precision, other, increasingly popular variants to exist, so we keep the
-precision variable where we can.
-
-
-Without mixed precision, the total cost of the
-\pyinline{torch.float32} ($ p=4 $ bytes) model and optimizer states in bytes is then
-\begin{align}
-	M _{ \rm model} & = 4 N _{ \rm params } \ , \quad M_{ \rm  optim } = 8 N _{ \rm params }
-	\quad ({\rm no \ mixed \ precision, } p=4)
-	\label{eq_optimizer_states_mem_no_mp}
-\end{align}
-where, from the previous section, the pure parameter-count of the decoder-only Transformers
-architecture is
-\begin{align}
-	N _{ \rm params } & \approx  (4 + 2E) L D ^{ 2 } \times \left ( 1 + \Ocal \left( \frac{ V }{ DL }
-		\right) + \Ocal \left( \frac{ 1 }{ D } \right)  \right ) \ . \label{eq_approx_params_no_sharding}
-\end{align}
-where the first term comes from the \pyinline{TransformerBlock} weight matrices\footnote{So,
-	in the usual $ E=4 $ case, the \pyinline{MLP} layers are twice as costly as the
-	\pyinline{CausalAttention} layers.}, the first omitted subleading correction term is the embedding
-matrix, and the last comes from biases, \pyinline{LayerNorm} instances, and other negligible
-factors.  The optimizer states cost double the model itself.
-
-
-The situation is more complicated when mixed-precision is used \cite{micikevicius2018mixed}.
-The pertinent components of mixed-precision\footnote{A note on the implementation of mixed-precision
-in \pyinline{torch}: usually mixed-precision occurs by wrapping the forward pass in a context
-manager, \pyinline{torch.autocast}. The default behavior is to then create copies of some tensors
-in lower-precision and do the forward pass with those. For instance, this is done with
-matrix-multiplies whose arguments and outputs will be in \pyinline{torch.float16}, but for sums
-the inputs and outputs will all be \pyinline{torch.float32}, for vanilla mixed-precision usage.
-Consequently, any such \pyinline{torch.float16} versions of tensor will often persist effectively
-as contributors to activation memory, since the backwards pass will need those same tensors. This
-can be verified by inspecting the saved tensors: if \pyinline{z} is the output of a
-matrix-multiply in such an autocast context, \pyinline{z.grad_fn._saved_mat2} will be a
-\pyinline{torch.float16} copy of the weights used to perform the matrix-multiply. In effect, the
-cost of the model weights which are used for the actual forward pass are only materialized within
-the lifetime of the context manager.}:
-\begin{itemize}
-	\item A half-precision ($ p=2 $ bytes) copy of the model is used to perform the forwards and
-	      backwards passes
-	\item A second, "master copy" of the model is also kept with weights in full $ p=4 $ precision
-	\item The internal \pyinline{Adam} states are kept in full-precision
-\end{itemize}
-Confusingly, the master copy weights are usually accounted for as part of the optimizer state, in
-which case the above is altered to
-\begin{align}
-	M _{ \rm model} & = 2 N _{ \rm params } \ , \quad M_{ \rm  optim } = 12 N _{ \rm params }
-	\quad ({\rm mixed \ precision}) .
-	\label{eq_optimizer_states_mem_mp}
-\end{align}
-The optimizer state is now six times the cost of the actual model used to process data and the costs
-of \eqref{eq_optimizer_states_mem_mp} are more than those of \eqref{eq_optimizer_states_mem_no_mp}.
-However, as we will see, the reduced cost of activation memory can offset these increased costs, and
-we get the added benefit of increased speed due to specialized hardware. The above also demonstrates
-why training is so much more expensive than inference.
-
-
-\subsubsection{Gradients}
-
-Gradients are pretty simple and always cost the same regardless of whether or not mixed-precision is
-used:
-\begin{align}
-	M_{ \rm grad} & = 4 N _{ \rm params }     \label{eq_grad_memory} \ .
-\end{align}
-In mixed precision, even though the gradients are initially computed in $ p= 2$, they
-\href{https://huggingface.co/docs/transformers/v4.20.1/en/perf_train_gpu_one#anatomy-of-models-memory}{have to
-	be converted} to $ p=4 $ to be applied to the master weights of the same precision.
-
-
-
-
-\subsubsection{Activations}
-
-Activations will require a more extended analysis \cite{korthikanti2022reducing}. Unlike the above
-results, the activation memory will depend on both the batch size and input sequence length, $ B $
-and $ S $, scaling linearly with both.
-
-
-
-\paragraph{Attention Activations}
-
-We will count the number of input elements which need to be cached. Our \pyinline{(B, S, D)}-shaped inputs
-to the attention layer with $ BDS $ elements are first converted to $ 3BDS $ total query, key, value
-elements, and the query-key dot products produce $ ABS ^{ 2 } $ more, which are softmaxed into $ ABS
-		^{ 2 } $ normalized scores. The re-weighted inputs to the final linear layer also have $ BDS $
-elements, bringing the running sum to $ BS \left ( 5D + 2AS  \right ) $
-
-Finally, there are also the dropout layers applied to the normalized attention scores and the final
-output whose masks must be cached in order to
-backpropagate. In torch, the mask is a \pyinline{torch.bool} tensor, but
-\href{https://github.com/pytorch/pytorch/issues/41571}{surprisingly} these use one \textit{byte} of
-memory per element, rather than one bit \footnote{As you can verify
-	via \pyinline{4 * torch.tensor([True]).element_size() == torch.tensor([1.]).element_size().}}.
-Given this, the total memory cost from activations is
-\begin{align}
-	M _{ \rm act  } ^\texttt{Attention} & = BLS \left ( (5p+1)D + (2p+1)AS  \right ) \ .
-	\label{eq_att_actmem_vanilla}
-\end{align}
-
-
-
-
-\paragraph{MLP Activations}
-
-First we pass the \pyinline{(B, S, D)}-shaped inputs into the first MLP layer. These turn into the
-\pyinline{(B, S, E*D)} inputs of the non-linearity, whose same-shaped outputs are then passed into
-the last \pyinline{Linear} layer, summing to $ (2E+1)BDS $ total elements thus far. Adding in the
-dropout mask, the total memory requirement across all \pyinline{MLP} layers is:
-\begin{align}
-	M _{ \rm act  } ^\texttt{MLP} & = (2Ep+p+1)BDLS\ .
-	\label{eq_mlp_actmem_vanilla}
-\end{align}
-
-
-
-
-\paragraph{LayerNorm, Residual Connections, and Other Contributions}
-
-Then the last remaining components. The \pyinline{LayerNorm} instances each have $ BDS $ inputs and
-there are two per transformer block, so $ M _{ {\rm  act}  } ^\texttt{LayerNorm} = 2pBDLS $, and
-there is an additional instance at the end of the architecture\footnote{Following
-\cite{korthikanti2022reducing} we will neglect this in the below sum, an $ \Ocal \left( 1/L
-\right) $ error}. There are two residual connections per block, but their inputs do not require
-caching (since their derivatives are independent of inputs). Then, there are additional
-contributions from pushing the last layer's outputs through the language-model head and
-computing the loss function, but these do not scale with $ L $ and are ultimately $ \sim \Ocal
-\left( \frac{ V }{ DL } \right)  $ suppressed, so we neglect them.
-
-
-
-
-
-\paragraph{Total Activation Memory}
-
-
-Summing up the contributions above, the total activation memory cost per-layer is
-\begin{align}
-	M _{ {\rm act}  } ^{ {\rm  total}  } & \approx  2BDLS   \left ( p(E+4) + 1 + \Ocal \left( \frac{
-		V}{ DL } \right)  \right )
-	+ ABLS ^{ 2 } \left ( 2p+1\right ) \label{eq_act_mem_total_no_sharding}\ .
-\end{align}
-Evaluating in common limits, we have:
-\begin{align}
-	M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=4 } & =BLS \left ( 66 D+15AS  \right ) \nn
-	M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=2 } & =BLS \left ( 34 D+5AS  \right )
-\end{align}
-
-
-\paragraph{When does mixed-precision reduce memory?} (Answer: usually.) We saw in Sec.~\ref{sec_params_grads_optim_mem}
-that mixed precision \textit{increases} the fixed costs of non-activation memory, but from the above
-we also see that it also \textit{reduces} the activation memory and the saving increase with larger
-batch sizes and sequence lengths. It is straightforward to find where the tipping point is.
-Specializing to the case $E=4$, vanilla mixed-precision case with no parallelism\footnote{With both
-	tensor- and sequence-parallelism, the parallelism degree $ T $ actually drops out in the comparison
-	(since both form of memory are decrease by $ 1/T $, so this restriction  can be lifted.}, the
-minimum batch size which leads to memory savings is
-\begin{align}
-	B _{ {\rm min}  } & = \frac{ 6 D ^{ 2 } }{ 8 DS + A S ^{ 2 } }\label{eq_min_mp_batch_size}\ .
-\end{align}
-Plugging in numbers for the typical $ \Ocal \left( 40 \ {\rm GiB} \right)$ model in the Summer of
-2023 gives $ B _{ {\rm min} } \sim \Ocal \left( 1\right)  $, so mixed-precision is indeed an overall
-savings at such typical scales.
-
-
-
-\begin{commentbox}{Side Note: Optimizations}
-
-The above analysis is conservative and accounts for more tensors than are actually saved in
-practice.\newline
-
-For instance, both the input and outputs of all non-linearities were counted, but there are many
-activations whose derivatives can be reconstructed from its outputs alone: $ \phi'(z)=F \left (
-\phi(z) \right ) $ for some $ F $. Examples:
-\begin{itemize}
-    \item \pyinline{ReLU}: since $ \phi(z)= z\theta(z) $, then (defining the derivative at zero to
-        be zero) $ \phi'(z) =\theta(z) = \theta \left ( \phi(z) \right) $. Correspondingly, torch
-        only uses the \pyinline{ReLU} outputs \href{https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/tools/autograd/derivatives.yaml#L2009-L2011}{to compute the derivative}
-        (there is no self arg in the \pyinline{threshold_backward(grad, result, 0)} line).
-    \item  \pyinline{tanh}: since $ \tanh'(z)=1-\tanh(z) ^{ 2 } $.
-\end{itemize}
-Other cases do not have this nice property, in which case both the inputs and outputs need to
-be stored:
-\begin{itemize}
-    \item \pyinline{GeLU} \cite{hendrycks2023gaussian}: $ \phi(z)=z\Phi(z) $ here and the derivative
-        $ \phi'(z)= \Phi(z) + \frac{ z e^{ -z ^{ 2 } /2 } }{\sqrt{2\pi}  } $, both the inputs and
-        outputs \href{https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/tools/autograd/derivatives.yaml#L2041-L2044}{must be used in the backwards pass.}.
-
-        The explicit CUDA kernel \href{https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/aten/src/ATen/native/cuda/ActivationGeluKernel.cu#L70-L84}{is here}.
-\end{itemize}
-If the inputs in each of these cases are not needed for any other part of the backwards pass, they
-are garbage collected in \pyinline{torch} soon after creation.
-
-
-\paragraph{Example}: \pyinline{Softmax} is another instance where this occurs, since
-\begin{align}
-     \partial _{ i } \Sm \left ( x _{ j } \right )  &= \delta _{ ij }\Sm \left ( x _{ j } \right ) -   \Sm \left ( x _{ i } \right )  \Sm \left ( x _{ j } \right ) \label{eq_softmax_derivative}
-\end{align}
-Because of this, the actual amount of activation memory due to the attention layer after the
-forwards pass is \eqref{eq_att_actmem_vanilla} with $ 2p \longrightarrow p $ in the $ \Ocal \left( S
-^{ 2 } \right)  $ term, though the above expression better reflects the necessary peak memory.
-
-\end{commentbox}
+The simplicity of the Transformers architecture lends itself to a deep variety of parallelism
+strategies. We review some of them below.
 
 \subsection{Tensor Parallelism \label{subsec_tensor_parallelism} }
 
@@ -1087,7 +829,7 @@ act on every sequence position identically, only the Attention layers (and the l
 require special handling.
 
 The algorithm performs the $ \bar{w}$ sum as a loop. We present the simplified case without a causal
-mask or maximum attention score tracking. These are important omissions \footnote{See
+mask or maximum attention score tracking. These are important omissions\footnote{See
 \cite{brandon2023stripedattentionfasterring} for causal mask efficiency considerations.}
 \begin{algo}{Ring Attention (Naive - Missing causal mask/max tracking.)}
 \State Initialize $ Z _{ \bar{r}td } $, $ L _{ \bar{r}t } $ to zeros
@@ -1095,11 +837,11 @@ mask or maximum attention score tracking. These are important omissions \footnot
 \For{ $ w \in \left \{ r, \ldots , R-1, 0, \ldots , r-1 \right \}  $} \Comment Computing components $ z _{ \bar{r}td } $ $ \forall t, d $
     \If{$ w \neq (r-1) \mod R $} prefetch shards $ k _{ (\bar{w}+1)xd }, v _{ (\bar{w}+1)xd } $ $ \forall x,d $
     \EndIf
-    \State $ Z _{ \bar{r}td } \gets Z _{ \bar{r}td }+   \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right ) $
-    \State $ L _{ \bar{r}t } \gets  L _{ \bar{r}t } +  \sum _{ x } q _{ \bar{r}t d } k _{ \bar{w}x d }  $
+    \State $ Z _{ \bar{r}td } \gets Z _{ \bar{r}td }+   \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right ) v _{ \bar{w}xd } $
+    \State $ L _{ \bar{r}t } \gets  L _{ \bar{r}t } +  \sum _{ x } \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right )  $
 \EndFor
 \State $ z _{ \bar{r}td } \gets \frac{ Z _{ \bar{r}td } }{ L _{ \bar{r}t }  }$
-\label{ring_attn_fwd_naive}
+\label{algo_ring_attn_fwd_naive}
 \end{algo}
 
 
@@ -1108,6 +850,264 @@ mask or maximum attention score tracking. These are important omissions \footnot
 
 TODO
 
+
+\newpage
+
+\part{Training}
+
+\section{Memory \label{sec_memory_training}}
+
+In this section we summarize the train-time memory costs of Transformers under various training
+strategies\footnote{A nice related blog post is \href{https://blog.eleuther.ai/transformer-math/}{here}. \label{foot_eleuther_math_101} }.
+
+The memory cost is much more than simply the cost of the model
+parameters. Significant factors include:
+\begin{itemize}
+	\item Optimizer states, like those of \pyinline{Adam}
+	\item Mixed precision training costs, due to keeping multiple model copies.
+	\item Gradients
+	\item Activation memory\footnote{Activations refers to any intermediate value which needs to be
+		      cached in order to compute backpropagation. We will be conservative and assume that the inputs
+		      of all operations need to be stored, though in practice gradient checkpointing and recomputation
+		      allow one to trade caching for redundant compute. In particular, flash attention
+		      \cite{dao2022flashattention} makes use of this strategy.} , needed for backpropagation.
+\end{itemize}
+Because the activation counting is a little more involved, it is in its own section.
+
+
+\begin{nicebox}{Essentials}
+	Memory costs count the elements of all tensors in some fashion, both from model parameters and
+	intermediate representations. The gradient and optimizer state costs scale with the former quantity:
+	$ \Ocal \left ( N _{ {\rm params}  } \right ) \sim \Ocal \left ( L D ^{ 2 } \right )$, only counting
+	the dominant contributions from weight matrices. Activation memory scales with the latter,
+	which for a \pyinline{(B, S, D)}-shaped input gives $ \Ocal \left ( BDLS  \right ) $ contributions
+	from tensors which preserve the input shape, as well as $ \Ocal \left( ABLS ^{ 2 } \right)  $
+	factors from attention matrices.
+\end{nicebox}
+
+
+\subsection{No Sharding}
+
+Start with the simplest case where there is no sharding of the model states. Handling the different
+parallelism strategies later will be relatively straightforward, as it involves inserting just a few
+factors here and there.
+
+\subsubsection{Parameters, Gradients, Optimizer States, and Mixed Precision
+	\label{sec_params_grads_optim_mem}}
+
+
+Memory from the bare parameter cost, gradients, and optimizer states are fixed costs independent of
+batch size and sequence-length (unlike activation memory), so we discuss them all together here. The
+parameter and optimizer costs are also sensitive to whether or not mixed-precision is used, hence we
+also address that topic, briefly.  We will assume the use of \pyinline{Adam}\footnote{Which stores
+	\href{https://pytorch.org/docs/stable/generated/torch.optim.Adam.html}{two different running
+		averages} per-model parameter.} throughout, for simplicity and concreteness. It will sometimes be
+useful below to let $ p $ to denote the precision in bytes that any given element is stored in, so
+\pyinline{torch.float32} corresponds to $ p=4 $, for instance. Ultimately, we primarily consider
+vanilla training in $ p=4 $ precision and \pyinline{torch.float32}/\pyinline{torch.float16} ($ p=4
+$/ $ p=2 $)  mixed-precision, other, increasingly popular variants to exist, so we keep the
+precision variable where we can.
+
+
+Without mixed precision, the total cost of the
+\pyinline{torch.float32} ($ p=4 $ bytes) model and optimizer states in bytes is then
+\begin{align}
+	M _{ \rm model} & = 4 N _{ \rm params } \ , \quad M_{ \rm  optim } = 8 N _{ \rm params }
+	\quad ({\rm no \ mixed \ precision, } p=4)
+	\label{eq_optimizer_states_mem_no_mp}
+\end{align}
+where, from the previous section, the pure parameter-count of the decoder-only Transformers
+architecture is
+\begin{align}
+	N _{ \rm params } & \approx  (4 + 2E) L D ^{ 2 } \times \left ( 1 + \Ocal \left( \frac{ V }{ DL }
+		\right) + \Ocal \left( \frac{ 1 }{ D } \right)  \right ) \ . \label{eq_approx_params_no_sharding}
+\end{align}
+where the first term comes from the \pyinline{TransformerBlock} weight matrices\footnote{So,
+	in the usual $ E=4 $ case, the \pyinline{MLP} layers are twice as costly as the
+	\pyinline{CausalAttention} layers.}, the first omitted subleading correction term is the embedding
+matrix, and the last comes from biases, \pyinline{LayerNorm} instances, and other negligible
+factors.  The optimizer states cost double the model itself.
+
+
+The situation is more complicated when mixed-precision is used \cite{micikevicius2018mixed}.
+The pertinent components of mixed-precision\footnote{A note on the implementation of mixed-precision
+in \pyinline{torch}: usually mixed-precision occurs by wrapping the forward pass in a context
+manager, \pyinline{torch.autocast}. The default behavior is to then create copies of some tensors
+in lower-precision and do the forward pass with those. For instance, this is done with
+matrix-multiplies whose arguments and outputs will be in \pyinline{torch.float16}, but for sums
+the inputs and outputs will all be \pyinline{torch.float32}, for vanilla mixed-precision usage.
+Consequently, any such \pyinline{torch.float16} versions of tensor will often persist effectively
+as contributors to activation memory, since the backwards pass will need those same tensors. This
+can be verified by inspecting the saved tensors: if \pyinline{z} is the output of a
+matrix-multiply in such an autocast context, \pyinline{z.grad_fn._saved_mat2} will be a
+\pyinline{torch.float16} copy of the weights used to perform the matrix-multiply. In effect, the
+cost of the model weights which are used for the actual forward pass are only materialized within
+the lifetime of the context manager.}:
+\begin{itemize}
+	\item A half-precision ($ p=2 $ bytes) copy of the model is used to perform the forwards and
+	      backwards passes
+	\item A second, "master copy" of the model is also kept with weights in full $ p=4 $ precision
+	\item The internal \pyinline{Adam} states are kept in full-precision
+\end{itemize}
+Confusingly, the master copy weights are usually accounted for as part of the optimizer state, in
+which case the above is altered to
+\begin{align}
+	M _{ \rm model} & = 2 N _{ \rm params } \ , \quad M_{ \rm  optim } = 12 N _{ \rm params }
+	\quad ({\rm mixed \ precision}) .
+	\label{eq_optimizer_states_mem_mp}
+\end{align}
+The optimizer state is now six times the cost of the actual model used to process data and the costs
+of \eqref{eq_optimizer_states_mem_mp} are more than those of \eqref{eq_optimizer_states_mem_no_mp}.
+However, as we will see, the reduced cost of activation memory can offset these increased costs, and
+we get the added benefit of increased speed due to specialized hardware. The above also demonstrates
+why training is so much more expensive than inference.
+
+
+\subsubsection{Gradients}
+
+Gradients are pretty simple and always cost the same regardless of whether or not mixed-precision is
+used:
+\begin{align}
+	M_{ \rm grad} & = 4 N _{ \rm params }     \label{eq_grad_memory} \ .
+\end{align}
+In mixed precision, even though the gradients are initially computed in $ p= 2$, they
+\href{https://huggingface.co/docs/transformers/v4.20.1/en/perf_train_gpu_one#anatomy-of-models-memory}{have to
+	be converted} to $ p=4 $ to be applied to the master weights of the same precision.
+
+
+
+
+\subsubsection{Activations}
+
+Activations will require a more extended analysis \cite{korthikanti2022reducing}. Unlike the above
+results, the activation memory will depend on both the batch size and input sequence length, $ B $
+and $ S $, scaling linearly with both.
+
+
+
+\paragraph{Attention Activations}
+
+We will count the number of input elements which need to be cached. Our \pyinline{(B, S, D)}-shaped inputs
+to the attention layer with $ BDS $ elements are first converted to $ 3BDS $ total query, key, value
+elements, and the query-key dot products produce $ ABS ^{ 2 } $ more, which are softmaxed into $ ABS
+		^{ 2 } $ normalized scores. The re-weighted inputs to the final linear layer also have $ BDS $
+elements, bringing the running sum to $ BS \left ( 5D + 2AS  \right ) $
+
+Finally, there are also the dropout layers applied to the normalized attention scores and the final
+output whose masks must be cached in order to
+backpropagate. In torch, the mask is a \pyinline{torch.bool} tensor, but
+\href{https://github.com/pytorch/pytorch/issues/41571}{surprisingly} these use one \textit{byte} of
+memory per element, rather than one bit \footnote{As you can verify
+	via \pyinline{4 * torch.tensor([True]).element_size() == torch.tensor([1.]).element_size().}}.
+Given this, the total memory cost from activations is
+\begin{align}
+	M _{ \rm act  } ^\texttt{Attention} & = BLS \left ( (5p+1)D + (2p+1)AS  \right ) \ .
+	\label{eq_att_actmem_vanilla}
+\end{align}
+
+
+
+
+\paragraph{MLP Activations}
+
+First we pass the \pyinline{(B, S, D)}-shaped inputs into the first MLP layer. These turn into the
+\pyinline{(B, S, E*D)} inputs of the non-linearity, whose same-shaped outputs are then passed into
+the last \pyinline{Linear} layer, summing to $ (2E+1)BDS $ total elements thus far. Adding in the
+dropout mask, the total memory requirement across all \pyinline{MLP} layers is:
+\begin{align}
+	M _{ \rm act  } ^\texttt{MLP} & = (2Ep+p+1)BDLS\ .
+	\label{eq_mlp_actmem_vanilla}
+\end{align}
+
+
+
+
+\paragraph{LayerNorm, Residual Connections, and Other Contributions}
+
+Then the last remaining components. The \pyinline{LayerNorm} instances each have $ BDS $ inputs and
+there are two per transformer block, so $ M _{ {\rm  act}  } ^\texttt{LayerNorm} = 2pBDLS $, and
+there is an additional instance at the end of the architecture\footnote{Following
+\cite{korthikanti2022reducing} we will neglect this in the below sum, an $ \Ocal \left( 1/L
+\right) $ error}. There are two residual connections per block, but their inputs do not require
+caching (since their derivatives are independent of inputs). Then, there are additional
+contributions from pushing the last layer's outputs through the language-model head and
+computing the loss function, but these do not scale with $ L $ and are ultimately $ \sim \Ocal
+\left( \frac{ V }{ DL } \right)  $ suppressed, so we neglect them.
+
+
+
+
+
+\paragraph{Total Activation Memory}
+
+
+Summing up the contributions above, the total activation memory cost per-layer is
+\begin{align}
+	M _{ {\rm act}  } ^{ {\rm  total}  } & \approx  2BDLS   \left ( p(E+4) + 1 + \Ocal \left( \frac{
+		V}{ DL } \right)  \right )
+	+ ABLS ^{ 2 } \left ( 2p+1\right ) \label{eq_act_mem_total_no_sharding}\ .
+\end{align}
+Evaluating in common limits, we have:
+\begin{align}
+	M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=4 } & =BLS \left ( 66 D+15AS  \right ) \nn
+	M _{ {\rm act}  } ^{ {\rm  total}  } \Big| _{ E=4, p=2 } & =BLS \left ( 34 D+5AS  \right )
+\end{align}
+
+
+\paragraph{When does mixed-precision reduce memory?} (Answer: usually.) We saw in Sec.~\ref{sec_params_grads_optim_mem}
+that mixed precision \textit{increases} the fixed costs of non-activation memory, but from the above
+we also see that it also \textit{reduces} the activation memory and the saving increase with larger
+batch sizes and sequence lengths. It is straightforward to find where the tipping point is.
+Specializing to the case $E=4$, vanilla mixed-precision case with no parallelism\footnote{With both
+	tensor- and sequence-parallelism, the parallelism degree $ T $ actually drops out in the comparison
+	(since both form of memory are decrease by $ 1/T $, so this restriction  can be lifted.}, the
+minimum batch size which leads to memory savings is
+\begin{align}
+	B _{ {\rm min}  } & = \frac{ 6 D ^{ 2 } }{ 8 DS + A S ^{ 2 } }\label{eq_min_mp_batch_size}\ .
+\end{align}
+Plugging in numbers for the typical $ \Ocal \left( 40 \ {\rm GiB} \right)$ model in the Summer of
+2023 gives $ B _{ {\rm min} } \sim \Ocal \left( 1\right)  $, so mixed-precision is indeed an overall
+savings at such typical scales.
+
+
+
+\begin{commentbox}{Side Note: Optimizations}
+
+The above analysis is conservative and accounts for more tensors than are actually saved in
+practice.\newline
+
+For instance, both the input and outputs of all non-linearities were counted, but there are many
+activations whose derivatives can be reconstructed from its outputs alone: $ \phi'(z)=F \left (
+\phi(z) \right ) $ for some $ F $. Examples:
+\begin{itemize}
+    \item \pyinline{ReLU}: since $ \phi(z)= z\theta(z) $, then (defining the derivative at zero to
+        be zero) $ \phi'(z) =\theta(z) = \theta \left ( \phi(z) \right) $. Correspondingly, torch
+        only uses the \pyinline{ReLU} outputs \href{https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/tools/autograd/derivatives.yaml#L2009-L2011}{to compute the derivative}
+        (there is no self arg in the \pyinline{threshold_backward(grad, result, 0)} line).
+    \item  \pyinline{tanh}: since $ \tanh'(z)=1-\tanh(z) ^{ 2 } $.
+\end{itemize}
+Other cases do not have this nice property, in which case both the inputs and outputs need to
+be stored:
+\begin{itemize}
+    \item \pyinline{GeLU} \cite{hendrycks2023gaussian}: $ \phi(z)=z\Phi(z) $ here and the derivative
+        $ \phi'(z)= \Phi(z) + \frac{ z e^{ -z ^{ 2 } /2 } }{\sqrt{2\pi}  } $, both the inputs and
+        outputs \href{https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/tools/autograd/derivatives.yaml#L2041-L2044}{must be used in the backwards pass.}.
+
+        The explicit CUDA kernel \href{https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/aten/src/ATen/native/cuda/ActivationGeluKernel.cu#L70-L84}{is here}.
+\end{itemize}
+If the inputs in each of these cases are not needed for any other part of the backwards pass, they
+are garbage collected in \pyinline{torch} soon after creation.
+
+
+\paragraph{Example}: \pyinline{Softmax} is another instance where this occurs, since
+\begin{align}
+     \partial _{ i } \Sm \left ( x _{ j } \right )  &= \delta _{ ij }\Sm \left ( x _{ j } \right ) -   \Sm \left ( x _{ i } \right )  \Sm \left ( x _{ j } \right ) \label{eq_softmax_derivative}
+\end{align}
+Because of this, the actual amount of activation memory due to the attention layer after the
+forwards pass is \eqref{eq_att_actmem_vanilla} with $ 2p \longrightarrow p $ in the $ \Ocal \left( S
+^{ 2 } \right)  $ term, though the above expression better reflects the necessary peak memory.
+
+\end{commentbox}
 
 
 
