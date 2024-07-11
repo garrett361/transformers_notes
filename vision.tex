@@ -41,3 +41,12 @@ The original CLIP recipe:
 \end{enumerate}
 They also add a temperature to the loss, which they also train.
 
+Post-training, the CLIP models can be used in many ways:
+\begin{enumerate}
+    \item Using the vision model as a general purpose feature extractor. This is how many
+        vision-language models work: the CLIP image embeddings form part of the VLM inputs.
+    \item Classification works by comparing the logits for a given image across embedded sentences
+        of the form \texttt{This is an image of a <CLASS HERE>.}
+\end{enumerate}
+
+
