@@ -13,5 +13,31 @@ The core of CLIP is its training objective. The dataset consists of image-captio
 relatively easy to extract; a core motivation), the CLIP processes many such pairs and then tries to
 predict which images match to which captions.
 
-A typical implementation will have separate
+A typical implementation will use separate models for encoding the text and image inputs. The two
+outputs are $ t _{ bd } $ and $ i _{ bd } $ shaped\footnote{There may also be another linear
+projection from the actual model outputs to a common space, too. Obviously, this is also necessary
+if the hidden dimensions of the two models differ.}, respectively, with batch and hidden dimensions,
+and are canonically trained so that the similarity score between any two elements is a function of
+their dot-product.
+
+The original CLIP recipe:
+\begin{enumerate}
+    \item Process the text bracketed with \pyinline{[SOS]} and \pyinline{[EOS]} insertions, use a
+        normal Transformer architecture\footnote{The original CLIP paper keeps the causal mask.},
+        and extract the last output from the \pyinline{[EOS]} token as the text embedding: $ i _{ bd
+        }= z _{ bsd }\big|_{ s=-1 } $.
+    \item Process the image with a vision transformer network.
+    \item Project to a common dimensionality space, if needed.
+    \item Compute the logits through cosine similarity: $ \ell _{ b b' } = i _{ bd }t _{ b'd }/ |i||t| $. These are used to
+        define both possible conditional probabilities\footnote{They differ by what is summed over the in the denominator.}:
+        \begin{align}
+         P(i_b|t _{ b' }) =  \frac{ e ^{ \ell _{b b'} } }{ \sum _{ b  } e ^{ \ell _{b b'} } }  \ ,
+         \quad P(t _{ b' }| i _{ b }) =  \frac{ e ^{ \ell _{b b'} } }{ \sum _{ b' }  e ^{ \ell _{b b'} } }
+        \end{align}
+    \item Compute the cross-entropy losses in both directions and average:
+        \begin{align}
+           \Lcal  &= \frac{ 1 }{ 2B }\sum _{ b } \left (\ln P \left ( i_b|t_b \right ) + \ln P \left ( t_b|i_b \right )\right ) \label{eq_clip_loss} \ .
+        \end{align}
+\end{enumerate}
+They also add a temperature to the loss, which they also train.
 
