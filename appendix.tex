@@ -1,0 +1,468 @@
+\appendix
+\section{Conventions and Notation\label{app_conventions}}
+
+
+We loosely follow the conventions of \cite{korthikanti2022reducing}.  Common parameters:
+\begin{itemize}
+	\item $ A $: number of attention heads
+	\item $ B $: microbatch size
+	\item $ C $: compute (FLOPs)
+	\item $ D $: the hidden dimension size
+	\item $ E $: expansion factor for MLP layer (usually $ E=4 $)
+	\item $ H $: $ D/A $, the head dimension size
+	\item $ K $: the block size (maximum sequence length\footnote{In the absence of methods such as         ALiBi \cite{ALiBi}  can be used to extend the sequence length at inference time.})
+	\item $ L $: number of transformer layers
+	\item $ N _{ {\rm params}  } $: total number of model parameters
+	\item $ P $: pipeline parallel size
+	\item $ S $: input sequence length
+	\item $ T $: tensor parallel size
+	\item $ V $: vocabulary size
+	\item $ t $: various timescales
+	\item $ p $: the precision of the elements of a tensor in bytes
+	\item $ \lambda  $: various rates, e.g. $ \lambda _{ {\rm mem}  } $ is memory bandwidth
+\end{itemize}
+Where it makes sense, we try to use the lower-case versions of these characters to denote the
+corresponding indices on various tensors. For instance, an input tensor with the above batch size,
+sequence length, and vocabulary size would be written as $ x _{ bsv } $, with $ b \in \left \{ 0,
+	\ldots, B - 1 \right \} $, $ s \in \left \{ 0, \ldots, S - 1\right \} $, and $  v \in \left \{ 0,
+	\ldots, V -1\right \}$ in math notation, or as \mintinline{python}{x[b, s, v]} in code.  Typical
+transformers belong to the regime
+\begin{gather}
+	V \gg D, S \gg L, A \gg P, T \ .  \label{app_eq_transformers_approxs}
+\end{gather}
+For instance, GPT-2 and GPT-3 \cite{gpt2radford2019language, gpt3brown2020language} have $ V \sim
+	\Ocal \left( 10 ^{ 4 } \right)  $, $ S, L \sim \Ocal \left( 10 ^{ 3 } \right)  $, $ L, A \sim \Ocal
+	\left( 10 ^{ 2 } \right)  $. We will often assume also assume that\footnote{This condition ensures
+	that the $ \Ocal \left( S ^{ 2 } \right)  $ FLOPs cost from self-attention is negligible
+	compared to $ \Ocal \left( D ^{ 2 } \right)  $ contributions from other matrix multiplies.  It
+	should be noted that in Summer 2023 we are steadily pushing into the regime where this condition
+	does \textit{not}  hold.} $ S \lesssim D $ or the weaker\footnote{This condition ensures that the
+	cost of reading the $ \Ocal \left( D ^{ 2 } \right)  $ weights is more than the cost of reading in
+	the $ \Ocal \left( BSD \right)  $ entries of the intermediate representations.} $ BS \lesssim D $.
+
+As indicated above,  we use zero-indexing. We also use \pyinline{python} code
+throughout\footnote{Written in a style conducive to latex, e.g. no type-hints and clarity
+prioritized over optimization.}  and write all ML code using standard \pyinline{torch} syntax. To
+avoid needing to come up with new symbols in math expressions we will often use expressions like $ x
+\leftarrow f(x) $ to refer to performing a computation on some argument ($ x $) and assigning the
+result right back to the variable $ x $ again.
+
+Physicists often joke (half-seriously) that Einstein's greatest contribution to physics was his
+summation notation in which index-sums are implied by the presence of repeated indices and summation
+symbols are entirely omitted. For instance, the dot product between two vectors would be written as
+\begin{align}
+	\vec{x} \cdot \vec{y} & = \sum _{ i } x _{ i } y _{ i } \equiv x _{ i } y _{  i }
+	\label{app_eq_einstein_sum}
+\end{align}
+We use similar notation which is further adapted to the common element-wise deep-learning
+operations.  The general rule is that if a repeated index appears on one side of an equation, but
+not the other, then a sum is implied, but if the same index appears on both sides, then it's an
+element-wise operation. The Hadamard-product between two matrices $ A $ and $ B $ is just
+\begin{align}
+	C _{ ij } & = A _{ ij } B _{ ij }\ .
+\end{align}
+Einstein notation also has implementations available for \pyinline{torch}:
+\href{https://rockt.github.io/2018/04/30/einsum}{see this blog post on \pyinline{einsum}} or the
+\href{https://einops.rocks/1-einops-basics/}{\pyinline{einops}} package.
+
+In particular, we use \pyinline{einops} notation for concatenation and splitting: $ A _{ c } = A _{
+    (de) }= B _{ de } $\footnote{The indexing is all row-major: if $ A _{ i } $ is $
+        I$-dimensional, $ i \in \{0, \ldots, I-1\} $, then if we split this index as $ A _{ i } = A
+        _{ (jk) } \equiv \bar{A} _{ jk } $, then the indices $ j, k $ will range over $ j \in \{0,
+    \ldots , J\} $, $ k\in \{0, \ldots , K\} $ with $ I =J \times K $ and where numerically $ i = j
+\times K + k $. More complex cases follow by induction.}. We will sometimes use a bar to indicate
+tensors which  are derived from other tensors through such splitting operations, usually in the
+context of tensor-sharding where devices only locally hold some shard of the tensor. In this
+context, only some of the dimensions will be sharded across devices, and we may also put a bar over
+the corresponding sharded index. For instance, consider a two-dimensional tensor $ M _{ ab } $ of
+shape \pyinline{M.shape=(A, B)}: sharding this tensor across two devices across the final index
+results in a tensor $ \bar{M}_{ a \bar{b} } $ which is of shape \pyinline{M_bar.shape=(A, B/2)} on
+each device. As here, we will sometimes use bars to denote indices which are sharded over different
+devices.
+
+We also put explicit indices on operators such as Softmax to help clarify the relevant
+dimension, e.g. we would write the softmax operation over the $ b $-index of some batched
+tensor $ x _{ bvd\ldots } $ as
+\begin{align}
+	s _{ bvd\ldots } & = \frac{ e^{ x _{ bv d\ldots}  } }{ \sum _{ v = 0 } ^{  v= V-1 } e^{ x _{
+						bvd\ldots } } } \equiv
+	\Sm _{ v } \ x _{ bvd\ldots }
+	\ , \label{app_eq_einstein_softmax}
+\end{align}
+indicating that the sum over the singled-out $ v $-index is gives unity.
+
+\section{Collective Communications \label{app_collective_communications} }
+
+A quick refresher on common distributed
+\href{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html}{communication
+    primitives}.  Consider $ N $ workers with tensor data $ x ^{ (n) }  $ of some arbitrary shape
+    \pyinline{x.shape}, which takes up $ M $ bytes of memory, where $ n $ labels the worker and any
+    indices on the data are suppressed. The $ n=0 $ worker is arbitrarily denoted the
+    \textit{chief}.  Then, the primitive operations are:
+\begin{itemize}
+	\item \pyinline{Broadcast}: all workers receive  the chief's data, $ x ^{ (0) }  $.
+	\item \pyinline{Gather}: all workers communicate their data $ x _{ n } $ to the chief, e.g. in a
+	      concatenated array $ [x ^{ 0 }, x ^{ 1 }, \ldots , x ^{ N-1 }] $.
+	\item \pyinline{Reduce}: data is \pyinline{Gather}-ed to the chief, which then performs some
+	      operation (\pyinline{sum}, \pyinline{max}, \pyinline{concatenate}, etc.) producing a new tensor $
+		      x' $ on the chief worker.
+    \item \pyinline{ReduceScatter}: a reducing operation (e.g. \pyinline{sum}) is applied to the $ x
+        ^{ (n) } $ to produce a $ x' $ of the same shape (e.g. $ x'= \sum x ^{ (n) } $) and each
+        worker only receives a $ 1/N $ slice (and hence $ M/N $ byte) of the result\footnote{Note that \pyinline{AllGather}
+            and \pyinline{ReduceScatter} are morally conjugate to each other. In the former, each
+            worker ends up with $ N $ times as much data as they started with, while in
+        \pyinline{ReduceScatter} they end up with $ 1/N $ of their initial data. One is nearly a
+        time-reversed version of the other, which is a way of remembering that they have the came
+        communication cost. They also compose to produce an output of the same initial size, as in
+        \pyinline{AllReduce}.}. A ring implementation sends $ M \times \frac{ N-1 }{ N } $ bytes
+        over each link in the ring.
+    \item \pyinline{AllGather}: all data $ x ^{ (n) } $ is communicated to all workers; each worker
+        ends up with the array $ [x ^{ 0 }, x ^{ 1 }, \ldots , x ^{ N-1 }] $. Functionally
+        equivalent to a \pyinline{Gather} followed by \pyinline{Broadcast}. A ring implementation
+        sends $ M \times \left ( N-1 \right ) $ bytes over each link in the ring.
+	\item \pyinline{AllReduce}: all workers receive the same tensor $ x' $ produced by operating on
+	      the $ x ^{ (n) } $ with \pyinline{sum}, \pyinline{mean}, etc. Functionally equivalent to a
+	      \pyinline{Reduce} followed by \pyinline{Broadcast}, or a \pyinline{ReduceScatter} followed
+	      by a \pyinline{AllGather} (the more efficient choice\footnote{The former strategy scales
+		      linearly with the number of worker, while the latter strategy underlies ``ring"
+		      \pyinline{AllReduce} which is (nearly) independent of the number of workers: if each
+		      worker carries data of size $ D $ which is to be \pyinline{AllReduce}-d, a total of $
+			      \frac{ 2 \left ( N-1 \right )D }{ N } $ elements need to be passed around.
+		      \href{https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/}{See this blog
+			      post for a nice visualization} or \cite{bandwidthOptimalAllReduce2009} for a relevant
+              paper.\label{foot_all_reduce}}). In the latter case, the total cost is $ 2M \times
+              \frac{ N-1 }{ N } $, due to \pyinline{AllReduce}-ing the initial $ M $-sized data, and
+              then \pyinline{AllGather}-ing the $ M/N $-sized reductions.
+      \item  \pyinline{Scatter}: One worker gives shards of a tensor to all workers. If the worker
+          is scattering tensor $ T _{ x } $ over the given index, a \pyinline{Scatter}
+          effectively shards this as $ T _{ x } \longrightarrow T _{ (\bar{r}y) } $, each worker
+          getting a $ \bar{r} $-shard.
+      \item  \pyinline{AllToAll}: All workers receive shards of all others worker's tensors.  If
+          every worker has a tensor $ T _{ \bar{r}y } $, for one value of $ \bar{r} $, which we
+          imagine came from a sharding a tensor $ T _{ x } = T _{ (\bar{r}y) } $, then an
+          \pyinline{AllToAll} over the $ y $ index produces produces the tensor $ T _{ z \bar{r} }$
+          defined by$ T _{ z \bar{r} }= T _{ x } $ on all workers.
+\end{itemize}
+
+
+
+\section{Hardware}
+
+Basic information about relevant hardware considerations. Much of the following is from the
+\href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html}{NVIDIA
+	docs}.
+
+
+
+\subsection{NVIDIA GPU Architecture}
+
+NVIDIA GPUs consist of some amount of relatively-slow off-chip DRAM memory\footnote{This is the number usually reported when
+	discussing a given GPU, e.g. 32GiB for the top-of-the-line A100}, relatively-fast on-chip SRAM, and
+a number of \textbf{streaming multiprocessors} (SMs) which perform the parallel computations.  Inside
+more-recent GPUs, the SMs carry both ``CUDA cores" and "Tensor cores", where the latter are used for matrix-mulitiplies
+and the former for everything else.
+
+
+A few numbers of primary importance:
+\begin{itemize}
+	\item The rate at which data can be transferred from DRAM to SRAM ($ \lambda _{ {\rm mem} } $)
+	\item The number of FLOP/s, which is more fundamentally computed by multiplying the number of
+	      SMs by the FLOPS/cycle of each SM for the specific operation under consideration (see the NVIDIA
+	      docs) by the clock rate: $ N _{ {\rm SM} }\cdot  \lambda _{ {\rm FLOPs/cycle} }\cdot  \lambda _{
+			      {\rm clock} } $
+\end{itemize}
+
+The terminology and structure of the memory hierarchy is also important to understand. Types of
+memory, from slowest to fastest:
+\begin{itemize}
+	\item \textbf{Global} memory is the slow, but plentiful, off-chip DRAM. It is the type of memory
+	      typically used as kernel arguments
+	\item \textbf{Constant} memory is read only and accessible by all threads in a given block. The
+	      size of arrays in constant memory must be known at compile time
+	\item \textbf{Local Memory} is similarly slow to global memory, but more plentiful than register
+	      memory, and privately to individual threads and is allocated from within a kernel. When
+	      registers run out, local memory fills the gap
+	\item \textbf{Shared} memory is shared between all threads in a given block. Shared memory is
+	      effectively a user-controlled cache. The size of arrays in shared memory must  be known at
+	      compile time
+	\item \textbf{Registers} hold scalar values and small tensors whose values are known at compile
+	      time. They are local to each thread and they are plentiful since each thread needs its own
+	      set of registers: 65,536 = $ 2 ^{ 16 } $ registers per SM an A100.
+\end{itemize}
+\href{https://www.youtube.com/watch?v=QQceTDjA4f4&t=2124s}{An excellent video overview of CUDA and NVIDIA GPU architecture which covers some of the above is here.}
+
+\subsection{CUDA Programming Model}
+
+The CUDA programming model uses a hierarchy of concepts:
+\begin{itemize}
+    \item \textbf{Threads}  are the fundamental unit of execution\footnote{Threads are always
+        physically launched in \textbf{Warps} which consist of 32 threads.} which each run the same
+        CUDA \textbf{Kernel}, or function, on different data inputs in parallel. Threads within the
+        same block (below) may share resources, like memory, and may communicate with each other.
+        Individual threads are indexed through the \textbf{threadIdx} variable, which has
+        \cudainline{threadIdx.{x, y, z}} attributes with \cudainline{threadIdx.x} in
+        \cudainline{0, ..., blockDim.x -1} and similar.
+
+	\item Threads (and hence warps) are organized into 3D \textbf{blocks}. The size and indices of
+	      the blocks can be accessed through the \cudainline{blockDim} and \cudainline{blockIdx}
+	      variables, respectively, with \cudainline{blockIdx.x} in \cudainline{0, ..., gridDim.x - 1}.
+	      \cudainline{blockDim.x *blockDim.y * blockDim.z} total threads run in a block.
+	\item Blocks are organized into 3D \textbf{groups}. The size of the gird dimensions can be
+	      accessed through the \cudainline{gridDim} variable, with similar attributes to the above. \\
+	      \cudainline{gridDim.x * gridDim.y * gridDim.z} total blocks run in a grid.
+\end{itemize}
+
+The number of threads which can be launched in a given block is hardware limited; A100 80GiB GPUs
+can run up to 1024 threads in a SM at a time (32 blocks with 32 threads each), for instance. Hence,
+block and grid sizes need to be adjusted to match the problem size. There are also important memory
+access considerations here. The 1024 threads which can be launched can also read sequentially from
+memory and efficient usage implies that choosing the block size such that we are doing these reads
+as often as possible is ideal.
+
+\subsection{NVIDIA GPU Stats \label{app_gpu_stats}}
+
+
+Summary of some relevant NVIDIA GPU statistics:
+\begin{center}
+	\begin{tabular}{| c |c| c |c |c| c| }\hline
+		GPU                                                                                                                                  & Memory & $ \lambda _{ {\rm FLOP/s }  } $ & $ \lambda _{ {\rm mem}  } $ & $ \lambda _{ {\rm math}  } $ & $ \lambda _{ {\rm comms}  } $ \\ \hline
+		\href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf}{A100} & 80GiB  & 312  TFLOP/s                    & 2.0 TiB/s                   & 156 FLOPS/B                  & 300 GiB/s                     \\ \hline
+		\href{https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf}{A100}                       & 40GiB  & 312  TFLOP/s                    & 1.6 TiB/s                   & 195 FLOPS/B                  & 300 GiB/s                     \\ \hline
+		\href{https://images.nvidia.com/content/technologies/volta/pdf/volta-v100-datasheet-update-us-1165301-r5.pdf}{V100}                  & 32GiB  & 130  TFLOP/s                    & 1.1 TiB/s                   & 118  FLOPS/B                 & 16 GiB/s                      \\ \hline
+	\end{tabular}
+\end{center}
+where
+\begin{itemize}
+	\item $ \lambda _{ {\rm  FLOP/s}  } $ is flops bandwidth (for \pyinline{float16/bfloat16}  multiply-accumulate ops)
+	\item $ \lambda _{ {\rm  mem}  } $ is memory bandwidth
+	\item $ \lambda _{ {\rm  math}  } = \frac{  \lambda _{ {\rm FLOP/s}  } }{ \lambda _{ {\rm mem} } } $ is \href{https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch}{math bandwidth}
+	\item $ \lambda _{ {\rm  comms}  } $ is one-way communication bandwidth
+\end{itemize}
+A useful approximate conversion rate is that $ 1 \ {\rm TFLOP/s} \approx 100\  {\rm PFLOP/day} $.
+
+Important practical note: the $ \lambda _{ {\rm FLOP/s} } $ numbers should be taken as aspirational.
+Out-of-the box, \pyinline{torch.float16} matrix-multiplies in \pyinline{torch} with well-chosen
+dimensions tops out around $ \sim 250 $ FLOPS/s
+
+
+
+
+\section{Compute-bound vs Memory-bound \label{app_compute_mem_bound} }
+
+If your matrix-multiplies are not sufficiently large on, you are wasting resources
+\cite{he2022brrrrfromfirstprinciples}. The relevant parameters which determine sufficiency are $
+	\lambda _{ {\rm FLOP/s}  } $ and $ \lambda _{ {\rm mem}  } $, the FLOPs and memory bandwidth,
+respectively. The ratio $  \lambda _{ {\rm math}  } \equiv \frac{  \lambda _{ {\rm FLOP/s}  } }{
+		\lambda _{ {\rm mem}  } }   $ determines how many FLOPS you must perform for each byte loaded from
+memory; see App.~\ref{app_gpu_stats}. If your computations have a FLOPs/B ratio which is larger than
+$ \lambda _{ {\rm math}  } $, then you are compute-bound (which is good, as you're maximizing
+compute), and otherwise you are memory(-bandwidth)-bound (which is bad, since your compute
+capabilities are idling). The FLOPs/B ratio of your computation is sometimes called the
+\textbf{compute intensity} or \textbf{arithmetic intensity}. When compute bound, a process takes
+time $ \sim F/\lambda _{ {\rm FLOP/s} } $, while memory-bound processes take time\footnote{Note that
+	the time is not additive, e.g. compute-bound tasks do not take time $ \sim F/\lambda _{ {\rm FLOP/s}
+		} +M/\lambda _{ {\rm mem} }$ because they are not sequential: compute and memory-communications can
+	be concurrent.} $ \sim M/\lambda _{ {\rm mem} } $.
+
+
+
+\subsection{Matrix-Multiplications vs. Element-wise Operations}
+
+For instance, to multiply a \pyinline{(B, S, D)}-shaped tensor $ z _{ bsd } $ by a \pyinline{(D, D)}-shaped
+weight-matrix $ W _{ d d' } $, $ p \left ( BDS +D ^{ 2 } \right ) $ bytes must be transferred from
+DRAM to SRAM at a rate $ \lambda _{ {\rm  mem}  } $, after which we perform $ 2BSD ^{ 2 } $ FLOPs,
+and write the \pyinline{(B, S, D)}-shaped  result back to DRAM again, for a ratio of
+\begin{align}
+	\frac{ 1 }{ p } \frac{ BDS }{ 2BS + D } \ \left ( {\rm FLOPs/B} \right )  \ .
+\end{align}
+We want to compare this against $ \lambda _{ {\rm math}  } $, which from
+App.~\ref{app_gpu_stats} we take to be $ \Ocal \left( 100\  {\rm FLOPs/B} \right)  $, and plugging
+in any realistic numbers, shows that such matrix-multiplies are essentially always compute-bound.
+Compare this to the case of some element-wise operation applied to the same $ z _{ bsd } $ tensor
+whose FLOPs requirements are $ \sim C\times BDS $ for some constant-factor $ C \ll S, D $.  Then,
+then FLOPS-to-bytes ratio is $ \sim \frac{ C }{ p } $, which is \textit{always} memory-bound for
+realistic values of $ C $. The moral is to try and maximize the number of matrix-multiplies and
+remove as many element-wise operations that you can get away with.
+
+
+\subsection{Training vs. Inference}
+
+Finally, we note that the above has implications for the Transformers architecture as a whole, and
+in particular it highlights the difficulties in efficient inference. Under the assumptions of
+Sec.~\ref{sec_flops_training}, $ \sim \Ocal \left( BSN _{ {\rm params}  }  \right)  $
+total FLOPs needed during training, while the number of bytes loaded from and written to memory are
+$ \Ocal \left( BDLS + N _{ {\rm params}  } \right)  \sim \Ocal \left( \frac{ BS N _{ {\rm params}  } }{ D}+ N _{ {\rm params}  } \right)  $
+which is $ \Ocal \left( N _{ {\rm  params}  } \right)  $ for not-super-long sequence lengths.  The
+arithmetic intensity is therefore $ \Ocal \left( BS \right)  $ and so training is compute-bound in any
+usual scenario, even at small $B \sim \Ocal \left( 1 \right)  $ batch sizes (as long as individual operations in the network don't suffer from outlandish
+memory-boundedness). The problem during inference is that (if using the kv-cache; see
+Sec.~\ref{sec_kv_cache}) we only need to process a \textit{single} token at a time and so $ S
+	\longrightarrow 1 $ in the numerator in the preceding, while the denominator is also weighed down by
+the  kv-cache in the attention layers.
+
+In more detail, the \pyinline{MLP} layers just process $ S=1 $ length tensors during generation, but
+are insensitive to the kv-cache, so their intensity comes from just setting $ S=1 $ in the above,
+\begin{align}
+	\sim \frac{ BD  }{ B + D } \ ,
+\end{align}
+dropping $\Ocal \left( 1 \right)  $ factors now, while the attention layers have a ratio of the form
+\begin{align}
+	\sim \frac{ BDS+BD ^{ 2 } }{ BD + D ^{ 2 }+BDS }\ ,
+\end{align}
+where the last term in the denominator is due to the cache. Now at small $B \sim \Ocal \left( 1
+	\right)  $ batch sizes, both intensities reduce to $ \Ocal \left( B \right)  $, which is
+insufficient to be compute-bound.  In the large $ B \gtrsim D/S $ limit, they at least become $ \Ocal \left( D
+	\right)  $ and $ \Ocal \left( 1 + \frac{ D }{ S } \right)  $, respectively, which may be enough to be
+compute-bound, but it's hard to even get into this regime. Note, the importance of the ratio $ D/S
+$. The hidden dimension fixes the context length scale at which inference can never be
+compute-bound, in the absence of additional tricks not considered here\footnote{One such trick: the
+	multi-query attention of Sec.~\ref{subsec_multi_query_attn} improves everything a factor of $
+		A $: the large batch regime is $ B \gtrsim \frac{ D }{ AS }$ and the intensity ratio becomes
+	$ \Ocal \left( 1 + \frac{ D }{ AS } \right)  $. An analysis equivalent to the one performed here can be found in the original paper
+	\cite{shazeer2019fast}.}.
+
+\subsection{Intra- and Inter-Node Communication}
+
+For intra-node communication, GPUs are connected by either PCIe or NVLink, generally.
+\begin{itemize}
+	\item \href{https://blogs.nvidia.com/blog/2023/03/06/what-is-nvidia-nvlink/}{NVLink}
+	      interconnects are continually updated and achieve speeds of $ \lambda _{ {\rm comm} } ^{
+			      {\rm intra} } \sim 300$ GiB/s.
+\end{itemize}
+
+
+For inter-node communication, nodes are often connected by:
+\begin{itemize}
+	\item \href{https://en.wikipedia.org/wiki/InfiniBand}{InfiniBand} apparently also achieves speeds $ \lambda _{ {\rm comm} } ^{
+			      {\rm intra} } \sim 100$ GiB/s?  Haven't found a clear reference. But in any case, the
+	      bandwidth is divided amongst the GPUs in the node, leading to a reduction by $ \sim 8 $.
+\end{itemize}
+
+\section{Batch Size, Compute, and Training Time \label{app_batch_size}}
+
+The amount of compute directly determines the training time, but not all ways of spending compute
+are equivalent. We follow the discussion in \cite{mccandlish2018empirical} which gives a rule of thumb
+for determining the optimal batch size which is sometimes used in practice. The basic point is that
+all of the optimization steps take the gradient $ \bfg  $ as an input, and since the gradient is the
+average over randomly selected datapoints, steps are more precise as the batch size increases (with
+diminishing returns, past a certain point, but the computational cost also rises with batch size,
+and a balance between the two concerns should be struck.
+
+Consider vanilla SGD and study how the training loss changes with each step.  We randomly sample $ B
+$ datapoints $ x \in \Dcal$ from the dataset through some i.i.d. process\footnote{The below uses
+	sampling with replacement, while in practice we sample without replacement, but the different is
+	negligible for all practical cases.}. Each corresponding gradient $ \bfg (x) = \partial _{ w} \Lcal
+	\left ( w, x \right ) $ is itself a random variable whose average is the true gradient across the
+entire dataset $ \bar{\bfg} $ and we take the variance to be
+\begin{align}
+	{\rm Var}[\bfg (x), \bfg (x')] & =\Sigma
+\end{align}
+for some matrix $ \Sigma  $ with (supressed) indices spanning the space of model weights. Taking instead the mean
+of a sum of such estimates, $ \bfg _{ B }\equiv \frac{ 1 }{ B } \sum _{ x \in \Bcal} \bfg (x) $,
+the mean stays the same, but the variance reduces in the usual way: $ {\rm Var}[\bfg _{ B } (x),
+			\bfg _{ B }(x')]=\Sigma /B$.
+
+Study the mean loss across the entire dataset: $ \Lcal \left ( w \right ) = \langle
+	\Lcal \left ( w, x \right) \rangle$. Using SGD we take a step $ w \longrightarrow w -\eta \bfg _{ B }   $
+and change the loss as
+\begin{align}
+	\Lcal \left ( w -\eta \bfg _{ B } \right )  = \Lcal \left ( w  \right ) -\eta \bar{\bfg }\cdot
+	\bfg _{ B } + \frac{ 1 }{ 2 } \bfg _{ B }\cdot  H \cdot  \bfg _{ B } + \Ocal \left( \bfg _{ B }
+	^{ 3 } \right)\ ,
+\end{align}
+where $ H $ is the true hessian of the loss over the entire dataset at this value of the weights.
+Taking the expectation value and minimizing the results  over $ \eta  $ gives the optimal choice:
+\begin{align}
+	\eta _{ \star } & = \frac{ \eta _{ {\rm  max} } }{ 1 + \frac{ B _{ {\rm  noise} } }{ B } }\ , \quad  \eta _{ {\rm  max} }\equiv \frac{ \bar{\bfg } ^{ 2 } }{ \bar{\bfg }\cdot  H \cdot  \bar{\bfg } } , \quad  B _{ {\rm  noise} } \equiv \frac{ \Tr H \cdot \Sigma  }{  \bar{\bfg }\cdot  H \cdot  \bar{\bfg }}\ .
+\end{align}
+Notably, the above supports the usual rule of thumb that the learning rate should be increased
+proportionally to the batch size, at least whenever $ B \ll B _{ {\rm  noise} } $. The diminishing
+returns of pushing batch sizes past $ B _{ {\rm noise} } $ are also evident. In practice it is too
+expensive to compute the Hessian, but thankfully the entirely unjustified approximation in which the
+Hessian is multiple of the identity such that
+\begin{align}
+	B _{ {\rm noise} } & \approx B _{ {\rm  simple} } \equiv \frac{ \Tr \Sigma  }{ \bar{\bfg } ^{ 2 } }\ ,
+\end{align}
+is somehow a decent approximation empirically, and an estimator can be created for $ B _{ {\rm noise} } $
+in a data-parallel setup; see \cite{mccandlish2018empirical} or
+\href{https://github.com/crowsonkb/k-diffusion/blob/ab527a9a6d347f364e3d185ba6d714e22d80cb3c/k_diffusion/gns.py#L1}{Katherine
+	Crowson's implementation} or \href{https://github.com/EleutherAI/gpt-neox/blob/408e29d9c746a02d842917bb7447c5c4be0b42d4/megatron/gradient_noise_scale/gradient_noise_scale.py#L1}{neox} for more.
+
+
+We can further characterize the trade-off between compute and optimization steps. The expected
+decrease in loss per update is then
+\begin{align}
+	\langle \delta \Lcal \rangle & \approx \frac{ \eta _{ {\rm  max} } }{ 1 + \frac{ B _{ {\rm  noise} } }{ B } } \bar{\bfg } ^{2 } + \Ocal \left( \eta _{ {\rm max} } ^{ 2 } \right) \ ,
+\end{align}
+that is, we would need $ 1 + \frac{ B _{ {\rm noise} } }{ B } $ times as many SGD steps to make the
+same progress we would have as compared to full-batch SGD. If $ S _{ {\rm  min} } $ is the number of
+steps that would have been needed for full-batch SGD, we would need $ S=S _{ {\rm  min} } + S _{
+			{\rm  min} } \frac{ B _{ {\rm noise} } }{ B } $ steps for minibatch SGD.  The total number of
+examples seen is correspondingly $ E = S _{ {\rm  min} } \times  \left ( B _{ {\rm  noise} } +B
+	\right)\equiv E _{ {\rm min} }+ S _{ {\rm  min} }B $, and so we see the trade-off between SGD steps
+$ S $ and compute $ E $ alluded to above.  These relations can be written as\footnote{The analysis
+	here is simplified in that it assumes that the noise scale and the chosen batch size are both
+	time-independent. There is confusing logic treating the more general case where both
+	$ B _{ {\rm noise} } $ and $ B $ vary with step in \cite{mccandlish2018empirical}, but in any case,
+	the ultimate relations they use are effectively the same.}
+\begin{align}
+	\left ( \frac{ S }{ S _{ {\rm  min} } }-1 \right )\left ( \frac{ E }{ E _{ {\rm min} } }-1 \right ) & =1
+\end{align}
+which represent hyperbolic Pareto frontier curves. So, solutions are of the form $ S=\left ( \alpha
+	+1 \right )S _{ {\rm  min} } $, $ E=\left ( \frac{ 1 }{ \alpha  } +1 \right )E _{ {\rm  min} } $
+and since $E=BS $ the corresponding batch size is $ B _{ {\rm crit} } \equiv  \frac{ 1 }{ \alpha  }
+	B _{ {\rm noise} }$. The parameter $ \alpha $ characterizes how much you value the trade-off between
+these two factors and a reasonable balance is the $ \alpha =1 $ solution for which $S = 2S _{ {\rm
+					min} } $, $ E=2E _{ {\rm min} } $ and $ B _{ {\rm crit} }= B _{ {\rm  noise} } $ exactly.
+
+Correspondingly, in \cite{mccandlish2018empirical} they suggest training at precisely this batch
+size.  But it seems much more relevant to balance time against compute directly, rather than
+optimization steps vs compute. Modeling the total training time by $ T\approx S \left ( \kappa B + \sigma  \right)$
+for some $ \kappa ,\sigma  $ to model compute costs\footnote{Computation and communication costs
+	each scale with $ B $, the optimizer step does not (and maybe some overhead?), for instance.}, then
+the above is equivalent to
+\begin{align}
+	T & = \frac{\left ( E _{ {\rm min} } + S _{ {\rm min} } B \right) \left ( \kappa B+ \sigma   \right ) }{  B  }\ .
+\end{align}
+which has a minimum at
+\begin{align}
+	B & = \sqrt{\frac{ \sigma E _{ {\rm min} } }{ \kappa S _{ {\rm min} }   }}\ .
+\end{align}
+for which the total time is
+\begin{align}
+	T _{ {\rm  min} } & = \left ( \sqrt{\kappa E _{ {\rm  min} }} - \sqrt{\sigma S _{ {\rm min} }} \right ) ^{ 2 }\ .
+\end{align}
+In comparison, the total time for the $ B _{ {\rm  crit} } = \frac{ E _{ {\rm min} } }{ S _{ {\rm
+						min} } } $ strategy of \cite{mccandlish2018empirical} gives $ T _{ {\rm  min} } = 2 \left ( \kappa E
+	_{ {\rm min} } + \sigma S _{ {\rm min} } \right ) $ which is a factor of $ \frac{ 2 }{ 1- \frac{
+			\sqrt{\sigma \kappa B _{ {\rm noise} } } }{ \kappa B _{ {\rm noise}  } + \sigma } } $ larger.
+So, this seems like a better choice of optimal batch size, if you value your time.
+
+
+\section{Cheat Sheet \label{app_cheat_sheet}}
+
+Collecting all of the most fundamental equations, given to various degrees of accuracy.
+
+Number of model parameters:
+\begin{align}
+	N _{ {\rm params} } & =   (4+2E)LD ^{ 2 } + VD+ \Ocal \left( DL \right) \approx   \left ( 4+2E \right )LD ^{ 2 }\ ,
+\end{align}
+assuming no sharding of the embedding matrix.
+
+
+\paragraph{Training}
+
+Memory costs for mixed-precision training:
+\begin{align}
+	M _{ {\rm model} }                   & =p _{ {\rm model} } N _{ {\rm params} } \nn
+	M _{ {\rm optim} }                   & =  \left ( s _{ {\rm states} }+1 \right) \times p _{ {\rm master } } N _{ {\rm params} } \nn
+	M _{ {\rm act}  } ^{ {\rm  total}  } & =\frac{ 2BDLS   \left ( p(E+4) + 1   \right ) }{ T }
+	+ \frac{ ABLS ^{ 2 } \left ( 2p+1\right ) }{ T }  + \Ocal \left( BSV \right)
+\end{align}
+where $ s _{ {\rm  states} } $ is the number of optimizer states, e.g. $ s=0 $ for SGD and $ s=2 $
+for Adam. FLOPs total:
+\begin{align}
+	F _{ {\rm total}  } ^{ {\rm  model}  } & \approx 12 BDLS \left ( S + \left ( 2+E \right )D \right ) .
+\end{align}
+
+
