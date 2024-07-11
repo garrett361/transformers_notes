@@ -1,0 +1,17 @@
+\part{Vision}
+
+Notes on the usage of Transformers for vision tasks.
+
+
+\section{CLIP}
+
+CLIP (Contrastive Language-Image Pre-Training) \cite{radford2021learningtransferablevisualmodels} is
+a technique for generating semantically meaningful representations of images. The method is not
+necessarily Transformers specific, but the typical implementations are based on this architecture.
+
+The core of CLIP is its training objective. The dataset consists of image-caption pairs (which are
+relatively easy to extract; a core motivation), the CLIP processes many such pairs and then tries to
+predict which images match to which captions.
+
+A typical implementation will have separate
+
