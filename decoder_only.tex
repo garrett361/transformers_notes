@@ -468,7 +468,7 @@ iteration. We capitalize tensors which only exist on-chip and leave tensors whic
 lower-cased. The entire $ z _{ irah } $ tensor is then computed as (we omit the attention head $ a
 $-index for clarity):
 \begin{algo}{Flash Attention Version Two (Forward)}
-\For{ $ i \in \ldots  $}
+\For{ $ i \in \ldots  $} \Comment Computing outputs $ z _{ irh } $ $ \forall r, h $
 \State Initialize off-chip tensors $ z _{ irh },  \ell _{ ir }$ to zeros
 \State Move  $ q _{ irh }$ on-chip, instantiate $Z _{ ijrh }, L _{ ijr }$ to zeros and $M _{ ijr }$ to $ -\infty $ on-chip.
 \For{ $ j \in \ldots  $}
@@ -1060,6 +1060,51 @@ roles in the backwards pass. Graphic from \cite{shoeybi2020megatronlm}. }
 \end{figure}
 
 
+\subsection{Ring Attention \label{subsec_ring_attention}}
+
+Ring Attention \cite{liu2023ringattentionblockwisetransformers} is roughly a distributed version of
+Flash Attention \ref{subsec_flash_attention}: it enables extremely long sequence-length processing
+by never realizing the entire $ \Ocal \left( S ^{ 2 } \right)  $ attention scores at once.
+
+It works by sharding over the sequence dimension. Let $ z _{ sd } $ is the (batch-dim suppressed)
+residual stream of a non-sharded Transformer:
+\begin{align}
+    z _{  sd } &= \Sm _{ s' } \left ( q _{ sd' } k _{ s'd' } \right ) v _{ s'd } \ .
+\end{align}
+Then in Ring Attention, we shard over $ R $ devices via $ z _{ sd } \longrightarrow z _{ \bar{r}td }
+$, and similar for other tensors, to compute the sharded outputs
+\begin{align}
+    z _{  \bar{r}td } &= \Sm _{ \bar{w} x  } \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right ) v _{ \bar{w}x d } \ .
+\end{align}
+Ring Attention provides an algorithm for computing the \pyinline{Softmax} sum Since the MLP layers
+act on every sequence position identically, only the Attention layers (and the loss computation)
+require special handling.
+
+The algorithm:
+\begin{algo}{Ring Attention}
+\State Initialize $ Z _{ \bar{r}td } $
+\State Populate the key, query, and value shards $ q _{ \bar{r}td },k _{ \bar{w}x d' },v _{ \bar{w}x d' } $ with $ \bar{r} =  \bar{w} = r $ on rank $ r $
+\For{ $ w \in \left \{ r, \ldots , R-1, 0, \ldots , r-1 \right \}  $} \Comment Computing components $ z _{ \bar{r}td } $ $ \forall t, d $
+\If{$ w \neq (r-1) \mod R $} prefetch shards $ k _{ (\bar{w}+1)xd }, v _{ (\bar{w}+1)xd } $ $ \forall x,d $
+\EndIf
+\State Initialize off-chip tensors $ z _{ irh },  \ell _{ ir }$ to zeros
+\State Move  $ q _{ irh }$ on-chip, instantiate $Z _{ ijrh }, L _{ ijr }$ to zeros and $M _{ ijr }$ to $ -\infty $ on-chip.
+\For{ $ j \in \ldots  $}
+    \State Move  $ k_{ jch' },v _{ jch' }$ on-chip
+    \State $ S _{ irjc } \gets q _{ irh' } k _{ jch' } $  \Comment $ S _{ irjc } $ is a temp, only needed for one $ i,j $ iter
+    \State $ M _{ irj }  \gets \max(M _{ i(j-1)r },  \max _{ c } S _{ irjc } ) $ \Comment Get max attention score seen so far
+    \State $ \tilde{P} _{ irjc} \gets \exp \left ( S _{ irjc } - M _{ irj } \right ) $
+    \State $ L _{ irj }  \gets e^{ M _{ i(j-1)r } - M _{ irj }}L _{ irj } + \sum _{ c }\tilde{P} _{ irjc }$ \Comment Correct, update denominators
+    \State $ Z _{ irjh } \gets   e^{ M _{ i(j-1)r } - M _{ irj } }Z _{ irjh } +\tilde{P} _{ irjc}v _{ jch }$ \Comment Correct, update numerators
+\EndFor
+\State $ z _{ irh } \gets \frac{1}{L _{ i(-1)r }} Z _{ i(-1)rh }$ \Comment Divide $ z $ by last $ j  $ value of $ L _{ ijc } $
+    \State $ \ell _{ ir } \gets M _{ i(-1)r }+\ln L _{ i(-1)r }$ \Comment Store statistics for bwd
+    \State Write  $z _{ irh } ,  \ell _{ ir }$ to off-chip memory
+\EndFor
+\label{ring_attn}
+\end{algo}
+
+
 \subsection{Pipeline Parallelism \label{subsec_pipe_parallelism}}
 
 TODO
@@ -1548,7 +1593,7 @@ The essentials of inference-time math, much of it based on \cite{kipply_inferenc
 
 \paragraph{Naive Inference} Processing a single \pyinline{(B, S, D)}-shaped tensor to generate a
 single next input costs the $ 2BSN _{ {\rm params}  } $ FLOPs we found for the forwards-pass in
-Sec.~\ref{sec_flops_training} (assuming $ S \lessim D $). Memory costs just come from the parameters
+Sec.~\ref{sec_flops_training} (assuming $ S \lesssim D $). Memory costs just come from the parameters
 themselves: $ M _{ {\rm infer}  }^{ {\rm naive}  }=pN _{ {\rm params}  } $. Per the analysis of
 App.~\ref{app_compute_mem_bound}, naive inference is generally compute-bound and so the
 per-token-latency is approximately\footnote{Assuming we do the naive thing here and generate the
