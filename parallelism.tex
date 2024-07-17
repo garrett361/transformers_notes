@@ -342,7 +342,29 @@ implementations of Ring Attention which leverage flash attention kernels can be 
 \href{https://github.com/lucidrains/ring-attention-pytorch}{here} and
 \href{https://github.com/zhuzilin/ring-flash-attention}{here}.
 
+The full forms of the forwards and backwards passes are again similar to those of flash attention; see Sec. \ref{subsubsec_fa_details}.
 
+\subsubsection{The Causal Mask}
+
+A naive, row-major sharding of the queries, keys, and vectors is highly suboptimal for causal
+attention because it leads to idling GPUs. Sharding the queries and keys as in $ q _{ s } =q _{
+(\bar{r}t) } $ and $ k _{ s' } = k _{ (t'\bar{r}') } $ in row-major order\footnote{That is, $ s = \bar{r}T
++ t $ for $ \bar{r} \in \left \{ 0, \ldots , R-1 \right \} $ and $ t \in \left \{ 0, \ldots  T-1
+\right \} $ with $ S=RT $.}, causality means that the entire chunked attention computation will be
+trivial for any iteration in which $ r'> r $. This is the case for $ R-1 $ iterations for the $ r=0
+$ GPU, for instance.
+
+So, we shouldn't shard this way for ring attention. In \cite{brandon2023stripedattentionfasterring}
+they demonstrate the speed-up achieved by just reversing the sharding pattern to column-major: $ q
+_{ s } =q _{ (t\bar{r}) } $ and $ k _{ s' } = k _{ (t'\bar{r}') } $ which guarantees non-trivial
+work for every GPU on every iteration. In the \texttt{ring-flash-attention} repo, they come up with
+yet another sharding strategy ("zig-zag" attention;
+\href{https://github.com/zhuzilin/ring-flash-attention/issues/2}{see this github issue}) which
+increases efficiency even more. Their strategy can't be naturally writtein in \texttt{einops}
+notation, but it is easy enough to explain: they split the sequence length into $ 2R $ sequential
+chunks and give zero-indexed chunks $ r $ and $ 2R -r -1 $ to GPU $ r $, which ends up guaranteeing
+that at least half of the computations will be non-trivial for every GPU for every stage of the
+computation.
 
 
 
