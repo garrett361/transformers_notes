@@ -441,18 +441,19 @@ numerical) stability, the basic version of the algorithm is as in the below. The
 algorithm again uses the causal mask, tracks maximum attention scores, and stores more statistics
 for the backwards pass, but this captures the essentials. Additional recomputation is needed for the
 backwards pass.
+
 \begin{algo}{Flash Attention (Naive - Missing causal mask/max tracking.)}
 \For{ $ i \in \ldots  $} \Comment Computing outputs $ z _{ irh } $ $ \forall r, h $
-\State Initialize off-chip tensors $ z _{ irh },  \ell _{ ir }$ to zeros
+\State Initialize off-chip tensor $ z _{ irh }$ to zeros
 \State Move  $ q _{ irh }$ on-chip, instantiate temp $Z _{ irh }$ to zeros on-chip.
-\For{ $ j \in \ldots  $} \Comment All on-chip computations
+\For{ $ j \in \ldots  $}\Comment All on-chip computations. $ r, c $ indices processed in parallel.
     \State Move  $ k_{ jch },v _{ jch }$ on-chip
     \State $ Z _{ irh } \gets   Z _{ irh } +\exp \left ( q _{ irh' } k _{ jch' }/\sqrt{D}  \right ) v _{ jch }$ \Comment Update numerator
     \State $ L _{ ir } \gets   L _{ ir } +\sum _{ j }\exp \left ( q _{ irh' } k _{ jch' }/\sqrt{D}  \right ) $ \Comment Update denominator
 \EndFor
-\State $ z _{ irh } \gets \frac{Z _{ irj }}{L _{ ir }}$ \Comment Write result off-chip
+\State $ z _{ irh } \gets \frac{Z _{ irh }}{L _{ ir }}$ \Comment Write result off-chip
 \EndFor
-\label{algo_fa_basic}
+\label{algo_fa_fwd_basic}
 \end{algo}
 
 We now analyze the memory transfer costs. As a baseline, vanilla attention requires $ \Ocal \left( S
@@ -474,3 +475,71 @@ weights, but these are discarded and re-computed for flash attention.  The only 
 cost comes from the $ \Ocal \left( ABS \right)  $ elements in the $ \ell _{ abs } $ statistics, which are
 dominated by the $ \Ocal \left( BSD \right)  $ costs from needing to save inputs, and hence negligible.
 
+
+\subsubsection{The Details}
+
+Here we give more detailed descriptions of the flash-attention forwards and backwards passes.
+
+For the forwards pass, we add in maximum-logits tracking for more numerically stable exponential
+computation and the causal mask. The causal mask $ C _{ s s' } = C _{ (ir)(jc) } $ is zero if $ s \ge s' $ and $ -\infty $ otherwise.
+
+\begin{algo}{Flash Attention Forward Pass}
+\For{ $ i \in \ldots  $}
+\State Initialize off-chip tensors $ z _{ irh },  \ell _{ ir }$ to zeros \Comment Computing outputs $ z _{ irh } $ $ \forall r, h $
+\State Move  $ q _{ irh }$ on-chip, instantiate temp $Z _{ irh }$ to zeros and $ M ^{ {\rm new} } _{ ir }, M ^{ {\rm old} } _{ ir } $ to $ -\infty $ on-chip
+\For{ $ j \in \ldots  $} \Comment All on-chip computations. $ r, c $ indices processed in parallel.
+    \State Move  $ k_{ jch },v _{ jch }$ on-chip
+    \State $ S _{ irjc } \gets   q _{ irh' } k _{ jch' }/\sqrt{D} + C _{ ijrc } $ \Comment Softmax logits + causal mask
+    \State $ M ^{ {\rm new} } _{ ir } \gets  \max \left ( M ^{ {\rm  old} } _{ ir }, {\rm Max}_{ jc }  S _{ irjc }  \right )   $
+    \State $ Z _{ irh } \gets   Z _{ irh } +\exp \left (  S _{ ijrc } - M ^{ {\rm  new} } _{ ir }  \right ) v _{ jch }$ \Comment Update numerator
+    \State $ L _{ ir } \gets   e ^{ M ^{ {\rm old} } _{ ir } - M ^{ {\rm  new} } _{ ir } } L _{ ir } +\sum _{ j }\exp \left (   S _{ ijrc } - M ^{ {\rm  new} } _{ ir }   \right ) $ \Comment Update denominator
+    \State $ M ^{ {\rm old} } _{ ir } \gets  M ^{ {\rm  new} } _{ ir }   $
+\EndFor
+\State $ z _{ irh } \gets \frac{Z _{ irh }}{L _{ ir }}$, $  \ell _{ ir } \gets M ^{ {\rm old} } _{ ir } + \ln L _{ ir }$ \Comment Write results off-chip. $ \ell _{ ir } $ for backwards
+\EndFor
+\label{algo_fa_fwd_advanced}
+\end{algo}
+
+For the backwards pass, the main complication comes from computing derivatives with respect to the
+attention scores. Recalling the Softmax derivative \eqref{eq_softmax_derivative}, given gradients $
+\frac{\partial \Lcal   }{ \partial z _{ irj } } \equiv  g _{ irj } $ we have the building
+blocks\footnote{The fact that we can replace the  $ j' $ sum with the cached attention outputs in
+the final derivative below is crucial.}
+\begin{align}
+    \frac{ \partial P _{ irjc } }{ \partial S _{ irj'c' } } &= P _{ irjc}\delta _{ jj' }\delta _{ c c'} - P _{ ijrc } P _{ irj'c' } \nn
+    \frac{ \partial \Lcal }{ \partial P _{ irjc } } &= g _{ irh } v _{ jch }  \nn
+    \frac{ \partial \Lcal }{ \partial S _{ irjc } } &= g _{ irh } \frac{ \partial P _{ irjc } }{ \partial S _{ irj'c' } }\nn
+                                                    &= g _{ irh } \left ( P _{ irjc } v _{ jch } - P _{ irjc } P _{ ir j'c' } v _{ j'c'h }  \right )  \nn
+                                                    &= g _{ irh } \left ( P _{ irjc } v _{ jch } - P _{ irjc }  z _{irh }  \right )\nn
+                                                    &= P _{ irjc }\left(\frac{ \partial \Lcal }{ \partial P _{ irjc } }  -g _{ irh }   z _{irh } \right)\label{eq_fa2_derivative_building_blocks}
+\end{align}
+from which we compute
+\begin{align}
+    \frac{ \partial \Lcal }{ \partial v _{ jch } } &= g _{ irh } P _{ irjc }  \nn
+    \frac{ \partial \Lcal }{ \partial q _{ irh } } &=  \frac{ \partial \Lcal }{ \partial S _{ irjc } }\frac{k _{ jch } }{ \sqrt{D}}\nn
+    \frac{ \partial \Lcal }{ \partial k _{ jch } } &=  \frac{ \partial \Lcal }{ \partial S _{ irjc } }\frac{q _{ irh } }{ \sqrt{D}}
+\end{align}
+Above we let $ P _{ ijrc } \equiv \Sm _{ jc}\left ( S _{ irjc } \right ) $ where $ S _{ ijrc }
+\equiv   q _{ irh' } k _{ jch' }/\sqrt{D} + C _{ ijrc }$, keeping notation similar to the above
+algorithm. All of this suggests a very similar algorithm to the above:
+
+\begin{algo}{Flash Attention Backward Pass}
+\For{ $ i \in \ldots  $}
+\State Initialize off-chip tensors $ \rd z _{ irh }, \rd q _{ jch }, \rd k _{ jch }  $ to zeros
+\State Move  $ z _{ irh }, q _{ irh }, g _{ irh }$ and the cached $ \ell _{ ir } $ on-chip.
+\For{ $ j \in \ldots  $} \Comment All on-chip computations. $ r, c $ indices processed in parallel.
+    \State Instantiate $ P _{ irjc },\rd P _{ irjc } ,\rd S _{ irjc } $  to zeros.
+    \State Move  $ k_{ jch },v _{ jch }$ on-chip
+    \State $ P _{ irjc } \gets   \exp \left (q _{ irh' } k _{ jch' }/\sqrt{D} + C _{ ijrc } + \ell _{ ir } \right )$ \Comment Get probabilities.
+    \State $ \rd P _{ irjc } \gets   g _{ irh} v _{ jch }$ \Comment Get derivatives w.r.t. $ P $
+    \State $ \rd S _{ irjc } \gets  P _{ ijrc }\left ( \rd P _{ ijrc } - g _{ irh } z _{ irh }  \right ) $\Comment Get derivatives w.r.t. $ S $
+    \State $ \rd k _{ jch } \gets  \rd S _{ irjc } \frac{ q _{ irh } }{ \sqrt{D} }$\Comment Derivatives w.r.t. $ \left \{q,  k, v \right \} $
+    \State $ \rd v _{ jch } \gets  g _{ irh }P _{ irjc }$
+    \State Write $ k, v $  derivatives to off-chip
+    \State $ \rd q _{ irh } \gets \rd q _{ irh }+ \rd S _{ irjc } \frac{ k _{ jch } }{ \sqrt{D} }$
+\EndFor
+\State Write $ q $  derivative to off-chip
+\EndFor
+\label{algo_fa_bwd_advanced}
+\end{algo}
+Above, $ \rd X =  \frac{ \partial \Lcal  }{ \partial X  } $.
