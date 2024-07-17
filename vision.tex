@@ -2,8 +2,25 @@
 
 Notes on the usage of Transformers for vision tasks.
 
+\section{Vision Transformers \label{sec_vit}}
 
-\section{CLIP}
+The original application of the Transformers architecture \cite{dosovitskiy2021imageworth16x16words}
+divides 2D images into patches of size $ P\times P $, e.g. flattening a three-channel $ i _{xyc} $
+image to shape $ f _{ s d  } $ where $ d \in \left \{ 0, \ldots , P ^{ 2 }C-1 \right \} $ and the
+effective sequence length runs over $ s \in \left \{ 0, L ^{ 2 }C /P ^{ 2 }-1 \right \} $, for an $
+L\times L $ sized image\footnote{Example: for a $ 256\times 256 $, three-channel image with a $
+16\times 16 $ patch size, the effective sequence length is 768.}. A linear projection converts the
+effective hidden dimension here to match match the model's hidden dimension. These are known as
+\textbf{Patch Embeddings}.
+
+Since there is no notion of causality, no causal mask is needed. A special \pyinline{[CLS]} token is
+prepended and used to generate the final representations $ z _{ bd } $ for a batch of images. This
+can be used for classification, for instance, by adding a classification head.  The original
+training objective was just that: standard classification tasks.
+
+
+
+\section{CLIP \label{sec_clip}}
 
 CLIP (Contrastive Language-Image Pre-Training) \cite{radford2021learningtransferablevisualmodels} is
 a technique for generating semantically meaningful representations of images. The method is not
@@ -11,7 +28,8 @@ necessarily Transformers specific, but the typical implementations are based on 
 
 The core of CLIP is its training objective. The dataset consists of image-caption pairs (which are
 relatively easy to extract; a core motivation), the CLIP processes many such pairs and then tries to
-predict which images match to which captions.
+predict which images match to which captions. This is thought to inject more semantic meaning into
+the image embeddings as compared with, say, those generated from the standard classification task.
 
 A typical implementation will use separate models for encoding the text and image inputs. The two
 outputs are $ t _{ bd } $ and $ i _{ bd } $ shaped\footnote{There may also be another linear

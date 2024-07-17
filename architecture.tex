@@ -402,7 +402,7 @@ index, let $ q _{ sd }, k _{ sd }, v _{ sd } $ be the queries, keys, and values,
 be the final output. Splitting into attention heads as in $ q _{ sd } = q _{ s(ah) }\longrightarrow
 q _{ sah } $ and similar the computation is
 \begin{align}
-    z _{ sah } &= \Sm _{ s' } \left ( q _{ sah' } k _{ s'ah' } \right ) v _{ s'ah }
+    z _{ sah } &= \Sm _{ s' } \left ( q _{ sah' } k _{ s'ah' } /\sqrt{D}  \right ) v _{ s'ah }
 \end{align}
 which is then concatenated as $ z _{ s(ah) }\longrightarrow  z _{ sd } $ to get the result. We are
 omitting the (very important) causal mask for clarity of presentation.  Because each attention head
@@ -426,9 +426,9 @@ This works by first chunking all of the inputs along their sequence dimensions a
 The chunk sizes are determined by memory constraints, as discussed below.  Then, the
 per-attention-head computation is equivalently written as
 \begin{align}
-    z _{irh} &= \Sm _{jc} \left ( q _{ irh' } k _{ jch' } \right ) v _{ jch } \nn
-             &= \frac{ \exp \left (  q _{ irh' } k _{ jch' } \right ) }{ \sum _{ jc } q _{ irh'' } k _{ jch'' } } v _{ jch }\nn
-             &\equiv \frac{\sum _{ j } Z _{ irjh } }{   \sum _{ j'c } q _{ irh'' } k _{ j'ch'' } }\nn
+    z _{irh} &= \Sm _{jc} \left ( q _{ irh' } k _{ jch' } / \sqrt{D} \right ) v _{ jch } \nn
+             &= \frac{ \exp \left (  q _{ irh' } k _{ jch' } / \sqrt{D} \right ) }{ \sum _{ jc }\exp \left ( q _{ irh'' } k _{ jch'' }/ \sqrt{D} \right ) } v _{ jch }\nn
+             &\equiv \frac{\sum _{ j } Z _{ irjh } }{   \sum _{ j'c } \exp \left(q _{ irh'' } k _{ j'ch'' }/ \sqrt{D}\right) }\nn
              &\equiv \frac{\sum _{ j } Z _{ irjh } }{\sum _{ j' }L _{ ij'r }}\nn
              &\equiv \frac{ Z _{ irh } }{L _{ ir }}\nn
 \end{align}
@@ -447,8 +447,8 @@ backwards pass.
 \State Move  $ q _{ irh }$ on-chip, instantiate temp $Z _{ irh }$ to zeros on-chip.
 \For{ $ j \in \ldots  $} \Comment All on-chip computations
     \State Move  $ k_{ jch },v _{ jch }$ on-chip
-    \State $ Z _{ irh } \gets   Z _{ irh } +\exp \left ( q _{ irh' } k _{ jch' }  \right ) v _{ jch }$ \Comment Update numerator
-    \State $ L _{ ir } \gets   L _{ ir } +\sum _{ j }\exp \left ( q _{ irh' } k _{ jch' }  \right ) $ \Comment Update denominator
+    \State $ Z _{ irh } \gets   Z _{ irh } +\exp \left ( q _{ irh' } k _{ jch' }/\sqrt{D}  \right ) v _{ jch }$ \Comment Update numerator
+    \State $ L _{ ir } \gets   L _{ ir } +\sum _{ j }\exp \left ( q _{ irh' } k _{ jch' }/\sqrt{D}  \right ) $ \Comment Update denominator
 \EndFor
 \State $ z _{ irh } \gets \frac{Z _{ irj }}{L _{ ir }}$ \Comment Write result off-chip
 \EndFor

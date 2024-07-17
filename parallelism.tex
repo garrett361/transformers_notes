@@ -300,7 +300,7 @@ by never realizing the entire $ \Ocal \left( S ^{ 2 } \right)  $ attention score
 It works by sharding over the sequence dimension. Let $ z _{ sd } $ is the (batch-dim suppressed)
 residual stream of a non-sharded Transformer:
 \begin{align}
-    z _{  sd } &= \Sm _{ s' } \left ( q _{ sd' } k _{ s'd' } \right ) v _{ s'd } \ ,
+    z _{  sd } &= \Sm _{ s' } \left ( q _{ sd' } k _{ s'd' } /\sqrt{D}\right ) v _{ s'd } \ ,
 \end{align}
 suppressing the causal mask for simplicity of presentation.
 
@@ -308,8 +308,8 @@ Then in Ring Attention, we shard over $ R $ devices via $ z _{ sd } \longrightar
 $, and similar for other tensors, to compute the sharded outputs
 \begin{align}
     z _{  \bar{r}td } &= \Sm _{ \bar{w} x  } \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right ) v _{ \bar{w}x d }\nn
-     &= \frac{ \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right ) }{ \sum _{ \bar{w}'x' } q _{ \bar{r}t d'' } k _{ \bar{w}'x' d'' }  } v _{ \bar{w}xd }\nn
-     &\equiv \frac{ Z _{\bar{r}td } }{   \sum _{ \bar{w}'x' } q _{ \bar{r}t d'' } k _{ \bar{w}'x' d'' }  }\nn
+     &= \frac{ \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' }/\sqrt{D} \right ) }{ \sum _{ \bar{w}'x' } \exp \left (q _{ \bar{r}t d'' } k _{ \bar{w}'x' d'' }/\sqrt{D}\right )  } v _{ \bar{w}xd }\nn
+     &\equiv \frac{ Z _{\bar{r}td } }{   \sum _{ \bar{w}'x' } \exp  \left (q _{ \bar{r}t d'' } k _{ \bar{w}'x' d'' }/\sqrt{D} \right ) }\nn
      &\equiv \frac{ Z _{\bar{r}td } }{L _{ \bar{r}t }}
 \end{align}
 where we introduced some notation which will be useful blow. Ring Attention is essentially an
@@ -319,19 +319,30 @@ require special handling.
 
 The algorithm performs the $ \bar{w}$ sum as a loop. We present the simplified case without a causal
 mask or maximum attention score tracking. These are important omissions\footnote{See
-\cite{brandon2023stripedattentionfasterring} for causal mask efficiency considerations.}
+\cite{brandon2023stripedattentionfasterring} for causal mask efficiency considerations.}.
 \begin{algo}{Ring Attention (Naive - Missing causal mask/max tracking.)}
 \State Initialize $ Z _{ \bar{r}td } $, $ L _{ \bar{r}t } $ to zeros
 \State Populate the key, query, and value shards $ q _{ \bar{r}td },k _{ \bar{w}x d' },v _{ \bar{w}x d' } $ with $ \bar{r} =  \bar{w} = r $ on rank $ r $
 \For{ $ w \in \left \{ r, \ldots , R-1, 0, \ldots , r-1 \right \}  $} \Comment Computing components $ z _{ \bar{r}td } $ $ \forall t, d $
     \If{$ w \neq (r-1) \mod R $} prefetch shards $ k _{ (\bar{w}+1)xd }, v _{ (\bar{w}+1)xd } $ $ \forall x,d $
     \EndIf
-    \State $ Z _{ \bar{r}td } \gets Z _{ \bar{r}td }+   \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right ) v _{ \bar{w}xd } $
-    \State $ L _{ \bar{r}t } \gets  L _{ \bar{r}t } +  \sum _{ x } \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right )  $
+    \State $ Z _{ \bar{r}td } \gets Z _{ \bar{r}td }+   \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' }/\sqrt{D} \right ) v _{ \bar{w}xd } $ \Comment Can use flash attention kernels here
+    \State $ L _{ \bar{r}t } \gets  L _{ \bar{r}t } +  \sum _{ x } \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' }/\sqrt{D}\right )  $ \Comment Can use flash attention kernels here
 \EndFor
 \State $ z _{ \bar{r}td } \gets \frac{ Z _{ \bar{r}td } }{ L _{ \bar{r}t }  }$
 \label{algo_ring_attn_fwd_naive}
 \end{algo}
+
+At every step in the loop in the algorithm we are computing the sums $ \exp \left ( q _{ \bar{r}t d'
+} k _{ \bar{w}x d' } \right ) v _{ \bar{w}xd } $ and $ \sum _{ x } \exp \left ( q _{ \bar{r}t d' } k
+_{ \bar{w}x d' } \right)  $ for fixed values of $ \bar{r}, \bar{w} $ and all values of the other
+indices. These are precisely the ingredients that go into the usual attention computation and for
+this reason it's possible to use flash attention kernels for every individual step. \pyinline{torch}
+implementations of Ring Attention which leverage flash attention kernels can be found
+\href{https://github.com/lucidrains/ring-attention-pytorch}{here} and
+\href{https://github.com/zhuzilin/ring-flash-attention}{here}.
+
+
 
 
 
