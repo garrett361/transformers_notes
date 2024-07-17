@@ -365,7 +365,7 @@ notation, but it is easy enough to explain: they split the sequence length into 
 chunks and give zero-indexed chunks $ r $ and $ 2R -r -1 $ to GPU $ r $, which ends up optimally
 distributing the work.
 
-Efficiency proofs for the three causal strategies. Let $ q _{ s } $ be sharded to $ q _{ \bar{r}t }
+We analyze the efficiency of each strategy now. Let $ q _{ s } $ be sharded to $ q _{ \bar{r}t }
 $ according to the strategy's specifics and similar for $ k _{ s } $. On the first iteration every
 rank has keys and queries with identical sequence positions, meaning $ \frac{ \frac{ S }{ R }\left (
 \frac{ S }{ R }+1 \right ) }{2  } $ positions will be attended to on every rank. The difference
