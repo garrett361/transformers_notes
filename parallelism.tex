@@ -357,14 +357,47 @@ $ GPU, for instance.
 So, we shouldn't shard this way for ring attention. In \cite{brandon2023stripedattentionfasterring}
 they demonstrate the speed-up achieved by just reversing the sharding pattern to column-major: $ q
 _{ s } =q _{ (t\bar{r}) } $ and $ k _{ s' } = k _{ (t'\bar{r}') } $ which guarantees non-trivial
-work for every GPU on every iteration. In the \texttt{ring-flash-attention} repo, they come up with
+work for every GPU on every iteration, which they call striped ring attention. In the \texttt{ring-flash-attention} repo, they come up with
 yet another sharding strategy ("zig-zag" attention;
 \href{https://github.com/zhuzilin/ring-flash-attention/issues/2}{see this github issue}) which
 increases efficiency even more. Their strategy can't be naturally writtein in \texttt{einops}
 notation, but it is easy enough to explain: they split the sequence length into $ 2R $ sequential
-chunks and give zero-indexed chunks $ r $ and $ 2R -r -1 $ to GPU $ r $, which ends up guaranteeing
-that at least half of the computations will be non-trivial for every GPU for every stage of the
-computation.
+chunks and give zero-indexed chunks $ r $ and $ 2R -r -1 $ to GPU $ r $, which ends up optimally
+distributing the work.
+
+Efficiency proofs for the three causal strategies. Let $ q _{ s } $ be sharded to $ q _{ \bar{r}t }
+$ according to the strategy's specifics and similar for $ k _{ s } $. On the first iteration every
+rank has keys and queries with identical sequence positions, meaning $ \frac{ \frac{ S }{ R }\left (
+\frac{ S }{ R }+1 \right ) }{2  } $ positions will be attended to on every rank. The difference
+comes about in the subsequent iterations:
+\begin{enumerate}
+    \item For naive ring attention, it's all or nothing. $ q _{ \bar{r}t } $ can attend to all of $k
+        _{ \bar{w}x } $ if $ \bar{r}\ge \bar{w} $. This means that at least one rank needs to
+        perform $ S ^{ 2 } / R ^{ 2 } $ operations every iteration (after the first one),
+        bottlenecking processes which have no work.
+    \item For striped attention  ring attention, rank $ r= R-1 $ will have queries corresponding to
+        positions $ \left \{ R-1, 2R-1, \ldots , S-1 \right \} $ and it will always be able to
+        attend to $ \frac{ \frac{ S }{ R }\left ( \frac{ S }{ R }+1 \right ) }{2  }  $ positions at
+        every iteration, just like on the first iteration. This rank (and others which perform the
+        same number of operations for some iterations) is the bottleneck, since rank $ r=0 $, which
+        owns sequence positions $ \left \{ 0, R, \ldots  , S-R-1 \right \} $ is only ever able to
+        attend to $  \frac{ \frac{ S }{ R }\left ( \frac{ S }{ R }-1 \right ) }{2  }   $ positions,
+        since its zero-position component can never attend to anything after the first iteration.
+        This mismatch between ranks is suboptimal.
+    \item For zig-zag attention, there are two scenarios which end up producing the same amount of
+        work. When $ \bar{r} <  \bar{w} $ the two sets of position indices covered by $ t $ on $ q
+        _{ \bar{r}t } $ fall between those\footnote{Example: four ranks with sequence length $ S=8
+        $, the rank-zero queries cover positions $ \left \{ 0,  7 \right \} $ while the
+        rank-one keys cover $ \left \{  2,  6 \right \} $, so the former sandwich the latter.}
+        covered by the $ x $ index on $ k _{ \bar{w}x } $. That is, every index in the query can
+        attend to exactly half of the indices on the keys: $ \frac{ S ^{ 2 } }{ 2R ^{ 2 } } $ operations.
+        In the opposite\footnote{The $ \bar{w}=\bar{r} $ case was already treated in the first
+        iteration.} $ \bar{w} <  \bar{r} $ case, the query positions sandwich those of the keys and
+        so the upper half of the query positions can attend to all of the key's positions, again $
+        \frac{ S ^{ 2 } }{ 2R ^{ 2 } } $ operations. So work is perfectly distributed and no rank serves as
+        a bottleneck.
+
+\end{enumerate}
 
 
 
