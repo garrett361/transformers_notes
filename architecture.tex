@@ -440,10 +440,8 @@ similarly to how it's outlined above: we compute in chunks, looping over $ i $ a
 loop which is used to compute the numerator and denominator simultaneously.
 
 Ignoring the important causal mask and not tracking the maximum logits (which we should do for
-numerical stability), the basic version of the algorithm is as in the below. The full
-algorithm again uses the causal mask, tracks maximum attention scores, and stores more statistics
-for the backwards pass, but this captures the essentials. Additional recomputation is needed for the
-backwards pass.
+numerical stability), the basic version which captures the essentials of the algorithm is below.
+Additional recomputation is needed for the backwards pass.
 
 \begin{algo}{Flash Attention (Naive - Missing causal mask/max tracking.)}
 \For{ $ i \in \ldots  $} \Comment Computing outputs $ z _{ irh } $ $ \forall r, h $
