@@ -298,9 +298,10 @@ Flash Attention \ref{subsec_flash_attention}: it enables extremely long sequence
 by never realizing the entire $ \Ocal \left( S ^{ 2 } \right)  $ attention scores at once.
 
 It works by sharding over the sequence dimension. Let $ z _{ sd } $ is the (batch-dim suppressed)
-residual stream of a non-sharded Transformer:
+residual stream of a non-sharded Transformer\footnote{Like in Sec. \ref{subsec_flash_attention}, we
+omit any normalization factor inside the Softmax.}:
 \begin{align}
-    z _{  sd } &= \Sm _{ s' } \left ( q _{ sd' } k _{ s'd' } /\sqrt{D}\right ) v _{ s'd } \ ,
+    z _{  sd } &= \Sm _{ s' } \left ( q _{ sd' } k _{ s'd' } \right ) v _{ s'd } \ ,
 \end{align}
 suppressing the causal mask for simplicity of presentation.
 
@@ -308,8 +309,8 @@ Then in Ring Attention, we shard over $ R $ devices via $ z _{ sd } \longrightar
 $, and similar for other tensors, to compute the sharded outputs
 \begin{align}
     z _{  \bar{r}td } &= \Sm _{ \bar{w} x  } \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right ) v _{ \bar{w}x d }\nn
-     &= \frac{ \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' }/\sqrt{D} \right ) }{ \sum _{ \bar{w}'x' } \exp \left (q _{ \bar{r}t d'' } k _{ \bar{w}'x' d'' }/\sqrt{D}\right )  } v _{ \bar{w}xd }\nn
-     &\equiv \frac{ Z _{\bar{r}td } }{   \sum _{ \bar{w}'x' } \exp  \left (q _{ \bar{r}t d'' } k _{ \bar{w}'x' d'' }/\sqrt{D} \right ) }\nn
+     &= \frac{ \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right ) }{ \sum _{ \bar{w}'x' } \exp \left (q _{ \bar{r}t d'' } k _{ \bar{w}'x' d'' }\right )  } v _{ \bar{w}xd }\nn
+     &\equiv \frac{ Z _{\bar{r}td } }{   \sum _{ \bar{w}'x' } \exp  \left (q _{ \bar{r}t d'' } k _{ \bar{w}'x' d'' } \right ) }\nn
      &\equiv \frac{ Z _{\bar{r}td } }{L _{ \bar{r}t }}
 \end{align}
 where we introduced some notation which will be useful blow. Ring Attention is essentially an
@@ -326,8 +327,8 @@ mask or maximum attention score tracking. These are important omissions\footnote
 \For{ $ w \in \left \{ r, \ldots , R-1, 0, \ldots , r-1 \right \}  $} \Comment Computing components $ z _{ \bar{r}td } $ $ \forall t, d $
     \If{$ w \neq (r-1) \mod R $} prefetch shards $ k _{ (\bar{w}+1)xd }, v _{ (\bar{w}+1)xd } $ $ \forall x,d $
     \EndIf
-    \State $ Z _{ \bar{r}td } \gets Z _{ \bar{r}td }+   \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' }/\sqrt{D} \right ) v _{ \bar{w}xd } $ \Comment Can use flash attention kernels here
-    \State $ L _{ \bar{r}t } \gets  L _{ \bar{r}t } +  \sum _{ x } \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' }/\sqrt{D}\right )  $ \Comment Can use flash attention kernels here
+    \State $ Z _{ \bar{r}td } \gets Z _{ \bar{r}td }+   \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' } \right ) v _{ \bar{w}xd } $ \Comment Can use flash attention kernels here
+    \State $ L _{ \bar{r}t } \gets  L _{ \bar{r}t } +  \sum _{ x } \exp \left ( q _{ \bar{r}t d' } k _{ \bar{w}x d' }\right )  $ \Comment Can use flash attention kernels here
 \EndFor
 \State $ z _{ \bar{r}td } \gets \frac{ Z _{ \bar{r}td } }{ L _{ \bar{r}t }  }$
 \label{algo_ring_attn_fwd_naive}
@@ -384,18 +385,18 @@ comes about in the subsequent iterations:
         attend to $  \frac{ \frac{ S }{ R }\left ( \frac{ S }{ R }-1 \right ) }{2  }   $ positions,
         since its zero-position component can never attend to anything after the first iteration.
         This mismatch between ranks is suboptimal.
-    \item For zig-zag attention, there are two scenarios which end up producing the same amount of
-        work. When $ \bar{r} <  \bar{w} $ the two sets of position indices covered by $ t $ on $ q
-        _{ \bar{r}t } $ fall between those\footnote{Example: four ranks with sequence length $ S=8
-        $, the rank-zero queries cover positions $ \left \{ 0,  7 \right \} $ while the
-        rank-one keys cover $ \left \{  2,  6 \right \} $, so the former sandwich the latter.}
-        covered by the $ x $ index on $ k _{ \bar{w}x } $. That is, every index in the query can
-        attend to exactly half of the indices on the keys: $ \frac{ S ^{ 2 } }{ 2R ^{ 2 } } $ operations.
-        In the opposite\footnote{The $ \bar{w}=\bar{r} $ case was already treated in the first
-        iteration.} $ \bar{w} <  \bar{r} $ case, the query positions sandwich those of the keys and
-        so the upper half of the query positions can attend to all of the key's positions, again $
-        \frac{ S ^{ 2 } }{ 2R ^{ 2 } } $ operations. So work is perfectly distributed and no rank serves as
-        a bottleneck.
+    \item For zig-zag attention, there are two scenarios. Each produces the same amount of
+        work, which makes this strategy optimal. When $ \bar{r} <  \bar{w} $ the two sets of
+        position indices covered by $ t $ on $ q _{ \bar{r}t } $ fall between
+        those\footnote{Example: four ranks with sequence length $ S=8 $, the rank-zero queries cover
+            positions $ \left \{ 0,  7 \right \} $ while the rank-one keys cover $ \left \{  2,  6
+        \right \} $, so the former sandwich the latter.} covered by the $ x $ index on $ k _{
+        \bar{w}x } $. That is, every index in the query can attend to exactly half of the indices on
+        the keys: $ \frac{ S ^{ 2 } }{ 2R ^{ 2 } } $ operations. In the opposite\footnote{The $
+        \bar{w}=\bar{r} $ case was already treated in the first iteration.} $ \bar{w} <  \bar{r} $
+        case, the query positions sandwich those of the keys and so the upper half of the query
+        positions can attend to all of the key's positions, again $ \frac{ S ^{ 2 } }{ 2R ^{ 2 } } $
+        operations. So work is perfectly distributed and no rank serves as a bottleneck.
 
 \end{enumerate}
 

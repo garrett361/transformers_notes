@@ -400,9 +400,12 @@ activation memory required, at the expense of needing recomputation in the backw
 The central idea is to decompose the attention computation in the following way. Dropping the batch
 index, let $ q _{ sd }, k _{ sd }, v _{ sd } $ be the queries, keys, and values, and $ z _{ sd } $
 be the final output. Splitting into attention heads as in $ q _{ sd } = q _{ s(ah) }\longrightarrow
-q _{ sah } $ and similar the computation is
+q _{ sah } $ and similar, the computation is\footnote{We omit the usual $ \sqrt{D/A} $ normalization
+factor inside the Softmax to de-clutter the presentation. Really, this normalization should just be
+enforced at the level of the matrices which are used to generate the queries, keys, and values,
+anyway.}
 \begin{align}
-    z _{ sah } &= \Sm _{ s' } \left ( q _{ sah' } k _{ s'ah' } /\sqrt{D}  \right ) v _{ s'ah }
+    z _{ sah } &= \Sm _{ s' } \left ( q _{ sah' } k _{ s'ah' }   \right ) v _{ s'ah }
 \end{align}
 which is then concatenated as $ z _{ s(ah) }\longrightarrow  z _{ sd } $ to get the result. We are
 omitting the (very important) causal mask for clarity of presentation.  Because each attention head
@@ -426,9 +429,9 @@ This works by first chunking all of the inputs along their sequence dimensions a
 The chunk sizes are determined by memory constraints, as discussed below.  Then, the
 per-attention-head computation is equivalently written as
 \begin{align}
-    z _{irh} &= \Sm _{jc} \left ( q _{ irh' } k _{ jch' } / \sqrt{D} \right ) v _{ jch } \nn
-             &= \frac{ \exp \left (  q _{ irh' } k _{ jch' } / \sqrt{D} \right ) }{ \sum _{ jc }\exp \left ( q _{ irh'' } k _{ jch'' }/ \sqrt{D} \right ) } v _{ jch }\nn
-             &\equiv \frac{\sum _{ j } Z _{ irjh } }{   \sum _{ j'c } \exp \left(q _{ irh'' } k _{ j'ch'' }/ \sqrt{D}\right) }\nn
+    z _{irh} &= \Sm _{jc} \left ( q _{ irh' } k _{ jch' }  \right ) v _{ jch } \nn
+             &= \frac{ \exp \left (  q _{ irh' } k _{ jch' }  \right ) }{ \sum _{ jc }\exp \left ( q _{ irh'' } k _{ jch'' } \right ) } v _{ jch }\nn
+             &\equiv \frac{\sum _{ j } Z _{ irjh } }{   \sum _{ j'c } \exp \left(q _{ irh'' } k _{ j'ch'' }\right) }\nn
              &\equiv \frac{\sum _{ j } Z _{ irjh } }{\sum _{ j' }L _{ ij'r }}\nn
              &\equiv \frac{ Z _{ irh } }{L _{ ir }}\nn
 \end{align}
@@ -437,7 +440,7 @@ similarly to how it's outlined above: we compute in chunks, looping over $ i $ a
 loop which is used to compute the numerator and denominator simultaneously.
 
 Ignoring the important causal mask and not tracking the maximum logits (which we should do for
-numerical) stability, the basic version of the algorithm is as in the below. The full
+numerical stability), the basic version of the algorithm is as in the below. The full
 algorithm again uses the causal mask, tracks maximum attention scores, and stores more statistics
 for the backwards pass, but this captures the essentials. Additional recomputation is needed for the
 backwards pass.
@@ -448,8 +451,8 @@ backwards pass.
 \State Move  $ q _{ irh }$ on-chip, instantiate temp $Z _{ irh }$ to zeros on-chip.
 \For{ $ j \in \ldots  $}\Comment All on-chip computations. $ r, c $ indices processed in parallel.
     \State Move  $ k_{ jch },v _{ jch }$ on-chip
-    \State $ Z _{ irh } \gets   Z _{ irh } +\exp \left ( q _{ irh' } k _{ jch' }/\sqrt{D}  \right ) v _{ jch }$ \Comment Update numerator
-    \State $ L _{ ir } \gets   L _{ ir } +\sum _{ j }\exp \left ( q _{ irh' } k _{ jch' }/\sqrt{D}  \right ) $ \Comment Update denominator
+    \State $ Z _{ irh } \gets   Z _{ irh } +\exp \left ( q _{ irh' } k _{ jch' }  \right ) v _{ jch }$ \Comment Update numerator
+    \State $ L _{ ir } \gets   L _{ ir } +\sum _{ j }\exp \left ( q _{ irh' } k _{ jch' }  \right ) $ \Comment Update denominator
 \EndFor
 \State $ z _{ irh } \gets \frac{Z _{ irh }}{L _{ ir }}$ \Comment Write result off-chip
 \EndFor
@@ -489,7 +492,7 @@ computation and the causal mask. The causal mask $ C _{ s s' } = C _{ (ir)(jc) }
 \State Move  $ q _{ irh }$ on-chip, instantiate temp $Z _{ irh }$ to zeros and $ M ^{ {\rm new} } _{ ir }, M ^{ {\rm old} } _{ ir } $ to $ -\infty $ on-chip
 \For{ $ j \in \ldots  $} \Comment All on-chip computations. $ r, c $ indices processed in parallel.
     \State Move  $ k_{ jch },v _{ jch }$ on-chip
-    \State $ S _{ irjc } \gets   q _{ irh' } k _{ jch' }/\sqrt{D} + C _{ ijrc } $ \Comment Softmax logits + causal mask
+    \State $ S _{ irjc } \gets   q _{ irh' } k _{ jch' } + C _{ ijrc } $ \Comment Softmax logits + causal mask
     \State $ M ^{ {\rm new} } _{ ir } \gets  \max \left ( M ^{ {\rm  old} } _{ ir }, {\rm Max}_{ jc }  S _{ irjc }  \right )   $
     \State $ Z _{ irh } \gets   Z _{ irh } +\exp \left (  S _{ ijrc } - M ^{ {\rm  new} } _{ ir }  \right ) v _{ jch }$ \Comment Update numerator
     \State $ L _{ ir } \gets   e ^{ M ^{ {\rm old} } _{ ir } - M ^{ {\rm  new} } _{ ir } } L _{ ir } +\sum _{ j }\exp \left (   S _{ ijrc } - M ^{ {\rm  new} } _{ ir }   \right ) $ \Comment Update denominator
@@ -516,12 +519,13 @@ the final derivative below is crucial.}
 from which we compute
 \begin{align}
     \frac{ \partial \Lcal }{ \partial v _{ jch } } &= g _{ irh } P _{ irjc }  \nn
-    \frac{ \partial \Lcal }{ \partial q _{ irh } } &=  \frac{ \partial \Lcal }{ \partial S _{ irjc } }\frac{k _{ jch } }{ \sqrt{D}}\nn
-    \frac{ \partial \Lcal }{ \partial k _{ jch } } &=  \frac{ \partial \Lcal }{ \partial S _{ irjc } }\frac{q _{ irh } }{ \sqrt{D}}
+    \frac{ \partial \Lcal }{ \partial q _{ irh } } &=  \frac{ \partial \Lcal }{ \partial S _{ irjc } }k _{ jch } \nn
+    \frac{ \partial \Lcal }{ \partial k _{ jch } } &=  \frac{ \partial \Lcal }{ \partial S _{ irjc } }q _{ irh }
 \end{align}
 Above we let $ P _{ ijrc } \equiv \Sm _{ jc}\left ( S _{ irjc } \right ) $ where $ S _{ ijrc }
-\equiv   q _{ irh' } k _{ jch' }/\sqrt{D} + C _{ ijrc }$, keeping notation similar to the above
-algorithm. All of this suggests a very similar algorithm to the above:
+\equiv   q _{ irh' } k _{ jch' } + C _{ ijrc }$, keeping notation similar to the above
+algorithm. All of this suggests a very similar algorithm to the above. Using the unfortunate, but
+common, notation,  $ \rd X =  \frac{ \partial \Lcal  }{ \partial X  } $ the algorithm is:
 
 \begin{algo}{Flash Attention Backward Pass}
 \For{ $ i \in \ldots  $}
@@ -530,16 +534,15 @@ algorithm. All of this suggests a very similar algorithm to the above:
 \For{ $ j \in \ldots  $} \Comment All on-chip computations. $ r, c $ indices processed in parallel.
     \State Instantiate $ P _{ irjc },\rd P _{ irjc } ,\rd S _{ irjc } $  to zeros.
     \State Move  $ k_{ jch },v _{ jch }$ on-chip
-    \State $ P _{ irjc } \gets   \exp \left (q _{ irh' } k _{ jch' }/\sqrt{D} + C _{ ijrc } + \ell _{ ir } \right )$ \Comment Get probabilities.
+    \State $ P _{ irjc } \gets   \exp \left (q _{ irh' } k _{ jch' } + C _{ ijrc } + \ell _{ ir } \right )$ \Comment Get probabilities.
     \State $ \rd P _{ irjc } \gets   g _{ irh} v _{ jch }$ \Comment Get derivatives w.r.t. $ P $
     \State $ \rd S _{ irjc } \gets  P _{ ijrc }\left ( \rd P _{ ijrc } - g _{ irh } z _{ irh }  \right ) $\Comment Get derivatives w.r.t. $ S $
-    \State $ \rd k _{ jch } \gets  \rd S _{ irjc } \frac{ q _{ irh } }{ \sqrt{D} }$\Comment Derivatives w.r.t. $ \left \{q,  k, v \right \} $
+    \State $ \rd k _{ jch } \gets  \rd S _{ irjc }  q _{ irh }$ \Comment Derivatives w.r.t. $ \left \{q,  k, v \right \} $
     \State $ \rd v _{ jch } \gets  g _{ irh }P _{ irjc }$
     \State Write $ k, v $  derivatives to off-chip
-    \State $ \rd q _{ irh } \gets \rd q _{ irh }+ \rd S _{ irjc } \frac{ k _{ jch } }{ \sqrt{D} }$
+    \State $ \rd q _{ irh } \gets \rd q _{ irh }+ \rd S _{ irjc }  k _{ jch } $
 \EndFor
 \State Write $ q $  derivative to off-chip
 \EndFor
 \label{algo_fa_bwd_advanced}
 \end{algo}
-Above, $ \rd X =  \frac{ \partial \Lcal  }{ \partial X  } $.
