@@ -123,12 +123,15 @@ brevity and $ A $ and $ R $ stand for rejected and accepted, respectively, we ha
          &= \min \left (q(x _{ t }),  p(x _{ t })\right ) + p'(x _{ t })\sum _{ z _{ t } }\left (1 - \min \left (1, \frac{ p(z _{ t }) }{ q( z _{ t })
          }\right )  \right) \times q(z _{ t })
 \end{align}
-The sum is just some constant (denoted by $ 1 - \beta  $ in the paper) and so choosing
+The sum is just some constant (denoted by $ 1 - \beta  $ in the paper, which should really have a $
+t $ subscript) and so choosing
 \begin{align}
     p'(x _{ t }| x_{\rm prefix}) &\equiv \frac{ p(x _{ t }| x_{\rm prefix}) - \min \left ( q(x _{ t }| x_{\rm prefix}), p(x _{ t }| x_{\rm prefix}) \right ) }{ 1- \beta }
 \end{align}
 achieves the goal of getting $Q(x _{ t }| x_{\rm prefix}) = p(x _{ t }| x_{\rm prefix}) $. It can be
 verified that this distribution is properly normalized.
+
+An approximate analysis for choosing the optimal value of $ \gamma  $ can be found in the paper.
 
 
 \section{The Bare Minimum and the kv-Cache \label{sec_kv_cache}}
