@@ -458,17 +458,18 @@ Additional recomputation is needed for the backwards pass.
 \end{algo}
 
 We now analyze the memory transfer costs. As a baseline, vanilla attention requires $ \Ocal \left( S
-^{ 2 }+ DS \right)  $ memory transfers per attention head.   For flash attention, most of the memory
-transfers above come from the $k, v$ accesses in the inner loop, which access $ \Ocal \left( IJCH
-\right) \sim  \Ocal \left( \frac{ HS ^{ 2 } }{ R } \right)$ elements over the lifetime of the
-algorithm (per attention head). The factor $ H/R $ determines the memory-access advantage, and this
-number is bound by the on-chip memory size. The on-chip bytes from the queries, keys, and vectors
-take $ \Ocal \left( CH + RH \right)  $ memory and the temporaries from attention scores and
-exponentials require $ \Ocal \left( RC \right)$. If we have $ M $ bytes of on-chip memory, then we
-have the constraint $ CH + RH + RC \lesssim  M  $, and assuming assuming the chunks were chosen to
-maximize on-chip memory usage, $ \frac{ H }{ R } \sim  \frac{ H ^{ 2 } }{ M } $. Since $ M \sim 10
-^{ 5 } $ bytes on 2023 GPUs, this is a small factor for the typical head dimensions  $ H \sim 64 $,
-as desired.
+^{ 2 }+ DS \right)  $ memory transfers per attention head, where the two factors come from the
+attention scores and $ q, k, v $, respectively.  For flash attention, we no longer shuttle the
+attention scores off-chip, but $ k, v $ are repeatedly moved back and forth. These transfers form
+most of the memory operations in the inner loop above, which access $ \Ocal \left( IJCH \right) \sim
+\Ocal \left( \frac{ HS ^{ 2 } }{ R } \right)$ elements over the lifetime of the algorithm (per
+attention head). The factor $ H/R $ determines the memory-access advantage, and this number is bound
+by the on-chip memory size. The on-chip bytes from the queries, keys, and vectors take $ \Ocal
+\left( CH + RH \right)  $ memory and the temporaries from attention scores and exponentials require
+$ \Ocal \left( RC \right)$. If we have $ M $ bytes of on-chip memory, then we have the constraint $
+CH + RH + RC \lesssim  M  $, and assuming assuming the chunks were chosen to maximize on-chip memory
+usage, $ \frac{ H }{ R } \sim \frac{ H ^{ 2 } }{ M } $. Since $ M \sim 10 ^{ 5 } $ bytes on 2023
+GPUs, this is a small factor for the typical head dimensions  $ H \sim 64 $, as desired.
 
 Flash attention is also a big win for activation memory: a naive algorithm has a $ \Ocal \left( ABS
 ^{ 2 } \right)  $ per-layer contribution to activation memory due to needing to save the attention
