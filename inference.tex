@@ -100,7 +100,8 @@ Informally, the algorithm is:
     \item For every generated token $ z _{ t } $, accept it
         unconditionally if $ q(z_t| x _{ {\rm  prefix} })\le p(x_t| z _{ {\rm  prefix} })  $. If $
          q(z_t| x _{ {\rm  prefix} }) > p(z_t| x _{ {\rm  prefix} })$, instead accept the token
-        with only probability $ \frac{ p }{ q } $.
+        with only probability\footnote{This choice is not fundamental; it just makes following
+        expressions nicer.} $ \frac{ p }{ q } $.
     \item If only the first $ n < \gamma  $ tokens are accepted, generate token $ n+1 $ from a
         modified distribution $ p'(x_t| x _{ {\rm prefix} }) = F \left [ p(x), q(x) \right ]$ built
         from the two model predictions and chosen (as will be shown) such that the entire algorithm
