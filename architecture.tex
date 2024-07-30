@@ -524,7 +524,10 @@ from which we compute
 Above we let $ P _{ ijrc } \equiv \Sm _{ jc}\left ( S _{ irjc } \right ) $ where $ S _{ ijrc }
 \equiv   q _{ irh' } k _{ jch' } + C _{ ijrc }$, keeping notation similar to the above
 algorithm. All of this suggests a very similar algorithm to the above. Using the unfortunate, but
-common, notation,  $ \rd X =  \frac{ \partial \Lcal  }{ \partial X  } $ the algorithm is:
+common, notation,  $ \rd X =  \frac{ \partial \Lcal  }{ \partial X  } $ the algorithm is\footnote{In
+the FA2 paper, they actually pre-compute the $ g _{ irh } z _{ irh } $  sum prior to the main loop
+and store it in a tensor they call $ D $. And in the official \texttt{triton} example, $ \rd q $ is
+computed in a separate loop. So, take the below as more of a guideline than a strict recipe.}:
 
 \begin{algo}{Flash Attention Backward Pass}
 \For{ $ i \in \ldots  $}
