@@ -531,7 +531,7 @@ computed in a separate loop. So, take the below as more of a guideline than a st
 
 \begin{algo}{Flash Attention Backward Pass}
 \For{ $ i \in \ldots  $}
-\State Initialize off-chip tensors $ \rd z _{ irh }, \rd q _{ jch }, \rd k _{ jch }  $ to zeros
+\State Initialize off-chip tensors $ \rd q _{ irh }, \rd k _{ jch }, \rd v _{ jch }  $ to zeros
 \State Move  $ z _{ irh }, q _{ irh }, g _{ irh }$ and the cached $ \ell _{ ir } $ on-chip.
 \For{ $ j \in \ldots  $} \Comment All on-chip computations. $ r, c $ indices processed in parallel.
     \State Instantiate $ P _{ irjc },\rd P _{ irjc } ,\rd S _{ irjc } $  to zeros.
@@ -541,10 +541,10 @@ computed in a separate loop. So, take the below as more of a guideline than a st
     \State $ \rd S _{ irjc } \gets  P _{ ijrc }\left ( \rd P _{ ijrc } - g _{ irh } z _{ irh }  \right ) $\Comment Get derivatives w.r.t. $ S $
     \State $ \rd k _{ jch } \gets  \rd S _{ irjc }  q _{ irh }$ \Comment Derivatives w.r.t. $ \left \{q,  k, v \right \} $
     \State $ \rd v _{ jch } \gets  g _{ irh }P _{ irjc }$
-    \State Write $ k, v $  derivatives to off-chip
+    \State Write $ \rd k, \rd v $  derivatives to off-chip
     \State $ \rd q _{ irh } \gets \rd q _{ irh }+ \rd S _{ irjc }  k _{ jch } $
 \EndFor
-\State Write $ q $  derivative to off-chip
+\State Write $ \rd q $  derivative to off-chip
 \EndFor
 \label{algo_fa_bwd_advanced}
 \end{algo}
