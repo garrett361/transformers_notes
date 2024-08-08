@@ -117,7 +117,7 @@ the distribution described above. Then this can be broken down according to cond
 draft token and whether or not the draft token was accepted. Dropping the prefix condition for
 brevity and $ A $ and $ R $ stand for rejected and accepted, respectively, we have
 \begin{align}
-    Q(x_t) &=\sum _{ z _{ t } } Q(x_t|z _{ t } , A)P(A|z _{ t }) q(z _{ t }) + Q(x_t|z _{ t } , A)P(R|z _{ t }) q(z _{ t }) \nn
+    Q(x_t) &=\sum _{ z _{ t } } Q(x_t|z _{ t } , A)P(A|z _{ t }) q(z _{ t }) + Q(x_t|z _{ t } , R)P(R|z _{ t }) q(z _{ t }) \nn
          &=\sum _{ z _{ t } } \delta  _{ x _{ t }, z _{  t } } \times\min \left (1, \frac{ p(z _{ t }) }{ q( z _{ t })
          }\right ) \times q (z _{  t })  + p'(x _{ t })\left (1 - \min \left (1, \frac{ p(z _{ t }) }{ q( z _{ t })
          }\right )  \right) \times q(z _{ t }) \nn
