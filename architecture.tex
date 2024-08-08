@@ -292,6 +292,21 @@ code, the loss computation might look like the following (using fake data):
 There are, of course, many variants on the basic architecture. Some particularly important ones are
 summarized here.
 
+\subsection{GLU Variants\label{subsec_glu_variants}}
+
+In \cite{shazeer2020gluvariantsimprovetransformer}, Shazeer advocated for replacing the usual
+linear-then-activation function pattern,
+\begin{align}
+    z _{ d' } &= \phi \left  ( W _{ d' d } x _{ d } \right  )
+\end{align}
+to
+\begin{align}
+    z _{ d' } &=V _{ d'e }x _{ e } \phi \left ( W _{ d' d } x _{ d } \right  ) \ .
+\end{align}
+So, just perform another linear operation on the original input and broadcast it against the usual
+activation function output. Biases for can also be included. This construction is typically called
+``$ \phi $GLU" where $ \phi $ is the name of the activation function: ReGLU, SwiGLU (used in the
+LLaMA models), etc.
 
 \subsection{Multi-Query Attention \label{subsec_multi_query_attn}}
 
