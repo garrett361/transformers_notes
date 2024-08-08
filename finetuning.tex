@@ -1,0 +1,108 @@
+\part{Fine Tuning}
+
+\section{Instruction Fine Tuning}
+
+Generally, instruction fine-tuning is a follow-on step after model pre-training\footnote{A
+terminology note: pre-training is standard next-token training on an enormous, general dataset, supervised
+fine-tuning typically indicates additional, subsequent training on a higher-quality, maybe
+domain-specific dataset, and instruction fine-tuning follows.}.
+The pre-training, pure next-token prediction task is altered to optimize an objective which now
+incorporates other data, typically information regarding human preferences\footnote{One failure mode
+this corrects for: next-token training would do best by replicating common mistakes in grammar or
+statements of fact which can be corrected for using these methods.}.
+
+
+\subsection{Direct Preference Optimization}
+
+Direct Preference Optimization (DPO) \cite{rafailov2024directpreferenceoptimizationlanguage} is a
+vast simplification of previous reinforcement-learning based methods (namely PPO-based ones
+\cite{schulman2017proximalpolicyoptimizationalgorithms}).
+
+
+DPO aims to solve the RLHF optimization problem defined over a dataset $\Dcal \sim  (x, y _{ l }, y
+_{ w }) $ corresponding to prefixes ($ x $) and pairs of preferred and dis-preferred
+completions\footnote{I guess the $ l, w $ subscripts are for "lose" and "win"?} ($ y _{ l }, y _{ w
+} $). The relevant components are:
+\begin{enumerate}
+    \item A baseline language model: $ \pi _{ {\rm  ref} } (y|x)$, usually a supervised fine-tuned
+        model trained on high-quality data.
+    \item The to-be-trained model: $ \pi _{\theta } (y|x)$, usually initialized to $ \pi _{ {\rm
+        ref} } (y|x)$. This is the \textit{policy} in the literature.
+    \item A reward model which produces $ p(y _{ w } \succ y _{ l }| x ) $, the
+        probability\footnote{Whether one completion is preferred over another is a probabalistic
+        question since, e.g., not everyone in the population will agree.} $ y _{ w } $ is favored
+        over $ y _{ l } $.  More specifically, the reward function is assumed to be purely a function
+        of a single input and output, $ r(x, y) $, such that the probability can be written as $ p(y
+        _{ w } \succ y _{ l }| x ) = F[r(x, y _{ w }), r(x, y _{ l })] $ for some functional form $
+        F $. The reward model is commonly an LLM with a scalar output head attached.
+\end{enumerate}
+
+
+First, a quick review of RLHF, which proceeds in stages. First, $ \Dcal $ is used to train a reward
+model informed by the dataset $ \Dcal $. The optimal reward model $ r_{ \star } $ minimizes the
+binary cross-entropy loss over $ \Dcal $, which is just
+\begin{align}
+  \Lcal _{ r }   &= -E _{ x, y _{ l }, y _{ w } \sim \Dcal } \ln p(y _{ w } \succ y _{ l }| x ) \ . \label{eq_rlhf_reward_loss}
+\end{align}
+ The reward model embodies human preferences and we want to
+transfer this knowledge to the language model $ \pi _{ \theta } $. This can be done by optimizing $
+\pi _{ \theta  } $ to generate completions of inputs that lead to large rewards, reflecting
+human-preferred generations. In order to also keep the model from straying too far from its reference base, a tunable
+KL-divergence penalty is also added:
+\begin{align}
+    \Lcal _{ {\rm DPO} }  &= E _{x \sim \Dcal, y \sim \pi _{ \theta  }(y|x) } r _{ \star } (x, y)
+    - \beta D _{ {\rm KL} } \left ( \pi  _{ \theta  }(y|x)|| \pi _{{\rm ref}}(y|x) \right ) \ . \label{eq_rlhf_loss}
+\end{align}
+Reinforcement-learning methods are typically used to optimize the $ \pi _{ \theta  } $ model and the
+generation step is particularly costly.  In particular, the usual gradient-based optimization
+methods cannot be used because the loss depends on generated tokens which are discontinuous
+(non-differentiable) functions of the model's parameters.
+
+DPO improves upon RLHF by skipping any generation step, removing the explicit reward function, and
+making the optimization problem amenable to gradient based methods by choosing a specific functional
+relation between the reward function $ r(x, y) $ and the preference probability $p(y _{ w } \succ y
+_{ l }| x )$. Whereas RLHF minimizes the loss $ \Lcal _{ {\rm rlhf} } $ \eqref{eq_rlhf_loss} subject
+to a fixed, optimal reward function found by first minimizing the reward loss $ \Lcal _{ r } $
+\eqref{eq_rlhf_reward_loss}, DPO is essentially derived in the opposite direction: first, find the
+functional form of $ \pi _{ \theta } $ which minimizes the RLHF loss for an arbitrary reward
+function, and then use this form when minimizing of the cross-entropy defining the reward
+function\footnote{This is analogous to finding the solution of $\argmin{y}f(x, y)$ and $ \argmax{x}
+g(x) $ for vanilla functions $ f, g $, which can either be done by solving the first for $ y(x)
+$ and then maximizing $ g(y(x)) $, or solving the second for $ x _{ \star } $ and minimizing $ f(x
+_{ \star }, y) $.}.
+
+This is all possible due to the so-called Bradley-Terry model\footnote{More generally, any form
+dependent only upon the difference of the two rewards functions would be sufficient:  $p(y _{ w }
+\succ y _{ l }| x) = G[r(x, y _{ w }) - r(x, y _{ l })]$}:
+\begin{align}
+    p(y _{ w } \succ y _{ l }| x )&= \frac{ 1 }{ 1 + \exp \left ( r _{\phi}(x, y _{ l }) -r _{ \phi
+    }(x, y _{ w }) \right ) }   \nn
+    &= \sigma \left (  r _{\phi}(x, y _{ w }) -r _{ \phi }(x, y _{ l })\right ) \ .
+\end{align}
+In general, the optimal $ \pi _{ \theta  } $ which minimizes the RLHF loss \eqref{eq_rlhf_loss} for
+an arbitrary rewards function $ r(x, y) $ is given by\footnote{This is easy to show using the
+calculus of variations.}
+\begin{align}
+\pi _{\theta}(y|x) &= \frac{ \pi _{ {\rm ref}} (y|x)e ^{ r(x, y)/ \beta  }  }{ Z(x) } \ .
+\end{align}
+The intractable partition function bit $ Z(x) $ isn't important for the specific case of the
+Bradley-Terry model, but would be a show stopper for a generic functional form, because it drops out
+when using the above to eliminate the reward function in the preference probability\footnote{Which
+is why this model was used and why we didn't write out the explicit form of $ Z(x) $.}:
+\begin{align}
+p _{\theta} (y _{ w } \succ y _{ l }| x )&= \sigma \left (\beta \left (\ln \frac{ \pi _{
+\theta }(y|x _{ w }) }{ \pi _{ {\rm ref} }(y|x _{ w }) }-\ln \frac{ \pi _{ \theta }(y|x _{ l }) }{ \pi
+_{ {\rm ref} }(y|x _{  l}) }  \right )\right )
+\end{align}
+Having already minimized $ \Lcal _{ {\rm RLHF} } $, all that is left is to minimize $ \Lcal _{ r } $:
+\begin{align}
+    \Lcal _{ r } &= -E _{ x, y _{ l }, y _{ w } \sim \Dcal } \ln \sigma \left (\beta \left (\ln \frac{ \pi _{
+\theta }(y|x _{ w }) }{ \pi _{ {\rm ref} }(y|x _{ w }) }-\ln \frac{ \pi _{ \theta }(y|x _{ l }) }{ \pi
+_{ {\rm ref} }(y|x _{  l}) }  \right )\right ) \ , \label{eq_dpo_reward_loss}
+\end{align}
+which can now be minimized by standard, gradient based methods without any generation step.
+
+
+
+
+
