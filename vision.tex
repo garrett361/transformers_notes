@@ -46,7 +46,7 @@ The original CLIP recipe:
         }= z _{ bsd }\big|_{ s=-1 } $.
     \item Process the image with a vision transformer network.
     \item Project to a common dimensionality space, if needed.
-    \item Compute the logits through cosine similarity: $ \ell _{ b b' } = i _{ bd }t _{ b'd }/ |i||t| $. These are used to
+    \item Compute the logits through cosine similarity: $ \ell _{ b b' } = i _{ bd }t _{ b'd }/ |i _{ b }||t _{ b }| $. These are used to
         define both possible conditional probabilities\footnote{They differ by what is summed over the in the denominator.}:
         \begin{align}
          P(i_b|t _{ b' }) =  \frac{ e ^{ \ell _{b b'} } }{ \sum _{ b  } e ^{ \ell _{b b'} } }  \ ,
