@@ -95,53 +95,64 @@ indicating that the sum over the singled-out $ v $-index is gives unity.
 
 A quick refresher on common distributed
 \href{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html}{communication
-    primitives}.  Consider $ N $ workers with tensor data $ x ^{ (n) }  $ of some arbitrary shape
-    \pyinline{x.shape}, which takes up $ M $ bytes of memory, where $ n $ labels the worker and any
-    indices on the data are suppressed. The $ n=0 $ worker is arbitrarily denoted the
-    \textit{chief}.  Then, the primitive operations are:
+    primitives}.  Consider $ R $ ranks with tensor data $ x ^{ (r) }  $ of some arbitrary shape
+    \pyinline{x.shape}, which takes up $ M $ bytes of memory, where $ r $ labels the worker and any
+    indices on the data are suppressed. For collectives which perform an operation over a specific
+    dimension, the \pyinline{torch} convention is that it operates over \pyinline{dim=0}. The $ r=0
+    $ worker is arbitrarily denoted the \textit{chief}. Some operations are easiest to describe by
+    forming the logical super-tensor \pyinline{X=torch.stack([x0, x1, ...], dim=0} of shape
+    \pyinline{X.shape==Size(R, ...)} such that the tensor on rank \pyinline{r} is \pyinline{x=X[r]}.
+    Then, the primitive operations are:
 \begin{itemize}
 	\item \pyinline{Broadcast}: all workers receive  the chief's data, $ x ^{ (0) }  $.
 	\item \pyinline{Gather}: all workers communicate their data $ x _{ n } $ to the chief, e.g. in a
-	      concatenated array $ [x ^{ 0 }, x ^{ 1 }, \ldots , x ^{ N-1 }] $.
+	      concatenated array $ [x ^{ 0 }, x ^{ 1 }, \ldots , x ^{ R-1 }] $. E.g., the chief gets
+          \pyinline{x_out = X.reshape(R*X.shape[1], X.shape[2:])}.
 	\item \pyinline{Reduce}: data is \pyinline{Gather}-ed to the chief, which then performs some
 	      operation (\pyinline{sum}, \pyinline{max}, \pyinline{concatenate}, etc.) producing a new tensor $
-		      x' $ on the chief worker.
+		      x' $ on the chief worker. E.g., for \pyinline{sum} the chief gets
+              \pyinline{x_out = X.sum(dim=0)}.
     \item \pyinline{ReduceScatter}: a reducing operation (e.g. \pyinline{sum}) is applied to the $ x
-        ^{ (n) } $ to produce a $ x' $ of the same shape (e.g. $ x'= \sum x ^{ (n) } $) and each
-        worker only receives a $ 1/N $ slice (and hence $ M/N $ byte) of the result\footnote{Note that \pyinline{AllGather}
+        ^{ (r) } $ to produce a $ x' $ of the same shape (e.g. $ x'= \sum x ^{ (r) } $) and each
+        worker only receives a $ 1/R $ slice (and hence $ M/R $ byte) of the result\footnote{Note that \pyinline{AllGather}
             and \pyinline{ReduceScatter} are morally conjugate to each other. In the former, each
-            worker ends up with $ N $ times as much data as they started with, while in
-        \pyinline{ReduceScatter} they end up with $ 1/N $ of their initial data. One is nearly a
+            worker ends up with $ R $ times as much data as they started with, while in
+        \pyinline{ReduceScatter} they end up with $ 1/R $ of their initial data. One is nearly a
         time-reversed version of the other, which is a way of remembering that they have the came
         communication cost. They also compose to produce an output of the same initial size, as in
-        \pyinline{AllReduce}.}. A ring implementation sends $ M \times \frac{ N-1 }{ N } $ bytes
-        over each link in the ring.
-    \item \pyinline{AllGather}: all data $ x ^{ (n) } $ is communicated to all workers; each worker
-        ends up with the array $ [x ^{ 0 }, x ^{ 1 }, \ldots , x ^{ N-1 }] $. Functionally
+        \pyinline{AllReduce}.}. A ring implementation sends $ M \times \frac{ R-1 }{ R } $ bytes
+        over each link in the ring. E.g., for \pyinline{sum} rank \pyinline{r} gets output
+        \pyinline{x_out = X.sum(dim=0).tensor_split(R, dim=0)[r]}.
+    \item \pyinline{AllGather}: all data $ x ^{ (r) } $ is communicated to all workers; each worker
+        ends up with the array $ [x ^{ 0 }, x ^{ 1 }, \ldots , x ^{ R-1 }] $. Functionally
         equivalent to a \pyinline{Gather} followed by \pyinline{Broadcast}. A ring implementation
-        sends $ M \times \left ( N-1 \right ) $ bytes over each link in the ring.
+        sends $ M \times \left ( R-1 \right ) $ bytes over each link in the ring. E.g., all ranks
+        get \pyinline{x_out = X.reshape(R*X.shape[1], X.shape[2:])}.
 	\item \pyinline{AllReduce}: all workers receive the same tensor $ x' $ produced by operating on
-	      the $ x ^{ (n) } $ with \pyinline{sum}, \pyinline{mean}, etc. Functionally equivalent to a
+	      the $ x ^{ (r) } $ with \pyinline{sum}, \pyinline{mean}, etc. Functionally equivalent to a
 	      \pyinline{Reduce} followed by \pyinline{Broadcast}, or a \pyinline{ReduceScatter} followed
 	      by a \pyinline{AllGather} (the more efficient choice\footnote{The former strategy scales
 		      linearly with the number of worker, while the latter strategy underlies ``ring"
 		      \pyinline{AllReduce} which is (nearly) independent of the number of workers: if each
 		      worker carries data of size $ D $ which is to be \pyinline{AllReduce}-d, a total of $
-			      \frac{ 2 \left ( N-1 \right )D }{ N } $ elements need to be passed around.
+			      \frac{ 2 \left ( R-1 \right )D }{ R } $ elements need to be passed around.
 		      \href{https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/}{See this blog
 			      post for a nice visualization} or \cite{bandwidthOptimalAllReduce2009} for a relevant
               paper.\label{foot_all_reduce}}). In the latter case, the total cost is $ 2M \times
-              \frac{ N-1 }{ N } $, due to \pyinline{AllReduce}-ing the initial $ M $-sized data, and
-              then \pyinline{AllGather}-ing the $ M/N $-sized reductions.
+              \frac{ R-1 }{ R } $, due to \pyinline{AllReduce}-ing the initial $ M $-sized data, and
+              then \pyinline{AllGather}-ing the $ M/R $-sized reductions. E.g., for \pyinline{sum}
+              all ranks get \pyinline{x_out = X.sum(dim=0)}.
       \item  \pyinline{Scatter}: One worker gives shards of a tensor to all workers. If the worker
           is scattering tensor $ T _{ x } $ over the given index, a \pyinline{Scatter}
           effectively shards this as $ T _{ x } \longrightarrow T _{ (\bar{r}y) } $, each worker
-          getting a $ \bar{r} $-shard.
+          getting a $ \bar{r} $-shard. If \pyinline{x} is the chief's data, rank \pyinline{r}
+          receives \pyinline{x_out = x.tensor_split(R, dim=0)[r]}.
       \item  \pyinline{AllToAll}: All workers receive shards of all others worker's tensors.  If
           every worker has a tensor $ T _{ \bar{r}y } $, for one value of $ \bar{r} $, which we
           imagine came from a sharding a tensor $ T _{ x } = T _{ (\bar{r}y) } $, then an
           \pyinline{AllToAll} over the $ y $ index produces produces the tensor $ T _{ z \bar{r} }$
-          defined by$ T _{ z \bar{r} }= T _{ x } $ on all workers.
+          defined by $T _{ z \bar{r} }= T _{ x } $ on all workers. E.g. rank \pyinline{r} receives
+          \pyinline{x_out = X.reshape(X.shape[1], R, X.shape[:2])[:,r]}.
 \end{itemize}
 
 

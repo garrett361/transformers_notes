@@ -47,7 +47,8 @@ The original CLIP recipe:
     \item Process the image with a vision transformer network.
     \item Project to a common dimensionality space, if needed.
     \item Compute the logits through cosine similarity: $ \ell _{ b b' } = i _{ bd }t _{ b'd }/ |i _{ b }||t _{ b }| $. These are used to
-        define both possible conditional probabilities\footnote{They differ by what is summed over the in the denominator.}:
+        define both possible conditional probabilities\footnote{They differ by what is summed over
+        the in the denominator, i.e., which dimension the \pyinline{Softmax} is over.}:
         \begin{align}
          P(i_b|t _{ b' }) =  \frac{ e ^{ \ell _{b b'} } }{ \sum _{ b  } e ^{ \ell _{b b'} } }  \ ,
          \quad P(t _{ b' }| i _{ b }) =  \frac{ e ^{ \ell _{b b'} } }{ \sum _{ b' }  e ^{ \ell _{b b'} } }
