@@ -5,4 +5,4 @@ all: $(TEX_FILES) bibliography.bib
 	open decoder_only.pdf
 
 clean:
-	rm *.aux *.dvi *.pdf *.fls *.log
+	rm *.aux *.dvi *.pdf *.fls *.log *.synctex* *.pyg *.bbl *.brg *.brf *.out *.toc
