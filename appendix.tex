@@ -13,6 +13,7 @@ We loosely follow the conventions of \cite{korthikanti2022reducing}.  Common par
 	\item $ K $: the block size (maximum sequence length\footnote{In the absence of methods such as         ALiBi \cite{ALiBi}  can be used to extend the sequence length at inference time.})
 	\item $ L $: number of transformer layers
 	\item $ N _{ {\rm params}  } $: total number of model parameters
+	\item $ N _{ {\rm ex}  } $: number of experts for MoE models.
 	\item $ P $: pipeline parallel size
 	\item $ S $: input sequence length
 	\item $ T $: tensor parallel size
@@ -25,7 +26,10 @@ Where it makes sense, we try to use the lower-case versions of these characters 
 corresponding indices on various tensors. For instance, an input tensor with the above batch size,
 sequence length, and vocabulary size would be written as $ x _{ bsv } $, with $ b \in \left \{ 0,
 	\ldots, B - 1 \right \} $, $ s \in \left \{ 0, \ldots, S - 1\right \} $, and $  v \in \left \{ 0,
-	\ldots, V -1\right \}$ in math notation, or as \mintinline{python}{x[b, s, v]} in code.  Typical
+	\ldots, V -1\right \}$ in math notation, or as \mintinline{python}{x[b, s, v]} in code.
+
+
+    Typical
 transformers belong to the regime
 \begin{gather}
 	V \gg D, S \gg L, A \gg P, T \ .  \label{app_eq_transformers_approxs}
@@ -63,7 +67,8 @@ element-wise operation. The Hadamard-product between two matrices $ A $ and $ B 
 \end{align}
 Einstein notation also has implementations available for \pyinline{torch}:
 \href{https://rockt.github.io/2018/04/30/einsum}{see this blog post on \pyinline{einsum}} or the
-\href{https://einops.rocks/1-einops-basics/}{\pyinline{einops}} package.
+\href{https://einops.rocks/1-einops-basics/}{\pyinline{einops}} package.  We strive to write all
+learnable weights in upper case.
 
 In particular, we use \pyinline{einops} notation for concatenation and splitting: $ A _{ c } = A _{
     (de) }= B _{ de } $\footnote{The indexing is all row-major: if $ A _{ i } $ is $
