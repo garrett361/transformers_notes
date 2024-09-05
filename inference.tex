@@ -55,7 +55,7 @@ distribution defined by the $ z _{ bsv } $. There are various refinements of thi
 A one-parameter generalization of this strategy
 introduces a (physics-motivated) \textbf{Temperature} which just adjusts the scale of the logits:
 \begin{py}
-	next_token = torch.multinomial((z[:, -1] / temp).softmax(dim=-1), num_samples=1)
+next_token = torch.multinomial((z[:, -1] / temp).softmax(dim=-1), num_samples=1)
 \end{py}
 assuming \pyinline{z} are the final logits. Larger temperature yields a larger variance in the chosen
 tokens.
