@@ -20,14 +20,14 @@ more engineering complexity and a higher memory burden).
 
 The general form of the MoE layer output is
 \begin{align}
-    z' _{ sd } &=G _{ se }(z _{ sd }, \ldots )E _{ e } \left ( z _{ sd } \right )
-\end{align}k
-where $ G _{ se }(z _{ sd }) \in \mathbb{R} ^{ S \times N _{ {\rm ex}  } } $ is a gating (i.e.,
-weighting) function and $ E _{ e } \left ( z _{ sd } \right ) $ is the usual MLP operation performed
-by the $ e $-th expert. Many of the entries $ G _{ es } $  are zero in practice, and only the
-computations $ E _{ e } \left ( z _{ sd } \right ) $ corresponding to non-trivial gating values are
-performed, of course. Different MoE variants are essentially differentiated by the specific form of
-their weighting function.
+    z' _{ sd } &=G _{ se }(z _{ sd }, \ldots )E _{ esd } \left ( z _{ sd } \right ) \label{eq_general_moe}
+\end{align}
+where $ G _{ se }(z _{ sd }, \ldots ) \in \mathbb{R} ^{ S \times N _{ {\rm ex}  } } $ is a gating (i.e.,
+weighting) function and $ E _{ esd } \left ( z _{ sd } \right ) \in \mathbb{R} ^{ N _{ {\rm ex}
+}\times S \times D } $ is the usual MLP operation performed by the $ e $-th expert. Many of the
+entries $ G _{ es } $  are zero in practice, and only the computations $ E _{ esd } \left ( z _{ sd
+} \right )$ corresponding to non-trivial gating values are performed, of course. Different MoE
+variants are essentially differentiated by the specific form of their weighting function.
 
 
 \section{Routing}
@@ -36,8 +36,10 @@ their weighting function.
 Choosing which experts process which tokens is crucial, affecting both the downstream model and
 engineering (i.e. throughput) performance.  There are two dominant schemes:
 \begin{enumerate}
-    \item \textbf{Token Choice}: each token selects a fixed number of experts.
-    \item \textbf{Expert Choice}: each expert selects a fixed number of tokens.
+    \item \textbf{Token Choice}: each token selects a fixed number of experts. $ G _{ se } $
+         is sparse over the expert index; see \eqref{eq_general_moe}.
+    \item \textbf{Expert Choice}: each expert selects a fixed number of tokens. $ G _{ se } $ is
+        sparse over the token index; see \eqref{eq_general_moe}.
 \end{enumerate}
 Layered on top of this choice are the details of the routing mechanisms.
 
@@ -48,46 +50,36 @@ Token and expert choice both introduce a tensor $W _{ de } \in \mathbb{R} ^{ D\t
 } $. In each case, we perform a \texttt{topk} computation and output a weighted sum of expert
 outputs: the two methods just differ in the dimension over which the \texttt{topk} is performed.
 
-For expert choice, the gating function is
+For token choice, the gating function is:
 \begin{align}
-    G  ^{ {\rm  expert\ choice} }_{ se }(z _{ sd }, W)  &= \texttt{Softmax}_{ e } \left ( \texttt{topk} _{ e } \left ( z _{ sd } \cdot W _{ de }  \right ) \right ) \ , \label{eq_expert_choice}
+    G  ^{ {\rm  token\ choice} }_{ se }(z _{ sd }, W)  &= \texttt{Softmax}_{ e } \left ( \texttt{topk} _{ e } \left ( z _{ sd } \cdot W _{ de }  \right ) \right ) \ , \label{eq_token_choice}
 \end{align}
-where we're taking the \texttt{topk} to set all non-top-$ k $ entries to $ -\infty $. So, $ G _{ se
-} $ is a matrix with $ Sk $ non-trivial elements. A (potential) disadvantage of expert choice is
-that some tokens will not be routed to any expert at all, but every expert has an equal load.
+where this \texttt{topk} just sets all non-top-$ k $ entries to $ -\infty $. $ G _{ se } $
+is sparse in its expert dimension and has $ Sk $ non-trivial elements. While every token will get
+routed to $ k $ experts with token choice routing, the per-expert load can be very unbalanced.
 
-Token choice just performs the \texttt{Softmax} and \texttt{topk} on the sequence dimension, instead
+Expert choice just performs the \texttt{Softmax} and \texttt{topk} on the sequence dimension,
+instead.  The gating function is
 \begin{align}
-    G  ^{ {\rm  token\ choice} }_{ se }(z _{ sd }, W)  &= \texttt{Softmax}_{ s } \left ( \texttt{topk} _{ s } \left ( z _{ sd } \cdot W _{ de }  \right ) \right ) \ , \label{eq_token_choice}
+    G  ^{ {\rm  expert\ choice} }_{ se }(z _{ sd }, W)  &= \texttt{Softmax}_{ s } \left ( \texttt{topk} _{ s } \left ( z _{ sd } \cdot W _{ de }  \right ) \right ) \ , \label{eq_expert_choice}
 \end{align}
-where we we again set all non-top-$ k $ scores to $ -\infty $ before taking the \texttt{Softmax}.
-$ G _{ se } $ has $ kE $ non-trivial elements in this case. While every token will get routed to $ k
-$ experts with token choice routing, the per-expert load can be very unbalanced.
-
-
-
-% \subsection{Expert Choice}
-% By design, expert choice routing \cite{zhou2022mixtureofexpertsexpertchoicerouting} perfectly
-% distributes compute load across experts, which is engineering performance optimal, but not
-% necessarily model-optimal (as found by \cite{muennighoff2024olmoeopenmixtureofexpertslanguage}).
-% Another disadvantage of expert choice is that it may drop tokens: some tokens may not be selected by
-% \textit{any} expert.
-%
-% Expert choice introduces a tensor $ W _{ de } \in \mathbb{R} ^{ D\times N _{ {\rm  ex} } } $ and
-% routes a given token to $ k $ experts\footnote{$ k $ relates to the \textit{capacity factor} $ c $
-% via $ k \equiv c S / N _{ {\rm ex} }$.} chosen by taking the top-$ k$ entries of $ w _{ se }=  z _{
-% sd }\cdot W _{ de } $ along the expert ($ e $) dimension for each sequence position. The outputs of
-% the corresponding experts are then combined with relative weights corresponding to
-% \pyinline{Softmax}-ing the expert dimension\footnote{The original paper seems to first
-% \pyinline{Softmax} and \textit{then} extract the top-$ k $, which would add up expert outputs with
-% weights that do not sum to one, but that is probably not standard practice.} of $ w _{ se } $.
-%
+with \texttt{topk} acting as in the token choice case. $G _{ se } $ is sparse along the sequence
+dimension and has $ N _{ {\rm ex} }k $ non-trivial elements. A (potential) disadvantage of expert
+choice is that some tokens will not be routed to any expert at all, but every expert has an equal
+load.
 
 
 
 
 
-\section{Shared Experts}
 
 
-Shared experts forces one particular expert to always be used.
+\section{MoE Variants}
+
+A collections of other MoE architecture choices.
+
+\subsection{Shared Experts}
+
+
+Shared experts forces one particular expert to always be used, with the motivation of having the
+differentiated expert serve as a common pool of knowledge.
