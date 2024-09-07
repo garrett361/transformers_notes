@@ -10,13 +10,13 @@ Experts\footnote{The original MoE research came out of Google: see
     \cite{shazeer2017outrageouslylargeneuralnetworks} and related work by these authors. An
 excellent MoE paper with open-source everything is here
 \cite{muennighoff2024olmoeopenmixtureofexpertslanguage}. } (MoE) models address this concern by
-splitting single MLP layer into a number ``expert" MLP layers and route a subset of the tokens to a
-subset of the experts."  Comparing a dense and a MoE model at fixed parameter count, the expert
-layer's intermediate dimension is reduced by $ \Ocal \left( N _{ {\rm ex} } \right)  $, the number
-of experts, and the FLOPs count is also reduced by this factor. MoE is a lever for changing the
-relation between the per-token FLOPs count and the overall parameter count. Perhaps unsurprisingly,
-MoE experts outperform and train faster than their FLOPs equivalent dense models (at the cost of
-more engineering complexity and a higher memory burden).
+splitting single MLP layer into a number of ``expert" MLP layers and route a subset of the tokens to
+a subset of the experts." MoE is a lever for changing the relation between the per-token FLOPs count
+and the overall parameter count. Example: comparing a dense and a MoE model at similar parameter counts, the
+expert layer's intermediate dimension is reduced by $ \Ocal \left( N _{ {\rm ex} } \right)  $ (the
+number of experts) and the FLOPs count is also reduced by this factor. Perhaps unsurprisingly, MoE
+experts outperform and train faster than their FLOPs equivalent dense models (at the cost of more
+engineering complexity and a higher memory burden).
 
 The general form of the MoE layer output is
 \begin{align}
@@ -56,7 +56,13 @@ For token choice, the gating function is:
 \end{align}
 where this \texttt{topk} just sets all non-top-$ k $ entries to $ -\infty $. $ G _{ se } $
 is sparse in its expert dimension and has $ Sk $ non-trivial elements. While every token will get
-routed to $ k $ experts with token choice routing, the per-expert load can be very unbalanced.
+routed to $ k $ experts with token choice routing, the per-expert load can be very unbalanced. Some
+token-choice implementations require setting a maximum tokens per expert limit which in turn defines
+the capacity factor $ c $: $ \texttt{maxtok} = c \times \frac{ S }{ N _{ {\rm ex} } } $. Tokens
+exceeding this limit are just not sent through the expert MLP at all (but remain in the residual
+stream, of course).
+
+
 
 Expert choice just performs the \texttt{Softmax} and \texttt{topk} on the sequence dimension,
 instead.  The gating function is
@@ -65,8 +71,21 @@ instead.  The gating function is
 \end{align}
 with \texttt{topk} acting as in the token choice case. $G _{ se } $ is sparse along the sequence
 dimension and has $ N _{ {\rm ex} }k $ non-trivial elements. A (potential) disadvantage of expert
-choice is that some tokens will not be routed to any expert at all, but every expert has an equal
-load.
+choice is that some tokens may not be routed to any expert at all, but every expert is at least
+guaranteed an equal load. In this case, we effectively have $ k = c \times  \frac{ S }{ N _{ {\rm
+ex} } } $, with $ c $ the capacity factor above.
+
+
+\section{MegaBlocks}
+
+The MoE computation maps awkwardly to the typical GPU primitives. Ideally the expert computations in
+\eqref{eq_general_moe} are parallelized as much as possible, but
+\href{https://pytorch.org/docs/stable/generated/torch.bmm.html}{batched matrix multiplies} (the
+closet common primitive) enforces equal token counts per expert, which is overly restrictive.
+
+MegaBlocks \cite{gale2022megablocksefficientsparsetraining} introduces the proper sparse kernels to
+handle general MoE computations without the need to enforce any hard per-expert token limits or
+introduce unnecessary padding. They call their method dropless MoE (dMoE).
 
 
 \section{MoE Variants}
@@ -78,3 +97,4 @@ A collections of other MoE architecture choices.
 
 Shared experts forces one particular expert to always be used, with the motivation of having the
 differentiated expert serve as a common pool of knowledge.
+
