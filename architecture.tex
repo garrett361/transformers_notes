@@ -382,25 +382,23 @@ computation $ a _{ ss' }\left ( q _{ s }, k _{ s' } \right ) $ should reasonably
 	\item The operation should preserve the scale of the intermediate representations and attention
 	      scores, in order to avoid issues with standard normalization.
 \end{enumerate}
-These conditions suggest a very natural family of solutions: rotation of the queries by some fixed
-element of $ SO(d) $ with a generator proportional to the position index, and rotation of keys by
-the conjugate element,
+These conditions suggest a very natural family of solutions: just rotate the usual queries by some fixed
+element of $ SO(d) $ using a generator proportional to the position index and rotate the keys by the
+conjugate element. That is, replace the $ q _{ sd }, k _{ sd } $   by
 \begin{align}
-	q _{ sd } & \longrightarrow \left [e^{ i s \hat{n}\cdot T }\right ]_{ d d' } q _{ sd' } \equiv R(s) _{ d d' } q _{ sd' } \nn
-	k _{ sd } & \longrightarrow \left [e^{ -i s \hat{n}\cdot T }\right ]_{ d d' } k _{ sd' } \equiv  R(s)^{ \dagger } _{ d d' } k _{ sd' } \ . \label{eq_rope}
+    q' _{ sd }&\equiv  \left [e^{ i s \hat{n}\cdot T }\right ]_{ d d' } q _{ sd' } \equiv R(s) _{ d d' } q _{ sd' } \nn
+    k' _{ sd }&\equiv  \left [e^{ -i s \hat{n}\cdot T }\right ]_{ d d' } k _{ sd' } \equiv  R(s)^{ \dagger } _{ d d' } k _{ sd' } \ , \label{eq_rope}
 \end{align}
+which makes their dot-product is $ q' _{ sd } k' _{ s'd } = R(s-s') q _{ sd } k _{ sd' }  $.
 
-Performing the above computation with a dense element of $ SO(D) $ is infeasible, as it would require
-a new dense matrix-multiply by a unique $ D \times D $ matrix at each sequence
+Performing the above computation with a dense element of $ SO(D) $ is infeasible, as it would
+require a new dense matrix-multiply by a unique $ D \times D $ matrix at each sequence
 position\footnote{For one, the $ \Ocal \left( SD ^{ 2 } \right)  $ memory cost to store the matrices
     would be prohibitive. The FLOPs cost is only $ 2BSD ^{ 2 } $, the same as for other matrix
-    multiplies, but because different matrices are needed at position, these FLOPs would be much more
-    GPU memory-bandwidth intensive.
-}
-
-In the original RoPE paper, the rotation $ \hat{n} $ was chosen such that the matrices are $ 2
-	\times  2 $ block-diagonal with the entries of the form\footnote{If $ D $ isn't even, the vectors
-	are padded by an extra zero.}
+multiplies, but because different matrices are needed at position (it's a batched matrix multiply),
+these FLOPs would be much more GPU memory-bandwidth intensive.} In the original RoPE paper, the
+rotation $ \hat{n} $ was chosen such that the matrices are $ 2 \times  2 $ block-diagonal with the
+entries of the form\footnote{If $ D $ isn't even, the vectors are padded by an extra zero.}
 \begin{align}
 	R(s)_{ [d:d+2][d:d+2] } & =\begin{pmatrix}
 		                           \cos \left ( s \theta _{ d }   \right ) & -\sin \left ( s \theta _{ d }   \right ) \\
