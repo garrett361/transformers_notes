@@ -275,7 +275,16 @@ predict the value of the next token, given the present context:
 	p(x _{ b (s+1) }=v| x _{ b s }, x _{ b (s-1) }, \ldots, x _{ b 0 }) & = \Sm _{ v }\ z _{ bsv
 		}\label{eq_transformer_conditional_prob}
 \end{align}
-and so the model is trained using the usual cross-entropy/maximum-likelihood loss
+and so the model is trained using the usual cross-entropy/maximum-likelihood loss\footnote{Here's an
+    alternative derivation for why this loss is minimized when the learned distribution perfectly
+    matches the actual one. Let $ p(x) $ be the actual distribution and $ q _{ \theta }(x) $ be the
+    model. Taking the continuous case, the expected loss is $ \Lcal = - \int \rd x\, p(x)\ln q _{
+    \theta}(x) $. We want to minimize this, subject to the condition that $ \int \rd x\, q _{ \theta
+    }(x) =1 $. So, we use the \href{https://en.wikipedia.org/wiki/Calculus_of_variations}{calculus
+    of variations} on the loss with a Lagrange multiplier: $ \Lcal' = \Lcal + \lambda \int \rd x\, q
+_{ \theta }(x) $. Solving  $ \frac{ \delta \Lcal' }{ \delta q _{ \theta }(x) }=0 $ yields $ q _{
+\theta }(x) = p(x) $. This seems more straightforward and general than the usual argument via the
+KL-divergence and Jensen's inequality. }
 \begin{align}
 	\Lcal & = -\frac{ 1 }{ BK }\sum _{ b,s }\ln p(x _{ b (s+1) }=y _{ b(s+1) }| x _{ b s }, x _{ b (s-1) },
 	\ldots, x _{ b 0 })\nn
