@@ -97,12 +97,12 @@ the \textbf{attention} and \textbf{MLP} blocks, but now it is common \cite{xiong
 them before these blocks\footnote{Which makes intuitive sense for the purposes of stabilizing the
 	matrix multiplications in the blocks}.
 
-The \pyinline{LayerNorm} operations acts over the sequence dimension. Spelling it out, given the
-input tensor $ z _{ bsd } $ whose mean and variance over the $ s $-index are $ \mu _{ bd } $ and $
-	\sigma _{ bd } $, respectively, the \pyinline{LayerNorm} output is
+The \pyinline{LayerNorm} operations acts over the hidden dimension. Spelling it out, given the
+input tensor $ z _{ bsd } $ whose mean and variance over the $ d $-index are $ \mu _{ bs } $ and $
+	\sigma _{ bs } $, respectively, the \pyinline{LayerNorm} output is
 \begin{align}
-	z _{ bsd } & \leftarrow \left ( \frac{ z _{ bsd } - \mu _{ bd } }{ \sigma _{ bd } } \right )\times \gamma _{ d }
-	+ \beta _{ d } \equiv \LN _{ s } z _{ bsd}
+	z _{ bsd } & \leftarrow \left ( \frac{ z _{ bsd } - \mu _{ bs } }{ \sigma _{ bs } } \right )\times \gamma _{ d }
+	+ \beta _{ d } \equiv \LN_{ d }\, z _{ bsd}
 \end{align}
 where $ \gamma _{ d }, \beta  _{ d } $ are the trainable scale and bias parameters. In
 \pyinline{torch}, this is a \pyinline{nn.LayerNorm(D)} instance.
@@ -112,21 +112,23 @@ $ 2D $ parameters per layer.
 We will continue discussing \pyinline{LayerNorm} instances in what follows in order to adhere to the
 usual construction and to discuss methods like sequence-parallelism in their original form (see
 Sec.~\ref{subsec_seq_parallelism}), but note: the data-independent \pyinline{LayerNorm}
-transformations are completely redundant when immediately followed by a \pyinline{Linear} layer,
-since both act linearly on their inputs and \pyinline{Linear} is already the most general
-data-independent linear transformation. Explicitly, the  $ \gamma _{ d }, \beta _{ d } $ parameters
-can be absorbed into the linear parameters as in
+transformations due to $  \gamma _{ d }, \beta _{ d } $ are completely redundant when immediately
+followed by a \pyinline{Linear} layer, since both act linearly on their inputs and \pyinline{Linear}
+is already the most general data-independent linear transformation. Explicitly, the  $ \gamma _{ d
+}, \beta _{ d } $ parameters can be absorbed into the \pyinline{Linear} parameters:
 \begin{align}
-	\left (     z _{ bsd } \gamma _{ d } + \beta _{ d } \right )  W _{d d'}    + b _{ d' } & = z _{ bsd }
+	\left (     x _{ bsd } \gamma _{ d } + \beta _{ d } \right )  W _{d d'}    + b _{ d' } & = x _{ bsd }
 	W' _{ d d' } + b' _{ d' } \ , \quad W' _{ d d' } \equiv  \gamma _{  d} W _{ d d' } \ , \quad b' _{
-	d' } \equiv b _{ d' } + \beta _{ d }W _{ d d' } \ .
+	d' } \equiv b _{ d' } + \beta _{ d }W _{ d d' } \ ,
 \end{align}
-That is, these transformations can be equivalently performed by the weight matrix and bias (if
-included) in \pyinline{Linear} layer\footnote{Note the importance of data-independence here: the
-data-dependent subtraction of the mean and division by the standard deviation cannot be absorbed
-for all elements in a batch.  Note that because the usual training algorithms are not covariant
-under parameter redefinitions, the above unfortunately does not imply that removing
-\pyinline{LayerNorm}s will have no effect on training dynamics.}.
+for arbitrary $ x _{ bsd } $. That is, these transformations can be equivalently performed by the
+weight matrix and bias (if included) in \pyinline{Linear} layer\footnote{Note the importance of
+    data-independence here: the data-dependent mean and standard deviation terms cannot be similarly
+    absorbed.  Also, because the usual training algorithms are not invariant under parameter
+    redefinitions, the above unfortunately does not imply that removing the learnable
+    \pyinline{LayerNorm} parameters (\pyinline{elementwise_affine=False} in \pyinline{torch}) will
+have no effect on training dynamics. $ \gamma _{ d }, \beta _{ d } $ can shoved into the
+\pyinline{Linear} layer's parameters as a small inference-time optimization, though.}.
 
 \subsection{Causal Attention \label{subsubsec_attn_layer} }
 
@@ -145,7 +147,8 @@ From these, we form three different vectors:
 These are the \textbf{query, key, and value} tensors, respectively \footnote{There are of course
 	many variants of the architecture and one variant which is popular in Summer 2023 is multi-query
 	attention \cite{shazeer2019fast} in which all heads share \textit{the same} key and value vectors
-	and only the query changes across heads, as this greatly reduces inference costs.}.
+    and only the query changes across heads, as this greatly reduces inference costs. See
+Sec.~\ref{subsec_multi_query_attn}.}.
 
 Using the above tensors, we will then build up an \textbf{attention map}  $ w _{ bss'a } $
 which corresponds to how much attention the token at position $ s $ pays to the token at
