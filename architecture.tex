@@ -443,8 +443,9 @@ The issue is that a naive computation would compute all $ \Ocal \left( S ^{ 2 } 
 components of the attention scores $ q _{ sh' } k _{ s'h' } $ for each attention head and their
 exponential all at once, which incurs a penalty of shuttling back and forth $ \Ocal \left( S ^{ 2 }
 \right)  $ elements to and from on-chip memory multiple times in order to get the final $ z _{ sh }
-$ outputs. Flash Attentions functions by instead computing the exponentials in stages with fewer
-memory transfers, never populating the attention scores or exponentials on off-chip memory.
+$ outputs (in addition to being potentially memory expensive). Flash Attention functions by instead
+computing the exponentials in stages with fewer memory transfers and never populating the attention
+scores or exponentials on off-chip memory.
 
 This works by first chunking all of the inputs along their sequence dimensions as in:
 \begin{itemize}
@@ -511,7 +512,8 @@ dominated by the $ \Ocal \left( BSD \right)  $ costs from needing to save inputs
 Here we give more detailed descriptions of the flash-attention forwards and backwards passes.
 
 For the forwards pass, we add in maximum-logits tracking for more numerically stable exponential
-computation and the causal mask. The causal mask $ C _{ s s' } = C _{ (ir)(jc) } $ is zero if $ s \ge s' $ and $ -\infty $ otherwise.
+computation and the causal mask. The causal mask $ C _{ s s' } = C _{ (ir)(jc) } $ is zero if $ s
+\ge s' $ and $ -\infty $ otherwise. The algorithm is as below.
 
 \begin{algo}{Flash Attention Forward Pass}
 \For{ $ i \in \ldots  $}
