@@ -97,9 +97,10 @@ the \textbf{attention} and \textbf{MLP} blocks, but now it is common \cite{xiong
 them before these blocks\footnote{Which makes intuitive sense for the purposes of stabilizing the
 	matrix multiplications in the blocks}.
 
-The \pyinline{LayerNorm} operations acts over the hidden dimension. Spelling it out, given the
-input tensor $ z _{ bsd } $ whose mean and variance over the $ d $-index are $ \mu _{ bs } $ and $
-	\sigma _{ bs } $, respectively, the \pyinline{LayerNorm} output is
+The \pyinline{LayerNorm} operations acts over the hidden dimension (since this is the dimension the
+subsequent \pyinline{Linear} instances act on). Spelling it out, given the input tensor $ z _{ bsd }
+$ whose mean and variance over the $ d $-index are $ \mu _{ bs } $ and $ \sigma _{ bs } $,
+respectively, the \pyinline{LayerNorm} output is
 \begin{align}
 	z _{ bsd } & \leftarrow \left ( \frac{ z _{ bsd } - \mu _{ bs } }{ \sigma _{ bs } } \right )\times \gamma _{ d }
 	+ \beta _{ d } \equiv \LN_{ d }\, z _{ bsd}
