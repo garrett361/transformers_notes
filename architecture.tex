@@ -150,12 +150,14 @@ These are the \textbf{query, key, and value} tensors, respectively \footnote{The
     and only the query changes across heads, as this greatly reduces inference costs. See
 Sec.~\ref{subsec_multi_query_attn}.}.
 
-Using the above tensors, we will then build up an \textbf{attention map}  $ w _{ bss'a } $
-which corresponds to how much attention the token at position $ s $ pays to the token at
-position $ s' $.  Because we have the goal of predicting the
-next token in the sequence, we need these weights to be causal: the final prediction $ y _{ bsv } $
-should only have access to information propagated from positions $ x _{ bs'v } $ with $ s' \le s $.
-This corresponds to the condition that $ w _{ bss'a} = 0  $ if  $ s' > s  $.
+Using the above tensors, we will then build up an \textbf{attention map}  $ w _{ bss'a } $ which
+corresponds to how much attention the token at position $ s $ pays to the token at position $ s' $.
+Because we have the goal of predicting the next token in the sequence, we need these weights to be
+causal: the final prediction $ y _{ bsv } $ should only have access to information propagated from
+positions $ x _{ bs'v } $ with $ s' \le s $. This corresponds to the condition that $ w _{ bss'a} =
+0  $ if  $ s' > s  $. The entire causal Transformers architecture as a whole obeys this condition:
+the outputs $ z _{ bsd } = \texttt{CausalTransformer}(x _{ bs'd' }) $ only depend on those inputs $
+x _{ bs'd' } $ with $ s' \le s $.
 
 These weights come from \pyinline{Softmax}-ed attention scores, which are just a normalized
 dot-product over the hidden dimension:
