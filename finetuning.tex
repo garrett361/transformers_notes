@@ -31,10 +31,10 @@ completions\footnote{I guess the $ l, w $ subscripts are for "lose" and "win"?} 
     \item A reward model which produces $ p(y _{ w } \succ y _{ l }| x ) $, the
         probability\footnote{Whether one completion is preferred over another is a probabalistic
         question since, e.g., not everyone in the population will agree.} $ y _{ w } $ is favored
-        over $ y _{ l } $.  More specifically, the reward function is assumed to be purely a function
-        of a single input and output, $ r(x, y) $, such that the probability can be written as $ p(y
-        _{ w } \succ y _{ l }| x ) = F[r(x, y _{ w }), r(x, y _{ l })] $ for some functional form $
-        F $. The reward model is commonly an LLM with a scalar output head attached.
+        over $ y _{ l } $.  The reward function $ r(x, y) $ reflects how well $ y $ completes the
+        prefix $ x $, in this context, and we assume the probability can be expressed in terms of
+        the reward function $ p(y _{ w } \succ y _{ l }| x ) = p( r(x, y _{ w }), r(x, y _{ l }) )
+        $. The reward model is commonly an LLM with a scalar output head attached.
 \end{enumerate}
 
 
@@ -47,16 +47,18 @@ binary cross-entropy loss over $ \Dcal $, which is just
  The reward model embodies human preferences and we want to
 transfer this knowledge to the language model $ \pi _{ \theta } $. This can be done by optimizing $
 \pi _{ \theta  } $ to generate completions of inputs that lead to large rewards, reflecting
-human-preferred generations. In order to also keep the model from straying too far from its reference base, a tunable
-KL-divergence penalty is also added:
+human-preferred generations. In order to also keep the model from straying too far from its
+reference base, a tunable KL-divergence penalty is also added\footnote{We've written the above as a
+loss so that we're minimizing everywhere.}:
 \begin{align}
-    \Lcal _{ {\rm DPO} }  &= E _{x \sim \Dcal, y \sim \pi _{ \theta  }(y|x) } r _{ \star } (x, y)
-    - \beta D _{ {\rm KL} } \left ( \pi  _{ \theta  }(y|x)|| \pi _{{\rm ref}}(y|x) \right ) \ . \label{eq_rlhf_loss}
+    \Lcal _{ {\rm RLHF} }  &= E _{x \sim \Dcal, y \sim \pi _{ \theta  }(y|x) } \left ( -r _{ \star }
+    (x, y) + \beta D _{ {\rm KL} } \left ( \pi  _{ \theta  }(y|x)|| \pi _{{\rm ref}}(y|x) \right )
+\right ) \ . \label{eq_rlhf_loss}
 \end{align}
-Reinforcement-learning methods are typically used to optimize the $ \pi _{ \theta  } $ model and the
-generation step is particularly costly.  In particular, the usual gradient-based optimization
-methods cannot be used because the loss depends on generated tokens which are discontinuous
-(non-differentiable) functions of the model's parameters.
+ Reinforcement-learning methods are typically used to optimize the $ \pi _{ \theta  } $ model and
+ the generation step is particularly costly.  In particular, the usual gradient-based optimization
+ methods cannot be used because the loss depends on generated tokens which are discontinuous
+ (non-differentiable) functions of the model's parameters.
 
 DPO improves upon RLHF by skipping any generation step, removing the explicit reward function, and
 making the optimization problem amenable to gradient based methods by choosing a specific functional
@@ -66,41 +68,41 @@ to a fixed, optimal reward function found by first minimizing the reward loss $ 
 \eqref{eq_rlhf_reward_loss}, DPO is essentially derived in the opposite direction: first, find the
 functional form of $ \pi _{ \theta } $ which minimizes the RLHF loss for an arbitrary reward
 function, and then use this form when minimizing of the cross-entropy defining the reward
-function\footnote{This is analogous to finding the solution of $\argmin{y}f(x, y)$ and $ \argmax{x}
-g(x) $ for vanilla functions $ f, g $, which can either be done by solving the first for $ y(x)
-$ and then maximizing $ g(y(x)) $, or solving the second for $ x _{ \star } $ and minimizing $ f(x
-_{ \star }, y) $.}.
+function\footnote{This is analogous to minimizing the regular function $f(x, y)$ subject to also
+    minimizing $ g(x) $. This can either be done by solving the second for $ x _{ \star } $ and
+    minimizing $ f(x _{ \star }, y) $ (the RLHF strategy), or first solving $ \frac{ \partial f }{
+\partial y  } =0$ to find $ x _{ \star }(y) $ and then minimizing $ g(x _{ \star }(y)) $ (the DPO
+strategy).}.
 
-This is all possible due to the so-called Bradley-Terry model\footnote{More generally, any form
-dependent only upon the difference of the two rewards functions would be sufficient:  $p(y _{ w }
-\succ y _{ l }| x) = G[r(x, y _{ w }) - r(x, y _{ l })]$}:
+
+
+The $ \pi _{ \theta  } $ which minimizes the RLHF loss \eqref{eq_rlhf_loss} for
+an arbitrary reward function $ r(x, y) $ is given by\footnote{This is easy to show using the
+calculus of variations, though it's not the route taken in the paper. The explicit RLHF loss is $
+\Lcal _{ {\rm RLHF} } = \int \rd x\,\rd y\,p(x) \pi _{ \theta  }(y|x)\left ( -r(x,y) +\beta \ln \pi _{
+\theta }(y|x)\ /\pi _{ {\rm ref} }(y|x) \right )  $ and we want to maximize this subject to the
+constraint that $ \pi _{ \theta  }(y|x) $ is properly normalized. So, we use a Lagrange multiplier
+and extremize $ \Lcal'  = \Lcal _{ {\rm RLHF} }+ \int \rd x\,\rd y\, \lambda (x) \pi _{ \theta
+}(y|x)   $. Solving for $ \frac{ \delta \Lcal ' }{ \delta \pi _{ \theta  } (y|x)} =0$ yields
+\eqref{eq_dpo_soln}.
+}
 \begin{align}
-    p(y _{ w } \succ y _{ l }| x )&= \frac{ 1 }{ 1 + \exp \left ( r _{\phi}(x, y _{ l }) -r _{ \phi
-    }(x, y _{ w }) \right ) }   \nn
-    &= \sigma \left (  r _{\phi}(x, y _{ w }) -r _{ \phi }(x, y _{ l })\right ) \ .
+\pi _{\theta}(y|x) &= \frac{ \pi _{ {\rm ref}} (y|x)e ^{ r(x, y)/ \beta  }  }{ Z(x) } \ ,\label{eq_dpo_soln}
 \end{align}
-In general, the optimal $ \pi _{ \theta  } $ which minimizes the RLHF loss \eqref{eq_rlhf_loss} for
-an arbitrary rewards function $ r(x, y) $ is given by\footnote{This is easy to show using the
-calculus of variations.}
+where $ Z(x) = \int \rd y\, \pi _{ {\rm ref} }(y|x)e^{ r(x, y)/ \beta  }$ is a intractable
+normalization (partition function) factor. However, if  $p(y _{ w } \succ y _{ l }| x )$ only
+depends on $ r(x, y _{ w }) $ and $ r(x, y _{ l }) $ through their difference, these factors cancel
+out. Letting $ p(y _{ w } \succ y _{ l }| x ) = \sigma ( r(x, y _{ w })- r(x, y _{ l }) ) $, for
+some\footnote{In the specific case where $ \sigma  $ is the sigmoid function, this is known as the
+Bradley-Terry model.} $ \sigma  $, and eliminating the reward function in the cross-entropy loss via
+\eqref{eq_dpo_soln} reduces $ \Lcal _{ r } $ to
 \begin{align}
-\pi _{\theta}(y|x) &= \frac{ \pi _{ {\rm ref}} (y|x)e ^{ r(x, y)/ \beta  }  }{ Z(x) } \ .
-\end{align}
-The intractable partition function bit $ Z(x) $ isn't important for the specific case of the
-Bradley-Terry model, but would be a show stopper for a generic functional form, because it drops out
-when using the above to eliminate the reward function in the preference probability\footnote{Which
-is why this model was used and why we didn't write out the explicit form of $ Z(x) $.}:
-\begin{align}
-p _{\theta} (y _{ w } \succ y _{ l }| x )&= \sigma \left (\beta \left (\ln \frac{ \pi _{
-\theta }(y|x _{ w }) }{ \pi _{ {\rm ref} }(y|x _{ w }) }-\ln \frac{ \pi _{ \theta }(y|x _{ l }) }{ \pi
-_{ {\rm ref} }(y|x _{  l}) }  \right )\right )
-\end{align}
-Having already minimized $ \Lcal _{ {\rm RLHF} } $, all that is left is to minimize $ \Lcal _{ r } $:
-\begin{align}
-    \Lcal _{ r } &= -E _{ x, y _{ l }, y _{ w } \sim \Dcal } \ln \sigma \left (\beta \left (\ln \frac{ \pi _{
+    \Lcal _{ {\rm DPO} } &= -E _{ x, y _{ l }, y _{ w } \sim \Dcal } \ln \sigma \left (\beta \left (\ln \frac{ \pi _{
 \theta }(y|x _{ w }) }{ \pi _{ {\rm ref} }(y|x _{ w }) }-\ln \frac{ \pi _{ \theta }(y|x _{ l }) }{ \pi
 _{ {\rm ref} }(y|x _{  l}) }  \right )\right ) \ , \label{eq_dpo_reward_loss}
 \end{align}
-which can now be minimized by standard, gradient based methods without any generation step.
+which we've now renamed the DPO loss.   The loss \eqref{eq_dpo_reward_loss} can now be minimized by
+standard, gradient based methods without any generation step.
 
 
 
