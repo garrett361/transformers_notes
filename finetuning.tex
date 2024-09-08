@@ -80,7 +80,7 @@ The $ \pi _{ \theta  } $ which minimizes the RLHF loss \eqref{eq_rlhf_loss} for
 an arbitrary reward function $ r(x, y) $ is given by\footnote{This is easy to show using the
 calculus of variations, though it's not the route taken in the paper. The explicit RLHF loss is $
 \Lcal _{ {\rm RLHF} } = \int \rd x\,\rd y\,p(x) \pi _{ \theta  }(y|x)\left ( -r(x,y) +\beta \ln \pi _{
-\theta }(y|x)\ /\pi _{ {\rm ref} }(y|x) \right )  $ and we want to maximize this subject to the
+\theta }(y|x)\ /\pi _{ {\rm ref} }(y|x) \right )  $ and we want to minimize this subject to the
 constraint that $ \pi _{ \theta  }(y|x) $ is properly normalized. So, we use a Lagrange multiplier
 and extremize $ \Lcal'  = \Lcal _{ {\rm RLHF} }+ \int \rd x\,\rd y\, \lambda (x) \pi _{ \theta
 }(y|x)   $. Solving for $ \frac{ \delta \Lcal ' }{ \delta \pi _{ \theta  } (y|x)} =0$ yields
