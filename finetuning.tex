@@ -83,7 +83,7 @@ calculus of variations, though it's not the route taken in the paper. The explic
 \theta }(y|x)\ /\pi _{ {\rm ref} }(y|x) \right )  $ and we want to minimize this subject to the
 constraint that $ \pi _{ \theta  }(y|x) $ is properly normalized. So, we use a Lagrange multiplier
 and extremize $ \Lcal'  = \Lcal _{ {\rm RLHF} }+ \int \rd x\,\rd y\, \lambda (x) \pi _{ \theta
-}(y|x)   $. Solving for $ \frac{ \delta \Lcal ' }{ \delta \pi _{ \theta  } (y|x)} =0$ yields
+}(y|x)   $. Solving $ \frac{ \delta \Lcal ' }{ \delta \pi _{ \theta  } (y|x)} =0$ yields
 \eqref{eq_dpo_soln}.
 }
 \begin{align}
@@ -98,8 +98,8 @@ Bradley-Terry model.} $ \sigma  $, and eliminating the reward function in the cr
 \eqref{eq_dpo_soln} reduces $ \Lcal _{ r } $ to
 \begin{align}
     \Lcal _{ {\rm DPO} } &= -E _{ x, y _{ l }, y _{ w } \sim \Dcal } \ln \sigma \left (\beta \left (\ln \frac{ \pi _{
-\theta }(y|x _{ w }) }{ \pi _{ {\rm ref} }(y|x _{ w }) }-\ln \frac{ \pi _{ \theta }(y|x _{ l }) }{ \pi
-_{ {\rm ref} }(y|x _{  l}) }  \right )\right ) \ , \label{eq_dpo_reward_loss}
+\theta }(y_{ w }|x ) }{ \pi _{ {\rm ref} }(y_{ w }|x ) }-\ln \frac{ \pi _{ \theta }(y _{ l }|x) }{ \pi
+_{ {\rm ref} }(y _{  l}|x) }  \right )\right ) \ , \label{eq_dpo_reward_loss}
 \end{align}
 which we've now renamed the DPO loss.   The loss \eqref{eq_dpo_reward_loss} can now be minimized by
 standard, gradient based methods without any generation step.
