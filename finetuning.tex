@@ -12,7 +12,7 @@ this corrects for: next-token training would do best by replicating common mista
 statements of fact which can be corrected for using these methods.}.
 
 
-\subsection{Direct Preference Optimization}
+\subsection{Direct Preference Optimization \label{subsec_dpo}}
 
 Direct Preference Optimization (DPO) \cite{rafailov2024directpreferenceoptimizationlanguage} is a
 vast simplification of previous reinforcement-learning based methods (namely PPO-based ones
@@ -20,7 +20,7 @@ vast simplification of previous reinforcement-learning based methods (namely PPO
 
 
 DPO aims to solve the RLHF optimization problem defined over a dataset $\Dcal \sim  (x, y _{ l }, y
-_{ w }) $ corresponding to prefixes ($ x $) and pairs of preferred and dis-preferred
+_{ w }) $ corresponding to prefixes ($ x $) and pairs of preferred and dispreferred
 completions\footnote{I guess the $ l, w $ subscripts are for "lose" and "win"?} ($ y _{ l }, y _{ w
 } $). The relevant components are:
 \begin{enumerate}
@@ -91,7 +91,10 @@ and extremize $ \Lcal'  = \Lcal _{ {\rm RLHF} }+ \int \rd x\,\rd y\, \lambda (x)
 \end{align}
 where $ Z(x) = \int \rd y\, \pi _{ {\rm ref} }(y|x)e^{ r(x, y)/ \beta  }$ is a intractable
 normalization (partition function) factor. However, if  $p(y _{ w } \succ y _{ l }| x )$ only
-depends on $ r(x, y _{ w }) $ and $ r(x, y _{ l }) $ through their difference, these factors cancel
+depends on $ r(x, y _{ w }) $ and $ r(x, y _{ l }) $ through their difference\footnote{In
+\cite{rafailov2024directpreferenceoptimizationlanguage}, the DPO symmetry $ r(x, y)\longrightarrow r(x,
+y) + f(x) $, for arbitrary $ f(x) $, is said to induce an equivalence class relation between
+different reward functions.}, these factors cancel
 out. Letting $ p(y _{ w } \succ y _{ l }| x ) = \sigma ( r(x, y _{ w })- r(x, y _{ l }) ) $, for
 some\footnote{In the specific case where $ \sigma  $ is the sigmoid function, this is known as the
 Bradley-Terry model.} $ \sigma  $, and eliminating the reward function in the cross-entropy loss via
@@ -106,5 +109,57 @@ standard, gradient based methods without any generation step.
 
 
 
+\subsection{KTO: Preference Finetuning without Pairs \label{subsec_kto}}
 
+DPO requires a dataset of triplets: a prefix, one preferred completion, and one dispreferred
+completion. KTO alignment \cite{ethayarajh2024ktomodelalignmentprospect} attempts to reduce the
+inputs a prefix, a completion, and a binary signal indicating whether the output is desirable or
+not, since such datasets are easier to construct.
+
+The method is based on the ideas of Kahneman and Tversky and the central ingredient is a value
+function which monotonically maps outcomes to perceived values $ v: \mathcal{Z}\longrightarrow
+\mathbb{R}$, with $ \mathcal{Z} $ the space of outcomes. Some normalization point $ z _{ 0 } $
+defines the boundary between positive and negative outcomes, the value function\footnote{Which can
+be taken to satisfy $ v(0)=0 $.} is taken to be a function of $ z-z _{ 0 } $, and human value
+functions are known to be convex for $ z > z _{ 0 }$ (diminishing returns) and exhibit loss
+aversion\footnote{Which I suppose means that $v \left ( z-z_0 \right) + v \left ( z _{ 0 }-z \right)
+\le 0 $ for $ z>0 $.}.
+
+KTO applies this framework to the usual text-prediction problem as in the following. The space of
+outcomes $ \mathcal{Z} $ is the reward function value taken to be
+\begin{align}
+    r _{ \theta  }(x, y)&\equiv \ln \frac{ \pi _{ \theta  }(y|x) }{ \pi _{ {\rm ref}}(y|x) } \ , \label{eq_kto_reward}
+\end{align}
+the difference in reference and model surprisal, as inspired by DPO. The reference point is just the
+expected value of the reward function over prefixes and trainable-model-generated completions, i.e.,
+the KL divergence averaged over prefixes:
+\begin{align}
+   z _{ 0 }  & \equiv  E _{ y \sim \pi _{ \theta  }(y|x)  ,   x \sim D  }r _{ \theta  }(x, y) =E _{ x \sim D  } D _{ {\rm KL} }(\pi _{ \theta  }(y|x)|| \pi _{ {\rm ref} }(y|x)) \ . \label{eq_kto_ref_pt}
+\end{align}
+Splitting the space of completions into desirable and undesirable ones,  $ \mathcal{Y}=
+\mathcal{Y}_{ D }\cup \mathcal{Y}_{ U } $, the KTO loss\footnote{They also add a constant term to
+    the loss for normalization purposes which we have omitted. The KTO loss falls into the broader
+    category of Human Aware Loss Objectives (HALOs) which are a general class of objectives that
+    roughly fit into the Kahneman-Tversky form. See the paper for a further discussion and
+    comparison of HALO vs non-HALO methods.
+} is taken to be:
+\begin{align}
+    \mathcal{L}_{ {\rm KTO} } &= - E _{ x, y \sim D }v(r _{ \theta  }(x, y) - z _{ 0 })\nn
+    v(r _{ \theta  }(x, y)-z _{ 0 })&\equiv  \begin{cases}
+        \lambda _{ D }\sigma \left ( \beta \left ( r _{ \theta  }(x, y) - z _{ 0 } \right ) \right ) & y \in \mathcal{Y}_{ D }\nn
+        \lambda _{ U }\sigma \left ( \beta \left ( -r _{ \theta  }(x, y) + z _{ 0 } \right ) \right ) & y \in \mathcal{Y}_{ U } \label{eq_kto_loss}
+    \end{cases}
+\end{align}
+for hyperparameters\footnote{Risk aversion would seem to require $ \lambda _{ U }> \lambda _{ D }$,
+but this isn't strictly imposed in the paper.} $ \beta , \lambda _{ D }, \lambda _{ U } \in
+\mathbb{R} ^{ + } $ and where $ \sigma  $ is the sigmoid function. So,  $ v(r _{ \theta  }(x,
+y)-z _{ 0 }) $ is maximized by sending $ r _{ \theta   } \longrightarrow  \infty $ for desirable
+results and to $ -\infty $ for undesirable ones, while the normalization point $ z _{ 0 } $
+concentrates updates on examples whose rewards do not stray wildly from the average reward, which
+implicitly carries information about the reference model.
+
+The reference point $ z _{ 0 } $ \eqref{eq_kto_ref_pt} is a problem, because it requires generation
+which is both expensive and not differentiable (the problem DPO solves). So, the authors perform a
+rough estimate of the scale and do not backpropagate through $ z _{ 0 } $, (which is a bit
+questionable).
 
