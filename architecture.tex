@@ -479,7 +479,7 @@ Additional recomputation is needed for the backwards pass.
 \For{ $ j \in \ldots  $}\Comment All on-chip computations. $ r, c $ indices processed in parallel.
     \State Move  $ k_{ jch },v _{ jch }$ on-chip
     \State $ Z _{ irh } \gets   Z _{ irh } +\exp \left ( q _{ irh' } k _{ jch' }  \right ) v _{ jch }$ \Comment Update numerator
-    \State $ L _{ ir } \gets   L _{ ir } +\sum _{ j }\exp \left ( q _{ irh' } k _{ jch' }  \right ) $ \Comment Update denominator
+    \State $ L _{ ir } \gets   L _{ ir } +\sum _{ c }\exp \left ( q _{ irh' } k _{ jch' }  \right ) $ \Comment Update denominator
 \EndFor
 \State $ z _{ irh } \gets \frac{Z _{ irh }}{L _{ ir }}$ \Comment Write result off-chip
 \EndFor
