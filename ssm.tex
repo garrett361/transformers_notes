@@ -1,0 +1,86 @@
+\part{State Space Models}
+
+\section{Intro\label{sec_ssm_intro}}
+
+Needing to re-reference the entire previously-generated prefix at generation time is a major pain
+point for transformers models. Token generation is $ \Ocal \left( S \right)  $ State space models
+return, more or less, to the old LSTM type strategy of encoding the conditional history which
+informs generation into a finite-sized state. The dream is faster generation and better memory
+efficiency.
+
+
+\section{S4 \label{sec_s4}}
+
+The S4 model of \cite{s4} is a good starting point.  These are based off a continuous representation
+in which some input signal\footnote{We use the notation of the mamba paper \cite{mamba}, which
+differs from that of the S4 paper \cite{s4}.} $ x _{ a }(t) $ is converted to an output $ y _{ c
+}(t) $ via an in
+intermediate latent variable $ h _{ b }(t) $, with the above related as in
+\begin{align}
+    \partial _{ t }h _{ b }(t) &= A _{ b b' }h _{ b' }(t) + B _{ b a }x _{ a }(t)\nn
+    y _{ c }(t) &= C _{ h b }h _{ b }(t) + D _{ c a }x _{ a }(t) \label{eq_s4_continuous} \ .
+\end{align}
+The capitalized tensors are the learnable weight matrices. $ D $ is often set to zero in the
+literature. Basically, the information in the sequence $ x _{ s }  $ is stored in $ h _{ s }  $, an
+internal memory for the model, much like the RNN/LSTM models of the past.
+
+For discrete sequences, we discretize:
+\begin{align}
+    h  _{ bs } &= A  _{ b b' }h _{ b' (s-1) } + B  _{ b a }x  _{ as }\nn
+    y  _{ cs } &= C _{ c b }h  _{ bs } + D _{ c a }x  _{ as } \label{eq_s4_discrete} \ .
+\end{align}
+where one can also relate these weights to those in \eqref{eq_s4_continuous} given the
+discretization scheme (see \ref{sec_mamba}).
+
+Subject to the initial condition $ h _{ b } ^{ -1 } =0 $, the above solves to
+\begin{align}
+    y _{ s }   &= \sum _{ s'=0 } ^{ s }  C \cdot  A ^{ s - s } \cdot B \cdot  x _{ s' } + D x _{ s }  \ , \label{eq_s4_soln}
+\end{align}
+omitting hidden dimension indices. Proper normalization of the various weights is non-trivial; see
+\cite{s4} for details. Further, diagonalization clearly makes the $ A ^{ s-n } $ computation easier,
+but care must be taken here, too. Clearly, the above computation is highly parallelizable. The S4
+(and mamba) papers describe \eqref{eq_s4_soln} as a
+
+Writing the above operation as $ y _{cs }   = \Sigma _{ca s s' } x _{ as' } $, one can build an
+non-linear S4 layer by acting on the output with a non-linearity and then mixing feature dimensions
+with a weight matrix:
+\begin{align}
+     z  _{ cs }  &= W _{ c c' } \phi \left ( \Sigma ^{c'a s s' } x _{ as' } \right ) \label{eq_s4_layer}
+\end{align}
+Assuming the $ c  $ and $ a  $ hidden dimensions have the same size, the operations can then be
+naturally composed.
+
+Taking all hidden dimensions to have size $ \Ocal \left( D \right)  $, the number of learnable
+weights is $ \Ocal \left( D ^{ 2 }  \right)  $. Training can be parallelized across the sequence
+dimension (via the representation \eqref{eq_s4_soln}, scaling linearly in sequence length. Iterative
+generation from $ x _{ as } \longrightarrow y _{ cs }  $, given knowledge of the previous hidden
+state $ h _{ b (s-1) }  $ takes only $ \Ocal \left( D ^{ 2 } \right)  $ (via the representation
+\eqref{eq_s4_discrete}). There is no sequence-length dependence for next-output generation, unlike
+for transformers, which is the main draw here: constant-time generation.
+
+\section{Mamba\label{sec_mamba}}
+
+A large limitation of the S4 model \eqref{eq_s4_discrete} is that the various weights are fixed
+quantities which do not adjust to the input\footnote{For instance, we could ask our architecture to
+    process two independent sequences concatenated together with a special separator token in the
+    middle. The hidden state should be reset at the separator token and the mamba architecture would
+be (in-principle) capable of this, while the S4 would not.} $ x _{ sd }  $. Mamba \cite{mamba}
+extends S4 by replacing the fixed weights by functions of the inputs. This destroys the recursive
+structure and requires various techniques for an efficient GPU implementation, which is the primary
+focus of the paper.
+
+The mamba architecture is as follows, based on the implementation in
+\href{https://github.com/alxndrTL/mamba.py}{\texttt{mamba.py}}
+
+
+\subsection{Aren't These Just RNNs?\label{subsec_rnns_and_ssm}}
+
+Yes, but very special ones with the important computational difference that the recursion relations
+are \textit{linear} in the hidden state $ h $. This crucial difference makes it possible to
+parallelize the operations during training. Compare \eqref{eq_s4_discrete} to what typical RNN
+recursion relations would look like:
+\begin{align}
+    h  _{ bs } &= \phi \left (A  _{ b b' }h _{ b' (s-1) } + B  _{ b a }x  _{ as }\right )\nn
+    y  _{ cs } &= \phi\left (C _{ c b }h  _{ bs } + D _{ c a }x  _{ as }\right ) \label{eq_rnn_comparison} \ .
+\end{align}
+for some non-linearity $ \phi $.
