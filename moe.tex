@@ -52,7 +52,7 @@ outputs: the two methods just differ in the dimension over which the \texttt{top
 
 For token choice, the gating function is:
 \begin{align}
-    G  ^{ {\rm  token} }_{ se }(z _{ sd }, W)  &= \texttt{Softmax}_{ e } \left ( \texttt{topk} _{ e } \left ( z _{ sd } \cdot W _{ de }  \right ) \right ) \ , \label{eq_token_choice}
+    G  ^{ {\rm  token} }_{ se }(z _{ sd }, W)  &= \Sm_{ e } \left ( \texttt{topk} _{ e } \left ( z _{ sd } \cdot W _{ de }  \right ) \right ) \ , \label{eq_token_choice}
 \end{align}
 where this \texttt{topk} just sets all non-top-$ k $ entries to $ -\infty $. $ G _{ se } $
 is sparse in its expert dimension and has $ Sk $ non-trivial elements. While every token will get
@@ -64,10 +64,10 @@ stream, of course).
 
 
 
-Expert choice just performs the \texttt{Softmax} and \texttt{topk} on the sequence dimension,
+Expert choice just performs the \Sm and \texttt{topk} on the sequence dimension,
 instead.  The gating function is
 \begin{align}
-    G  ^{ {\rm  expert} }_{ se }(z _{ sd }, W)  &= \texttt{Softmax}_{ s } \left ( \texttt{topk} _{ s } \left ( z _{ sd } \cdot W _{ de }  \right ) \right ) \ , \label{eq_expert_choice}
+    G  ^{ {\rm  expert} }_{ se }(z _{ sd }, W)  &= \Sm_{ s } \left ( \texttt{topk} _{ s } \left ( z _{ sd } \cdot W _{ de }  \right ) \right ) \ , \label{eq_expert_choice}
 \end{align}
 with \texttt{topk} acting as in the token choice case. $G _{ se } $ is sparse along the sequence
 dimension and has $ N _{ {\rm ex} }k $ non-trivial elements. A (potential) disadvantage of expert
