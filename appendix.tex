@@ -85,7 +85,7 @@ results in a tensor $ \bar{M}_{ a \bar{b} } $ which is of shape \pyinline{M_bar.
 each device. As here, we will sometimes use bars to denote indices which are sharded over different
 devices.
 
-We also put explicit indices on operators such as Softmax to help clarify the relevant
+We also put explicit indices on operators such as $ \Sm $ to help clarify the relevant
 dimension, e.g. we would write the softmax operation over the $ b $-index of some batched
 tensor $ x _{ bvd\ldots } $ as
 \begin{align}
@@ -497,9 +497,11 @@ show that
     \E{ z^{ 1 }_{ i }z^{ 1 }_{ j }} &= C _{ 1 }\delta _{ ij } \langle \phi(z )^{ 2 }\rangle
 \end{align}
 where  $ \langle \phi(z)^{ n }\rangle \equiv  \int  \rd\, \rho(z) \phi(z)^{ n } $ with
-$ \rho(z) $ a single-variable standard normal Gaussian (the $ D $ in the denominator was chosen to
+$ \rho(z) $ a single-variable standard normal Gaussian\footnote{This is similar notation as used in
+\cite{physicalDL}, with $ \E{\cdot} $ being a multivariate expectation value and $ \langle \cdot
+\rangle  $ an expectation value over a 1D distribution.} (the $ D $ in the denominator was chosen to
 counteract a factor of $ D $ from an index sum), which are all some $ \Ocal \left( 1 \right)  $, $ D
-$-independent numbers.
+$-independent numbers. 
 
 The first two moments can therefore be made Gaussian-normal-like by choosing $ C _{ 1 } = 1/ \E{ \phi(z)\phi(z )} $.
 Since this can always be done, the first non-trivial test of non-Gaussianity is the four-point

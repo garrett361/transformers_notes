@@ -521,7 +521,7 @@ computation and the causal mask. The causal mask $ C _{ s s' } = C _{ (ir)(jc) }
 \State Move  $ q _{ irh }$ on-chip, instantiate temp $Z _{ irh }$ to zeros and $ M ^{ {\rm new} } _{ ir }, M ^{ {\rm old} } _{ ir } $ to $ -\infty $ on-chip
 \For{ $ j \in \ldots  $} \Comment All on-chip computations. $ r, c $ indices processed in parallel.
     \State Move  $ k_{ jch },v _{ jch }$ on-chip
-    \State $ S _{ irjc } \gets   q _{ irh' } k _{ jch' } + C _{ ijrc } $ \Comment Softmax logits + causal mask
+    \State $ S _{ irjc } \gets   q _{ irh' } k _{ jch' } + C _{ ijrc } $ \Comment $ \Sm $ logits + causal mask
     \State $ M ^{ {\rm new} } _{ ir } \gets  \max \left ( M ^{ {\rm  old} } _{ ir }, \max_{ c }  S _{ irjc }  \right )   $
     \State $ Z _{ irh } \gets   Z _{ irh } +\exp \left (  S _{ ijrc } - M ^{ {\rm  new} } _{ ir }  \right ) v _{ jch }$ \Comment Update numerator
     \State $ L _{ ir } \gets   e ^{ M ^{ {\rm old} } _{ ir } - M ^{ {\rm  new} } _{ ir } } L _{ ir } +\sum _{ c }\exp \left (   S _{ ijrc } - M ^{ {\rm  new} } _{ ir }   \right ) $ \Comment Update denominator
@@ -533,7 +533,7 @@ computation and the causal mask. The causal mask $ C _{ s s' } = C _{ (ir)(jc) }
 \end{algo}
 
 For the backwards pass, the main complication comes from computing derivatives with respect to the
-attention scores. Recalling the Softmax derivative \eqref{eq_softmax_derivative}, given gradients $
+attention scores. Recalling the $ \Sm $ derivative \eqref{eq_softmax_derivative}, given gradients $
 \frac{\partial \Lcal   }{ \partial z _{ irj } } \equiv  g _{ irj } $ we have the building
 blocks\footnote{The fact that we can replace the  $ j' $ sum with the cached attention outputs in
 the final derivative below is crucial.}
@@ -578,6 +578,7 @@ computed in a separate loop. So, take the below as more of a guideline than a st
 \EndFor
 \label{algo_fa_bwd_advanced}
 \end{algo}
+
 
 \subsection{Linear Attention \label{subsec_linear_attn}}
 

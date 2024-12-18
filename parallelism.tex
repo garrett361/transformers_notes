@@ -299,7 +299,7 @@ by never realizing the entire $ \Ocal \left( S ^{ 2 } \right)  $ attention score
 
 It works by sharding over the sequence dimension. Let $ z _{ sd } $ is the (batch-dim suppressed)
 residual stream of a non-sharded Transformer\footnote{Like in Sec. \ref{subsec_flash_attention}, we
-omit any normalization factor inside the Softmax.}:
+omit any normalization factor inside the $ \Sm $.}:
 \begin{align}
     z _{  sd } &= \Sm _{ s' } \left ( q _{ sd' } k _{ s'd' } \right ) v _{ s'd } \ ,
 \end{align}
