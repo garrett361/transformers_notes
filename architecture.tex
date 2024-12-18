@@ -578,3 +578,34 @@ computed in a separate loop. So, take the below as more of a guideline than a st
 \EndFor
 \label{algo_fa_bwd_advanced}
 \end{algo}
+
+\subsection{Linear Attention \label{subsec_linear_attn}}
+
+Linear attention \cite{katharopoulos2020transformersrnnsfastautoregressive} removes the $ \Sm $ operation in the attention layer in order to reduce the inference costs in terms of
+compute and time, both.
+
+To review, the (single-head) attention operation is
+\begin{align}
+    z _{ sd } &= \Sm_{ s' }\left ( q _{ sd' } k _{ s'd' }  \right ) v _{ s'd }\nn
+     &\equiv A _{ s s' } v _{ s'd } \ .
+\end{align}
+In order to generate the final, $ s=-1 $ token using a kv-cache, generation time then requires
+reading in $ \Ocal \left( DS \right)  $ bytes and performing $ \Ocal \left( DS \right)  $ operations
+to generate the new token. However, if we remove the $ \Sm $, then we can write the above as
+\begin{align}
+    z _{ sd } &=  q _{ sd' } k _{ s'd' }  v _{ s'd }\nn
+         &= q _{ sd' }B _{d' d }  \ .
+\end{align}
+This would let us cache the $ \Ocal \left( D ^{ 2 } \right)  $ $ B _{ d d' } $ matrix and generating
+the next token only takes $ \Ocal \left( D ^{ 2 } \right)  $ operations, an $ \Ocal \left( D/S \right)
+$ improvement on both fronts.
+
+The essential point is that for standard attention, the entire $ A _{s s'} $ matrix must be computed
+anew for each new token, while $ B _{ d d' } $ can instead be iteratively updated via a cheap
+computation.
+
+The inference time costs don't come for free, though. Computing all of the $ z _{ sd }  $ in
+parallel, as in training, requires a causal mask which would require generating $ S $ different
+matrices $ B ^{ s  }_{  d d' }  $, one for each token position.
+
+
