@@ -597,16 +597,19 @@ to generate the new token. However, if we remove the $ \Sm $, then we can write 
     z _{ sd } &=  q _{ sd' } k _{ s'd' }  v _{ s'd }\nn
          &= q _{ sd' }B _{d' d }  \ .
 \end{align}
-This would let us cache the $ \Ocal \left( D ^{ 2 } \right)  $ $ B _{ d d' } $ matrix and generating
-the next token only takes $ \Ocal \left( D ^{ 2 } \right)  $ operations, an $ \Ocal \left( D/S \right)
-$ improvement on both fronts.
+This would let us cache the $ \Ocal \left( D ^{ 2 } \right)  $ $ B _{ d'd } $ matrix and generating
+the next token only takes $ \Ocal \left( D ^{ 2 } \right)  $ operations, an $ \Ocal \left( D/S
+\right) $ improvement on both fronts.
 
 The essential point is that for standard attention, the entire $ A _{s s'} $ matrix must be computed
 anew for each new token, while $ B _{ d d' } $ can instead be iteratively updated via a cheap
 computation.
 
-The inference time costs don't come for free, though. Computing all of the $ z _{ sd }  $ in
-parallel, as in training, requires a causal mask which would require generating $ S $ different
-matrices $ B ^{ s  }_{  d d' }  $, one for each token position.
+The causal masking looks a little different for linear attention. The causal mask is not needed
+during vanilla next-token generation, but is for parallelized training. Computing of the $ z _{ sd }
+$ in parallel, as in training, requires generating $ S $ different matrices $ B ^{ s }_{  d'd }  $,
+one for each token position: $ B ^{ s }_{  d' d } = \texttt{cumsum}_{ s } \left ( k _{ sd' }v _{ sd
+} \right ) $, effectively. Flash-attention-like techniques can be used to avoid materializing all of
+the $ \Ocal \left( SD ^{ 2 } \right)  $ elements at once.
 
 
