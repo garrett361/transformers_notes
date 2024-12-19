@@ -170,7 +170,7 @@ The updated model:
 \State $ x ^{ 2 } _{ se } = K _{ ess' }\star x ^{ 1 }_{ se }$ \Comment 1D grouped convolution over the sequence dimension (fused)
 \State $ x ^{ 3 } _{ se } = \phi \left ( x ^{ 2 }_{ se } \right )$ \Comment Elementwise non-linearity (\texttt{F.silu} default)
 \State $ x ^{ 4 } _{ se } = \texttt{selective\_scan2} \left ( x ^{ 3 }_{ se } \right )$ \Comment Selective scan (see below).
-\State $ x ^{ 5 } _{ se } = {\rm Norm }\left (x ^{ 4 } \right ) _{ se }\otimes\phi \left ( x ^{ 0 }_{ se } \right )$ \Comment Elementwise product, non-linearity, and norm (\texttt{RMS} default)
+\State $ x ^{ 5 } _{ se } = {\rm Norm }\left (x ^{ 4 }  _{ se }\otimes\phi \left ( x ^{ 0 }_{ se } \right )\right ) _{ e }$ \Comment Elementwise product, non-linearity, and norm (\texttt{RMS} default)
 \State $ z _{ sd } = W ^{ O }_{ de }x ^{ 5 }_{ se }$ \Comment Project back down.
 \State \Return $ z _{ sd } \in \mathbb{R}^{ S\times D }$
 \label{algo_mamba_2}
