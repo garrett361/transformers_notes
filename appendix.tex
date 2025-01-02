@@ -476,8 +476,8 @@ non-linearities.
 
 \subsection{Wide Models are Nearly Gaussian \label{app_nearly_gaussian_wide_models}}
 
-First we discuss the justification of an assumption we make throughout: the outputs every block
-(suitably defined) at initialization is approximately normally distributed.
+First we discuss the justification of an assumption we make throughout: the outputs of every block
+(suitably defined) at initialization are approximately normally distributed.
 
 Take our model to be $ z ^{ \ell } _{ i } = W ^{  \ell }_{ ij } \phi \left ( z ^{ \ell -1 } _{ j }
 \right ) $ where the inputs $ z ^{ 0 } _{ i } $ are i.i.d.~Gaussian-normally
@@ -501,7 +501,7 @@ $ \rho(z) $ a single-variable standard normal Gaussian\footnote{This is similar 
 \cite{physicalDL}, with $ \E{\cdot} $ being a multivariate expectation value and $ \langle \cdot
 \rangle  $ an expectation value over a 1D distribution.} (the $ D $ in the denominator was chosen to
 counteract a factor of $ D $ from an index sum), which are all some $ \Ocal \left( 1 \right)  $, $ D
-$-independent numbers. 
+$-independent numbers.
 
 The first two moments can therefore be made Gaussian-normal-like by choosing $ C _{ 1 } = 1/ \E{ \phi(z)\phi(z )} $.
 Since this can always be done, the first non-trivial test of non-Gaussianity is the four-point
@@ -539,9 +539,193 @@ initialization scales. Demonstrating this rigorously is a central goal of the Te
 \cite{yang2022tensor}.
 
 
+\section{muTransfer and Similar Ideas}
+
+
+muTransfer \cite{yang2022tensor} and similar work in \cite{physicalDL,
+yaida2022metaprincipledfamilyhyperparameterscaling,doshi2023criticalinitializationwidedeep} study
+reasonable prescriptions for how to initialize weights and set learning rates in a natural way. A
+practical consequence of these ideas is that they tend to correspond to families of models, related
+to each other by rescalings of architectural hyperparameters, and the optimal learning algorithm
+hyperparameters (such as the learning rate) for members of the family tend to be similar, much more
+so than is found for alternative schemes.
+
+We start by working through the general criteria for an extremely simple model, and then see how it
+extends to more general cases.
+
+
+\subsection{A Toy Limit: Deep Linear Networks and SGD}
+
+Take the model to be very simple: a deep linear model without any biases,
+\begin{align}
+    z _{ o } \equiv  z ^{ L }_{ o } &= O _{ od } H ^{ L-1 }_{ d d' } \ldots H ^{ 0 } _{ d'' i }I _{ i 'i } x _{ i } \nn
+    z ^{ \ell }_{ d } & \equiv H ^{ \ell }_{ d d' } z ^{ \ell-1 }_{ d' }  \ , \ell \in \left \{ 0, \ldots , L-1 \right \}\nn
+    z ^{-1}_{ i } & \equiv I _{ i i' } x _{ i' }  \ . \label{app_eq_deep_linear_model}
+\end{align}
+We chose the index $ \ell $ to only index the hidden layers, and suppressed any batch or sequence
+dimensions for simplicity. The $ H ^{ \ell } _{ d d' } \in \mathbb{R} ^{ D _{ \ell  } \times D  _{
+\ell-1 } } $  are the hidden layer weights, such that $ z_{ d }^{ \ell }\in \mathbb{R}^{ D_{
+\ell } } $,  $O _{ o d } \in \mathbb{R} ^{ D _{O}\times D  _{ L-1 } } $ is the readout layer
+(e.g. LM head for a LLM), and $I  _{ d i } \in \mathbb{R} ^{ D _{ 0} \times D  _{I} } $ the
+input layer (e.g. embedding layer for a LLM). The $ D_{ \ell } $ dimensions may all be different.
+
+
+We will consider a family of models which are related by expanding all of the hidden dimensions, which is
+the easiest limit to analyze:
+\begin{align}
+    D _{\ell } \longrightarrow   \lambda D _{ \ell }\ ,\quad D _{O } \longrightarrow   D _{O}\ ,\quad
+    D _{I} \longrightarrow   D _{I}\ . \label{app_eq_mup_width_scaling}
+\end{align}
+The input an output dimensions are not scaled, since these are typically fixed by the problem at
+hand (e.g., both are the vocab size for an LLM).
+
+Our goal is to choose the hyperparameters (weight initialization, learning rates, etc.) such that
+all models in this class have similar behaviors, which translates to the model outputs and updates
+all being $ \lambda  $ independent at first non-trivial order, in a way made more precise below. We
+require\footnote{In general, we define the size of a random variable $ Z $ through the size of its first
+non-vanishing moment: if it's the $ n $-th moment, then we write $ Z \sim \Ocal \left( \langle Z^{ n
+} \rangle^{1/n} \right)$. The common cases are when the $ Z $ has a non-trivial mean,  $ Z \sim
+\Ocal \left( \langle Z \rangle \right)$, and the case where the mean is zero, but the second moment
+is non-trivial: $ Z \sim \Ocal \left( \sqrt{\langle Z Z \rangle} \right)$.}:
+\begin{itemize}
+    \item All intermediate tensors $ z ^{ \ell }  _{d  } \sim \Ocal \left( 1 \right)  $.
+    \item Model outputs are $ z ^{ \ell } _{ d } \sim \Ocal \left( 1 \right)  $ \textit{after}
+        taking an optimizer step.
+\end{itemize}
+ These requirements fix the scaling of every parameter of interest with respect
+to $ \lambda  $, with a single degree of freedom remaining.
+
+Assume that the $ x _{i  } \sim \Ocal \left( 1 \right)  $, either by whitening or because they're
+one-hot ($ x_{ i }=\delta_{ iv } $, for some $ v $), as in the LLM case. Then for the \textbf{base
+model}, defined to be the one with $ \lambda =1 $, we already know how to achieve the first criteria
+above. Let the input weight components be independently normally distributed so that the inputs into
+the first hidden layer weights, $ z^{ -1 }_{ i } $, also Gaussian normal\footnote{We consider the
+inputs $ x_{ i } $ fixed, for simplicity. A better treatment would also consider the data
+distribution.}:
+\begin{align}
+   \langle  I_{ d i }I_{ d'i' } \rangle  &=  \delta_{ dd' }\delta _{ ii' }  \quad \implies
+    \langle z^{  -1 }_{ i } \rangle=0 \, \quad  \langle z^{  -1 }_{ i }z^{ -1 }_{ i'} \rangle  = \delta_{ ii' }\ ,
+\end{align}
+with $ \langle \cdot  \rangle $ an expectation value over all weight distributions. Then all of the
+$ z^{ \ell }_{ d } $ will be zero mean with unit two-point correlation functions\footnote{They are
+    not normally distributed, however: their higher-point, connected correlation functions are
+    non-trivial \cite{physicalDL}. This is expected, since the $ z^{ \ell }  $ for $ \ell \ge 0 $
+are products of Gaussian random variables, and such a product is not Gaussian. However, the degree
+of non-Gaussianity is small: $ \Ocal \left( \frac{ \ell }{ D } \right)  $.} if we initialize the $
+H^{ \ell }_{ dd' } $ as
+\begin{align}
+    \langle H^{ \ell }_{ de }H^{ \ell }_{ d'e' } \rangle &=\frac{ \delta _{ dd' }\delta _{ ee' } }{
+    D_{ \ell-1 } } \implies \langle z^{\ell}_{ d } \rangle =0 \ , \quad \langle z^{\ell}_{ d }z^{ \ell }_{ d'} \rangle  = \delta_{ dd' } \ .
+\end{align}
+We will leave the variance of the output layer undetermined for now:
+\begin{align}
+    \langle O _{ od }O_{ o'd' } \rangle &= \frac{ \delta _{ oo' }\delta _{ dd' } }{ D_{ L-1 }^{ 1+s } }
+    \ , \quad \implies \left\langle z^{ L }_{ d } \right\rangle= 0 \ , \quad \left\langle z^{ L }_{ d }z^{ L }_{ d' } \right\rangle= \delta_{ dd' }D_{ L-1 }^{ -s } \ ,
+\end{align}
+for some $ s $ (chosen to match the $ s $ of
+\cite{yaida2022metaprincipledfamilyhyperparameterscaling}. Setting $ s=0 $ would yield $ D
+$-independent,  order-one model outputs at initialization, $ z^{ L }\sim \Ocal \left( 1 \right)  $,
+but we'll see that this is not the only viable choice.
+
+Now take an optimization step due to the loss from, say, a single input $ x_{ i } $. We allow for
+per-weight learning rates $ \left \{ \eta_{ I }, \eta_{ \ell }, \eta_{ O } \right \} $, for the
+input, hidden, and output weights, respectively.  Taking a step and computing the model outputs on
+an input $ y_{ i } $ (possibly different from $ x_{ i } $), the updated model's outputs $ z^{ L
+}\left ( y_{ i }, t=1 \right ) $ are related to the value it would have had at
+initialization, $ z^{ L }\left ( y_{ i }, t=0 \right )\equiv z^{ L }\left ( y_{ i } \right ) $, via
+\begin{align}
+    z^{ L }_{ o }\left ( y, t=1 \right ) &=  z^{ L }_{ o }\left ( y \right )
+    + \frac{ \partial z^{ L }_{ o }(y) }{ \partial I_{ di } } \Delta I_{ di }(x)
+    + \frac{ \partial z^{ L }_{ o }(y) }{ \partial H^{ \ell }_{ od } } \Delta H^{ \ell }_{ od }(x)
+    + \frac{ \partial z^{ L }_{ o }(y) }{ \partial O_{ od } } \Delta O_{ od }(x)+\Ocal \left( \Delta X^{ 2 } \right) \nn
+   &=  z^{ L }_{ o }\left ( y \right )
+    - \frac{ \partial \mathcal{L}(z(x)) }{\partial z ^{ L }_{ o' }  }\left( \eta_{ I } \frac{ \partial z ^{ L }_{ o' }(x) }{ \partial I_{ di } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial I_{ di } }
+    + \eta_{ \ell }\frac{ \partial z ^{ L }_{ o' }(x) }{ \partial H^{ \ell }_{ dd' } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial H^{ \ell }_{ dd' } }
+    + \eta_{ O }\frac{ \partial z ^{ L }_{ o' }(x) }{ \partial O_{ o''d } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial O_{ o''d  } } \right ) \nn
+    & \quad+\Ocal \left( \eta^{ 2 } \right)  \ ,
+    \label{app_eq_general_output_update}
+\end{align}
+sum over $ \ell $ and all other repeated indices implicit. The above uses SGD with per-weight
+learning rates, with the final line obtained after specializing weight updates $ W
+\longrightarrow W + \Delta W $ to SGD\footnote{The term in parentheses is the neural tangent kernel,
+a fundamental quantity which characterizes how the network gets updated.}.
+
+We are interested in the typical size of the updates in \eqref{app_eq_general_output_update}, for which
+we compute the following expectation values:
+\begin{align}
+\left  \langle \frac{ \partial z ^{ L }_{ o' }(x) }{ \partial I_{ di } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial I_{ di } }  \right \rangle &=\left  \langle O_{ o'd' }H^{ L-1 }_{d'e' } \ldots  H^{ 0 }_{  f'd }\times  O_{ od'' }H^{ L-1 }_{d''e'' } \ldots  H^{ 0 }_{  f''d }\right  \rangle x_{ i } y_{ i }\nn
+  &= \delta_{ oo' }\frac{ x \cdot y }{ D^{ s }_{ L-1 } } \nn
+\left  \langle \frac{ \partial z ^{ L }_{ o' }(x) }{ \partial H^{ \ell }_{ dd' } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial H^{ \ell }_{ dd' } }  \right \rangle &= \left \langle O_{ o'e' }H^{ L-1 }_{e'f' } \ldots  H^{ \ell+1 }_{  g'd } z^{ \ell-1 }_{ d' }\times O_{ oe }H^{ L-1 }_{ef } \ldots  H^{ \ell+1 }_{  gd } z^{ \ell-1 }_{ d' } \right  \rangle \nn
+  &= \delta_{ oo' } \frac{ \left\langle z^{ \ell-1 }\cdot z^{ \ell-1 } \right\rangle }{ D^{ s }_{ L-1 } }\nn
+  &= \delta_{ oo' }  \frac{D_{ \ell-1 }}{ D^{ s }_{ L-1 } }\nn
+\left  \langle \frac{ \partial z ^{ L }_{ o' }(x) }{ \partial O_{ o''d } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial O_{ o''d } }  \right \rangle &= \delta_{ o'o''' }\delta_{ oo'' } \left \langle z^{ L-1 }_{ d }z^{ L-1 }_{ d } \right  \rangle \nn
+  &= \delta_{ oo' } D_{ L-1 }\ . \label{app_eq_mup_expectation_vals}
+\end{align}
+
+The above are useful if we can compute the expectation value of the model output updates, $
+\Delta z^{ L }_{ o }\equiv z^{ L }_{ o }(t=1) -z^{ L }_{ o }(t=0) $,
+\eqref{app_eq_general_output_update} as in
+\begin{align}
+    \left \langle \Delta z^{ L }_{ o }\left ( y \right ) \right \rangle &\approx
+    - \Big \langle \frac{ \partial \mathcal{L}(z(x)) }{\partial z ^{ L }_{ o' }  }\Big( \eta_{ I } \frac{ \partial z ^{ L }_{ o' }(x) }{ \partial I_{ di } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial I_{ di } }
+    + \eta_{ \ell }\frac{ \partial z ^{ L }_{ o' }(x) }{ \partial H^{ \ell }_{ dd' } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial H^{ \ell }_{ dd' } }
+    + \eta_{ O }\frac{ \partial z ^{ L }_{ o' }(x) }{ \partial O_{ o''d } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial O_{ o''d  } } \Big ) \Big \rangle\nn
+    &\approx
+    - \Big \langle \frac{ \partial \mathcal{L}(z(x)) }{\partial z ^{ L }_{ o' }  }\Big\rangle \Big\langle\Big( \eta_{ I } \frac{ \partial z ^{ L }_{ o' }(x) }{ \partial I_{ di } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial I_{ di } }
+    + \eta_{ \ell }\frac{ \partial z ^{ L }_{ o' }(x) }{ \partial H^{ \ell }_{ dd' } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial H^{ \ell }_{ dd' } }
+    + \eta_{ O }\frac{ \partial z ^{ L }_{ o' }(x) }{ \partial O_{ o''d } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial O_{ o''d  } } \Big ) \Big \rangle \ .
+\end{align}
+This questionable assumption, which appears to be made in \cite{yang2022tensor}, is at least
+justifiable in the limit of a mean-squared-error loss or in the essentially-equivalent limit where
+the loss is well-approximated as a quadratic expansion about its minimum. Using
+\eqref{app_eq_mup_expectation_vals} with this assumption gives
+\begin{align}
+    \left \langle \Delta z^{ L }_{ o }\left ( y \right ) \right \rangle &\approx
+    - \left \langle \frac{ \partial \mathcal{L}(z(x)) }{\partial z ^{ L }_{ o }  }\right\rangle \times  \frac{ \left ( \eta_{ I } x \cdot y
+    + \eta_{ \ell }  D_{ \ell-1 }
++ \eta_{ O }D^{1+s}_{ L-1 } \right )}{D^{ s }_{ L-1 }} \ . \label{app_eq_deltaz_scaling}
+\end{align}
+
+Some conclusions from \eqref{app_eq_deltaz_scaling}:
+\begin{itemize}
+    \item Assuming all the $ D_{ \ell } $ are of roughly the same size, collectively called $ D $,
+        it is fairly natural to use per-layer learning rates of the form
+        \begin{align}
+            \eta_{ I } &= \eta  D^{ s }\ ,\quad
+            \eta_{ \ell } = \eta D^{ s-1 }\ , \quad
+            \eta_{ O } =\frac{ \eta }{ D } \ , \label{app_eq_mup_lr_scaling}
+        \end{align}
+        for some common global learning rate hyperparameter $ \eta $, say. This ensures that the updates from
+        each parameter contributes the same $ \Ocal \left( \eta \right)  $ (and $ D $-independent)
+        shift to the model's outputs. With this choice, the model updates will be $ \lambda
+        $-independent under the scaling \eqref{app_eq_mup_width_scaling}, at the current order of
+        approximation.
+    \item The parameter $ s $ is currently undetermined. The muTransfer limit \cite{yang2022tensor}
+        corresponds to\footnote{Compare \eqref{app_eq_mup_lr_scaling} with $ s=1 $ to Table 3 of
+        \cite{yang2022tensor}.} $ s=1 $, for which the model outputs at initialization scale as $
+        z^{ L }_{ d }\sim \frac{ 1 }{ \sqrt{D} }  $, an undesirable scaling which is compensated for
+        by the $ D $-independent SGD updates which eventually make the model outputs approximately
+        independent of model width.
+    \item One reasonable constraint is $ s \ge 0 $, since the model outputs at initialization are $
+        z^{ L }_{ d }\sim D^{-s/2 }  $ and we want the $ \Delta z^{ L }\sim \Ocal \left( \eta
+        \right)  $ SGD updates to be non-trivial in the $ D\longrightarrow \infty $ limit.
+\end{itemize}
+
+
+
+
+
+
+
+which (with hindsight) we parameterize as
+\begin{align}
+    \eta_{ I } &= \frac{ \eta }{ D_{ I }^{ \alpha _{ I } } }\nn
+    \eta_{ \ell } &= \frac{ \eta }{ D_{ \ell }^{ \alpha _{ \ell } } }\nn
+    \eta_{ O } &= \frac{ \eta }{ D_{ O }^{ \alpha _{ O } } }\ ,
+\end{align}
+
 
 \section{Cheat Sheet \label{app_cheat_sheet}}
-
 Collecting all of the most fundamental equations, given to various degrees of accuracy.
 
 Number of model parameters:
