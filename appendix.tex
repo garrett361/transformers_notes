@@ -554,7 +554,7 @@ We start by working through the general criteria for an extremely simple model, 
 extends to more general cases.
 
 
-\subsection{A Toy Limit: Deep Linear Networks and SGD}
+\subsection{A Toy Limit: Deep Linear Networks and SGD\label{app_mup_toy_limit}}
 
 Take the model to be very simple: a deep linear model without any biases,
 \begin{align}
@@ -562,18 +562,18 @@ Take the model to be very simple: a deep linear model without any biases,
     z ^{ \ell }_{ d } & \equiv H ^{ \ell }_{ d d' } z ^{ \ell-1 }_{ d' }  \ , \ell \in \left \{ 0, \ldots , L-1 \right \}\nn
     z ^{-1}_{ i } & \equiv I _{ i i' } x _{ i' }  \ . \label{app_eq_deep_linear_model}
 \end{align}
-We chose the index $ \ell $ to only index the hidden layers, and suppressed any batch or sequence
+Typically, $ \ell $ is only used to index the hidden layers, and we suppress any batch or sequence
 dimensions for simplicity. The $ H ^{ \ell } _{ d d' } \in \mathbb{R} ^{ D _{ \ell  } \times D  _{
 \ell-1 } } $  are the hidden layer weights, such that $ z_{ d }^{ \ell }\in \mathbb{R}^{ D_{
 \ell } } $,  $O _{ o d } \in \mathbb{R} ^{ D _{O}\times D  _{ L-1 } } $ is the readout layer
-(e.g. LM head for a LLM), and $I  _{ d i } \in \mathbb{R} ^{ D _{ 0} \times D  _{I} } $ the
+(e.g. LM head for a LLM), and $I  _{ d i } \in \mathbb{R} ^{ D _{ -1} \times D  _{I} } $ the
 input layer (e.g. embedding layer for a LLM). The $ D_{ \ell } $ dimensions may all be different.
 
 
 We will consider a family of models which are related by expanding all of the hidden dimensions, which is
 the easiest limit to analyze:
 \begin{align}
-    D _{\ell } \longrightarrow   \lambda D _{ \ell }\ ,\quad D _{O } \longrightarrow   D _{O}\ ,\quad
+    D _{\ell } \longrightarrow   \lambda D _{ \ell }\ ,\quad D _{-1 } \longrightarrow   \lambda D _{-1}\ ,\quad D _{O } \longrightarrow   D _{O}\ ,\quad
     D _{I} \longrightarrow   D _{I}\ . \label{app_eq_mup_width_scaling}
 \end{align}
 The input an output dimensions are not scaled, since these are typically fixed by the problem at
@@ -598,21 +598,28 @@ to $ \lambda  $, with a single degree of freedom remaining.
 Assume that the $ x _{i  } \sim \Ocal \left( 1 \right)  $, either by whitening or because they're
 one-hot ($ x_{ i }=\delta_{ iv } $, for some $ v $), as in the LLM case. Then for the \textbf{base
 model}, defined to be the one with $ \lambda =1 $, we already know how to achieve the first criteria
-above. Let the input weight components be independently normally distributed so that the inputs into
-the first hidden layer weights, $ z^{ -1 }_{ i } $, also Gaussian normal\footnote{We consider the
-inputs $ x_{ i } $ fixed, for simplicity. A better treatment would also consider the data
+above. Let the input weight components be chosen so that they generate independent, normally
+distributed outputs. We consider two scenarios:
+\begin{enumerate}
+    \item If the inputs are approximately normally distributed (say be whitening
+        features), then we take $ \langle  I_{ d i }I_{ d'i' } \rangle  =  \frac{ \delta_{ dd'
+        }\delta _{ ii' } }{ D_{ I } } $.
+    \item If the inputs are instead one-hot (as in LLMs), then we take $ \langle  I_{ d i
+        }I_{ d'i' } \rangle  =   \delta_{ dd' }\delta _{ ii' } $.
+\end{enumerate}
+Both scenarios produce outputs, defined to be $ z^{ -1 }_{ d } $, which obey\footnote{We consider
+the inputs $ x_{ i } $ fixed, for simplicity. A better treatment would also consider the data
 distribution.}:
 \begin{align}
-   \langle  I_{ d i }I_{ d'i' } \rangle  &=  \delta_{ dd' }\delta _{ ii' }  \quad \implies
-    \langle z^{  -1 }_{ i } \rangle=0 \, \quad  \langle z^{  -1 }_{ i }z^{ -1 }_{ i'} \rangle  = \delta_{ ii' }\ ,
+    \langle z^{  -1 }_{ d } \rangle=0 \, \quad  \langle z^{  -1 }_{ d }z^{ -1 }_{ d'} \rangle  = \delta_{ dd' }\ ,
 \end{align}
-with $ \langle \cdot  \rangle $ an expectation value over all weight distributions. Then all of the
-$ z^{ \ell }_{ d } $ will be zero mean with unit two-point correlation functions\footnote{They are
-    not normally distributed, however: their higher-point, connected correlation functions are
-    non-trivial \cite{physicalDL}. This is expected, since the $ z^{ \ell }  $ for $ \ell \ge 0 $
-are products of Gaussian random variables, and such a product is not Gaussian. However, the degree
-of non-Gaussianity is small: $ \Ocal \left( \frac{ \ell }{ D } \right)  $.} if we initialize the $
-H^{ \ell }_{ dd' } $ as
+with $ \langle \cdot  \rangle $ an expectation value over all weight distributions. Subsequently,
+all of the $ z^{ \ell }_{ d } $ will be zero mean with unit two-point correlation
+functions\footnote{They are not normally distributed, however: their higher-point, connected
+    correlation functions are non-trivial \cite{physicalDL}. This is expected, since the $ z^{ \ell
+    }  $ for $ \ell \ge 0 $ are products of Gaussian random variables, and such a product is not
+Gaussian. However, the degree of non-Gaussianity is small: $ \Ocal \left( \frac{ \ell }{ D } \right)
+$.} if we initialize the $ H^{ \ell }_{ dd' } $ as
 \begin{align}
     \langle H^{ \ell }_{ de }H^{ \ell }_{ d'e' } \rangle &=\frac{ \delta _{ dd' }\delta _{ ee' } }{
     D_{ \ell-1 } } \implies \langle z^{\ell}_{ d } \rangle =0 \ , \quad \langle z^{\ell}_{ d }z^{ \ell }_{ d'} \rangle  = \delta_{ dd' } \ .
@@ -625,7 +632,7 @@ We will leave the variance of the output layer undetermined for now:
 for some $ s $ (chosen to match the $ s $ of
 \cite{yaida2022metaprincipledfamilyhyperparameterscaling}. Setting $ s=0 $ would yield $ D
 $-independent,  order-one model outputs at initialization, $ z^{ L }\sim \Ocal \left( 1 \right)  $,
-but we'll see that this is not the only viable choice.
+but we'll see that this is not the only viable choice (and muTransfer uses $ s=1 $).
 
 Now take an optimization step due to the loss from, say, a single input $ x_{ i } $. We allow for
 per-weight learning rates $ \left \{ \eta_{ I }, \eta_{ \ell }, \eta_{ O } \right \} $, for the
@@ -656,10 +663,10 @@ we compute the following expectation values:
 \left  \langle \frac{ \partial z ^{ L }_{ o' }(x) }{ \partial I_{ di } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial I_{ di } }  \right \rangle &=\left  \langle O_{ o'd' }H^{ L-1 }_{d'e' } \ldots  H^{ 0 }_{  f'd }\times  O_{ od'' }H^{ L-1 }_{d''e'' } \ldots  H^{ 0 }_{  f''d }\right  \rangle x_{ i } y_{ i }\nn
   &= \delta_{ oo' }\frac{ x \cdot y }{ D^{ s }_{ L-1 } } \nn
 \left  \langle \frac{ \partial z ^{ L }_{ o' }(x) }{ \partial H^{ \ell }_{ dd' } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial H^{ \ell }_{ dd' } }  \right \rangle &= \left \langle O_{ o'e' }H^{ L-1 }_{e'f' } \ldots  H^{ \ell+1 }_{  g'd } z^{ \ell-1 }_{ d' }\times O_{ oe }H^{ L-1 }_{ef } \ldots  H^{ \ell+1 }_{  gd } z^{ \ell-1 }_{ d' } \right  \rangle \nn
-  &= \delta_{ oo' } \frac{ \left\langle z^{ \ell-1 }\cdot z^{ \ell-1 } \right\rangle }{ D^{ s }_{ L-1 } }\nn
-  &= \delta_{ oo' }  \frac{D_{ \ell-1 }}{ D^{ s }_{ L-1 } }\nn
-\left  \langle \frac{ \partial z ^{ L }_{ o' }(x) }{ \partial O_{ o''d } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial O_{ o''d } }  \right \rangle &= \delta_{ o'o''' }\delta_{ oo'' } \left \langle z^{ L-1 }_{ d }z^{ L-1 }_{ d } \right  \rangle \nn
-  &= \delta_{ oo' } D_{ L-1 }\ . \label{app_eq_mup_expectation_vals}
+  &= \delta_{ oo' } \frac{ \left\langle z^{ \ell-1 }(x)\cdot z^{ \ell-1 }(y) \right\rangle }{ D^{ s }_{ L-1 } }\nn
+  &= \delta_{ oo' }  \frac{D_{ \ell-1 }}{ D^{ s }_{ L-1 } }\times \begin{cases} x\cdot y & x, y \sim {\rm one-hot}\\ \frac{ x\cdot y }{ D_{ I } } & x, y \sim {\rm normal}\end{cases}\nn
+\left  \langle \frac{ \partial z ^{ L }_{ o' }(x) }{ \partial O_{ o''d } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial O_{ o''d } }  \right \rangle &= \delta_{ o'o''' }\delta_{ oo'' } \left \langle z^{ L-1 }(x)\cdot z^{ L-1 }(y) \right  \rangle \nn
+&= \delta_{ oo' } D_{ L-1 }\times \begin{cases} x\cdot y & x, y \sim {\rm one-hot}\\ \frac{ x\cdot y }{ D_{ I } } & x, y \sim {\rm normal}\end{cases}\ . \label{app_eq_mup_expectation_vals}
 \end{align}
 
 The above are useful if we can compute the expectation value of the model output updates, $
@@ -693,36 +700,129 @@ Some conclusions from \eqref{app_eq_deltaz_scaling}:
         \begin{align}
             \eta_{ I } &= \eta  D^{ s }\ ,\quad
             \eta_{ \ell } = \eta D^{ s-1 }\ , \quad
-            \eta_{ O } =\frac{ \eta }{ D } \ , \label{app_eq_mup_lr_scaling}
+            \eta_{ O } =\frac{ \eta }{ D } \ , \label{app_eq_mup_lr_scaling_sgd}
         \end{align}
-        for some common global learning rate hyperparameter $ \eta $, say. This ensures that the updates from
-        each parameter contributes the same $ \Ocal \left( \eta \right)  $ (and $ D $-independent)
-        shift to the model's outputs. With this choice, the model updates will be $ \lambda
-        $-independent under the scaling \eqref{app_eq_mup_width_scaling}, at the current order of
-        approximation.
+        for some common global learning rate hyperparameter $ \eta $, say\footnote{More generally,
+        these should be taken as individually tunable, $ D $-independent hyperparameters.}. This
+        ensures that the updates from each parameter contributes the same $ \Ocal \left( \eta
+        \right)  $ (and $ D $-independent) shift to the model's outputs. With this choice, the model
+        updates will be $ \lambda $-independent under the scaling \eqref{app_eq_mup_width_scaling},
+        at the current order of approximation. Note that it's not at all obvious whether such a
+        stability condition also implies optimal learning.
+    \item Equivalently, one could imagine performing a scan over the space $ \left \{ \eta_{ I },
+        \eta_{ \ell }, \eta_{ O } \right \} $ to find the optimal learning rates for fixed model
+        widths $ \left \{ D_{ I }, D_{ \ell }, D_{ O } \right \} $. Then, one should be able to
+        scale up the model as in \eqref{app_eq_mup_width_scaling} while simultaneously scaling
+        \begin{align}
+            \eta_{ I } &\longrightarrow \eta_{ I }  \lambda^{ s }\ ,\quad
+            \eta_{ \ell } \longrightarrow \eta_{ \ell } \lambda^{ s-1 }\ , \quad
+            \eta_{ O } \longrightarrow\frac{ \eta_{ O } }{ \lambda } \ , \label{app_eq_mup_lr_lambda_scaling_sgd}
+        \end{align}
+        and retain nearly-optimal training. This is closer to the presentation in
+        \cite{yang2022tensor}.
     \item The parameter $ s $ is currently undetermined. The muTransfer limit \cite{yang2022tensor}
-        corresponds to\footnote{Compare \eqref{app_eq_mup_lr_scaling} with $ s=1 $ to Table 3 of
-        \cite{yang2022tensor}.} $ s=1 $, for which the model outputs at initialization scale as $
-        z^{ L }_{ d }\sim \frac{ 1 }{ \sqrt{D} }  $, an undesirable scaling which is compensated for
-        by the $ D $-independent SGD updates which eventually make the model outputs approximately
-        independent of model width.
+        corresponds to\footnote{\eqref{app_eq_mup_lr_lambda_scaling_adam} agrees with  Table 3 of
+        \cite{yang2022tensor} when $ s=1 $.} $ s=1 $, for which the model outputs at initialization
+        scale as $ z^{ L }_{ d }\sim \frac{ 1 }{ \sqrt{D} }  $, an undesirable scaling which is
+        compensated for by the $ D $-independent SGD updates which eventually make the model outputs
+        approximately independent of model width.
     \item One reasonable constraint is $ s \ge 0 $, since the model outputs at initialization are $
         z^{ L }_{ d }\sim D^{-s/2 }  $ and we want the $ \Delta z^{ L }\sim \Ocal \left( \eta
-        \right)  $ SGD updates to be non-trivial in the $ D\longrightarrow \infty $ limit.
+        \right)  $ SGD updates to remain non-trivial in the $ D\longrightarrow \infty $ limit.
 \end{itemize}
 
-
-
-
-
-
-
-which (with hindsight) we parameterize as
+An essentially-equivalent, but differently presented, line of inquiry comes from
+\cite{yaida2022metaprincipledfamilyhyperparameterscaling} in which they consider the so-called $
+\ell $-th layer neural tangent kernel\footnote{They use $ H $ where we use $ N $ to denote the
+kernel}:
 \begin{align}
-    \eta_{ I } &= \frac{ \eta }{ D_{ I }^{ \alpha _{ I } } }\nn
-    \eta_{ \ell } &= \frac{ \eta }{ D_{ \ell }^{ \alpha _{ \ell } } }\nn
-    \eta_{ O } &= \frac{ \eta }{ D_{ O }^{ \alpha _{ O } } }\ ,
+    N^{ \ell }_{ dd' }(y, x) &= \eta_{ I } \frac{ \partial z ^{ \ell }_{ d' }(x) }{ \partial I_{ ei } }\frac{ \partial z^{ \ell }_{ d }(y) }{ \partial I_{ ei } }
+    + \eta_{ \ell }\frac{ \partial z ^{ \ell }_{ d' }(x) }{ \partial H^{ \ell }_{ef} }\frac{ \partial z^{ \ell }_{ d }(y) }{ \partial H^{ \ell }_{ef} }
+    + \eta_{ O }\frac{ \partial z ^{ \ell }_{ d' }(x) }{ \partial O_{ of } }\frac{ \partial z^{ \ell }_{ d }(y) }{ \partial O_{of} }\ ,
 \end{align}
+where various terms are zero depending on the value of $ \ell $ and which coincides with the full
+neural tangent kernel when $ \ell=L $. These obey recursion relations, from the chain rule:
+\begin{align}
+    N^{ L }_{ oo' }(y, x)  &=\eta_{ O }\delta_{ oo' } z^{ L-1 }(x)\cdot z^{ L-1 }(y) + O_{ od }O_{ o'd' }N^{ L-1 }_{ dd' }\nn
+    N^{ \ell }_{ dd' }(y, x)  &=\eta_{ \ell }\delta_{ dd' } z^{ \ell-1 }(x)\cdot z^{ \ell-1 }(y) + H^{ \ell }_{ de }H^{\ell }_{ d'e' }N^{ \ell-1 }_{ ee' } \ , \quad L-1 \ge \ell \ge 1\nn
+    N^{0}_{ dd' }(y, x)  &=\eta_{0}\delta_{ dd' } z^{ -1 }(x)\cdot z^{ -1 }(y) + I_{ di }I_{ d'i' } N^{ -1 }_{ ii' }\nn
+    N^{ -1 }_{ dd' }(y, x)&=\eta_{ I }\delta_{ dd'} x\cdot y \ .
+\end{align}
+Demanding that the true neural tangent kernel $ N^{ L }_{ oo' } $ be width-independent and that all
+layers provide parametrically-equal contributions lands us on the same equations and solutions as
+above. Extending this analysis to higher orders in $ \eta $,
+\cite{yaida2022metaprincipledfamilyhyperparameterscaling} derives another bound: $ s\le 1 $, placing
+muTransfer at the edge of the bounded region.
+
+\subsubsection{Adam}
+
+Since Adam(W), not SGD, is the de facto optimizer of choice, we need to extend the above arguments.
+A quick and dirty assumption which leads to a reasonable (and phenomenologically supported) scaling
+result is to a assume that the SGD and Adam updates generally point in the same direction and that
+elements of the Adam updates are all $ \Ocal \left( 1 \right)  $.
+
+That is, let the Adam update for some weight $ W_{ de }\in \mathbb{R}^{ D\times E } $ be, schematically,
+ \begin{align}
+ \Delta^{ {\rm Adam} }    W_{ de }  =- \frac{ \left\langle \frac{ \partial \Lcal }{ \partial W_{ de } } \right\rangle }{ \sqrt{ \left\langle \left (\frac{ \partial \Lcal }{ \partial W_{ de } }\right )^{ 2 } \right\rangle } } \ ,
+ \end{align}
+ while  $ \Delta^{ {\rm Adam} }    W_{ de } =- \frac{ \partial \Lcal }{ \partial W_{ de } } $,
+ omitting the learning rate and where expectation values are really corrected exponential moving
+ averages.  Then assume that a relation of the form $ \Delta^{ {\rm Adam} }    W_{ de }\approx
+ \alpha_{ W } \Delta^{ {\rm SGD} }    W_{ de } $ holds for some $ \alpha_{ W } $, such that this
+ replacement can be made in any expectation value while only inducing small errors, in a way we will
+ not attempt to quantify.
+
+ We can then determine the value of $ \alpha_{ W } $ through
+ \begin{align}
+     \left\langle \Delta^{ {\rm Adam} }    W_{ de }\Delta^{ {\rm Adam} }    W_{ de } \right\rangle
+     &\approx \alpha_{ W }^{ 2 } \left\langle \Delta^{ {\rm SGD} }    W_{ de }\Delta^{ {\rm SGD} }    W_{ de } \right\rangle \ .
+ \end{align}
+The left hand side is approximately $ D\times E $ (the number of components of the weight, more
+generally) via the assumption that all components $ \Delta^{ {\rm Adam} }    W_{ de } $ are $ \Ocal
+\left( 1 \right)  $. For instance, this is exactly true in the limit where every gradient in the
+history has taken on the same value, in which case all components\footnote{Ignoring the $ \epsilon $
+term in the Adam implementation. This result is also exactly true for the LION optimizer
+\cite{chen2023symbolicdiscoveryoptimizationalgorithms} for which $ \Delta^{ {\rm LION} }    W_{ de }
+=\pm 1 $ for all components.} are 1. The right side can be approximated using the same assumptions
+used in App.~\ref{app_mup_toy_limit}:
+\begin{align}
+    \left\langle \Delta^{ {\rm SGD} }    W_{ de }\Delta^{ {\rm SGD} }    W_{ de } \right\rangle      &= \left\langle \frac{ \partial \Lcal }{ \partial W_{ de } }\frac{ \partial \Lcal }{ \partial W_{ de } } \right\rangle\nn
+         &=\left\langle \frac{ \partial \Lcal }{ \partial z_{ o } }\frac{ \partial z_{ o } }{ \partial W_{ de } }\frac{\partial \Lcal }{ \partial z_{ o' } }\frac{ \partial z_{ o' } }{ \partial W_{ de } } \right\rangle\nn
+         &\approx \left\langle \frac{ \partial \Lcal }{ \partial z_{ o } }\frac{\partial \Lcal }{ \partial z_{ o' } }\right\rangle \left \langle  \frac{ \partial z_{ o } }{ \partial W_{ de } }\frac{ \partial z_{ o' } }{ \partial W_{ de } } \right\rangle \ .
+\end{align}
+
+These final factors were computed in \eqref{app_eq_mup_expectation_vals} and the relations for the
+various weights become:
+\begin{align}
+    D_{ -1 }D_{ I } &=\alpha_{ I }^{ 2 } \left\langle \frac{ \partial \Lcal }{ \partial z_{ o } }\frac{\partial \Lcal }{ \partial z_{ o } }\right\rangle \frac{ x \cdot y }{ D^{ s }_{ L-1 } }\nn
+    D_{ \ell }D_{ \ell-1 } &=\alpha_{ \ell }^{ 2 } \left\langle \frac{ \partial \Lcal }{ \partial z_{ o } }\frac{\partial \Lcal }{ \partial z_{ o } }\right\rangle \frac{ D_{ \ell-1 } }{ D_{ L-1 }^{ s } } \times \begin{cases} x\cdot y & x, y \sim {\rm one-hot}\\ \frac{ x\cdot y }{ D_{ I } } & x, y \sim {\rm normal}\end{cases}\nn
+    D_{ O }D_{ L-1 } &=\alpha_{O}^{ 2 } \left\langle \frac{ \partial \Lcal }{ \partial z_{ o } }\frac{\partial \Lcal }{ \partial z_{ o } } \right\rangle D_{ L-1} \times \begin{cases} x\cdot y & x, y \sim {\rm one-hot}\\ \frac{ x\cdot y }{ D_{ I } } & x, y \sim {\rm normal}\end{cases}\nn
+\end{align}
+Considering the scaling \eqref{app_eq_mup_width_scaling}, we assume the $ \left\langle \frac{
+\partial \Lcal }{ \partial z_{ o } }\frac{\partial \Lcal }{ \partial z_{ o } } \right\rangle $
+factors to be $ \lambda $-independent (since the goal of muTransfer is to keep the model outputs $
+z^{ L }_{ 0 } $ $ \lambda $-independent) and matching the remaining factors gives:
+\begin{align}
+  \alpha_{ I }\propto \alpha_{ \ell }\propto \lambda^{ \frac{ 1+s }{ 2 } } \ , \quad
+  \alpha_{ O }\propto 1 \ .
+\end{align}
+
+Repeating the analysis of App.~\ref{app_mup_toy_limit} with the Adam updates and the preceding
+assumptions amounts to replacing $ \eta_{ X }\longrightarrow \eta_{ X }\alpha_{ X } $ everywhere,
+which changes \eqref{app_eq_mup_lr_lambda_scaling_sgd}
+to\footnote{\eqref{app_eq_mup_lr_lambda_scaling_adam} agrees with  Table 3 of \cite{yang2022tensor}
+when $ s=1 $.}
+\begin{align}
+    \eta_{ I } &\longrightarrow \eta_{ I }  \lambda^{ \frac{ s-1 }{ 2 } }\ ,\quad
+    \eta_{ \ell } \longrightarrow \eta_{ \ell } \lambda^{ \frac{ s-3 }{ 2 } }\ , \quad
+    \eta_{ O } \longrightarrow\frac{ \eta_{ O } }{ \lambda } \quad \label{app_eq_mup_lr_lambda_scaling_adam} ({\rm Adam}) \ .
+\end{align}
+
+
+
+
+
+
 
 
 \section{Cheat Sheet \label{app_cheat_sheet}}
