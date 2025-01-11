@@ -134,7 +134,8 @@ fuse).
 \begin{align}
     h _{ sen } &= \exp \left ( \Delta  _{ se } W^{A} _{ en } \right ) h _{ (s-1)e n} + \Delta _{ se }B _{ sn }x _{ se }\nn
     y _{ se } &= C _{ sn }h _{ sen } + W ^{ D } _{ e }x _{ se } \nn
-    \implies y _{ se } &= C _{ sn }\left (\sum _{ s'=0 }^{ s }e^{ \Delta _{ se }W^{A} _{ en } }\times \ldots \times e^{ \Delta _{ s'e }W^{A} _{ en } } \Delta _{ s'e } B _{ s'n } x _{ s'e }\right ) + W ^{ D } _{ e } x _{ se }
+    \implies y _{ se } &= C _{ sn }\left (\sum _{ s'=0 }^{ s }e^{ \Delta _{ se }W^{A} _{ en } }\times \ldots \times e^{ \Delta _{ (s'+1)e }W^{A} _{ en } } \Delta _{ s'e } B _{ s'n } x _{ s'e }\right ) + W ^{ D } _{ e } x _{ se }\nn
+     &= C _{ sn }\left (\sum _{ s'=0 }^{ s }\prod_{ s''=s'+1 }^{ s }e^{ \Delta _{ s''e }W^{A} _{ en } } \Delta _{ s'e } B _{ s'n } x _{ s'e }\right ) + W ^{ D } _{ e } x _{ se }
 \end{align}
 \State \Return $ y _{ se } \in \mathbb{R}^{ S\times E }$
 \label{algo_mamba1_scan}
@@ -182,7 +183,7 @@ $ is split into multiple attention heads, analogously to transformer models:
 
 \begin{algo}{Selective Scan 2: \texttt{selective\_scan2} }
 \State \textbf{Inputs}: tensor $ x _{ se }\in \mathbb{R}^{ S\times E } $
-\State $ x _{ sah } = x _{ s(ah) } $  \Comment Break the inputs up into attention heads.
+\State $ x _{ sah } = x _{ s(ah) } = x_{ se } $  \Comment Break the inputs up into attention heads.
 \State $ B _{ sgn } = W ^{ B }_{ gne }x _{ se } $  \Comment Create intermediates $B, C, \Delta  $ (can
 fuse)\footnote{The \texttt{mamba\_ssm} and \texttt{mamba.py} implementations differ here in that the
 latter optionally applies a norm operator post-projection.}.
@@ -195,7 +196,8 @@ latter optionally applies a norm operator post-projection.}.
 \begin{align}
     h _{ sgahn } &= \exp \left ( \Delta  _{ sa } W^{A} _{ a } \right ) h _{ (s-1)gah n} + \Delta _{ sa }B _{ sgn }x _{ se }\nn
     y _{ sah } &= C _{ sgn }h _{ sgahn } +  W ^{ D } _{ a }x _{ sah } \nn
-    \implies y _{ sah } &= C _{ sgn }\left (\sum _{ s'=0 }^{ s }e^{ \Delta _{ sa }W^{A} _{ a } }\times \ldots \times e^{ \Delta _{ s'a }W^{A} _{ a } } \Delta _{ s'a }B _{ s'gn } x _{ s'ah }\right ) + W ^{ D } _{ a } x _{ sah }
+    \implies y _{ sah } &= C _{ sgn }\left (\sum _{ s'=0 }^{ s }e^{ \Delta _{ sa }W^{A} _{ a } }\times \ldots \times e^{ \Delta _{ (s'+1)a }W^{A} _{ a } } \Delta _{ s'a }B _{ s'gn } x _{ s'ah }\right ) + W ^{ D } _{ a } x _{ sah }\nn
+   &= C _{ sgn }\left (\sum _{ s'=0 }^{ s }\prod_{ s''=s'+1 }^{ s  }e^{ \Delta _{ s''a }W^{A} _{ a } } \Delta _{ s'a }B _{ s'gn } x _{ s'ah }\right ) + W ^{ D } _{ a } x _{ sah }
 \end{align}
 \State $ y _{ se } = y _{ s(ah) } $  \Comment Concatenate the heads back together.
 \State \Return $ y _{ se } \in \mathbb{R}^{ S\times E }$
@@ -207,7 +209,6 @@ Algo.~\ref{algo_mamba1_scan} and Algo.~\ref{algo_mamba2_scan} are nearly identic
 in some tensor shapes.
 
 
-
 \subsection{Mamba2 Duality with Attention}
 
 There are only two steps in which tokens at different temporal positions interact in the Mamba2
@@ -216,7 +217,7 @@ model:
     \item In the short 1D convolution.
     \item In the recurrence relation, where we create the intermediate
         \begin{align}
-        z _{ sah } &= C _{ sgn }\left (\sum _{ s'=0 }^{ s }e^{ \Delta _{ sa }W^{A} _{ a } }\times \ldots \times e^{ \Delta _{ s'a }W^{A} _{ a } } \Delta _{ s'a }B _{ s'gn } x _{ s'ah }\right ) \equiv  M  _{ ass' }x _{ s'ah }
+        z _{ sah } &= C _{ sgn }\left (\sum _{ s'=0 }^{ s }e^{ \Delta _{ sa }W^{A} _{ a } }\times \ldots \times e^{ \Delta _{ (s'+1)a }W^{A} _{ a } } \Delta _{ s'a }B _{ s'gn } x _{ s'ah }\right ) \equiv  M  _{ ass' }x _{ s'ah }
         \end{align}
         which is the most complicated step of the model.
 \end{enumerate}
@@ -235,6 +236,145 @@ any $ \Ocal \left( S ^{ 2 } \right)  $ tensors.
 
 Similar statements hold for the original Mamba; the index names and choices just make the analogy
 more readily recognizable in Mamba2.
+
+\subsection{Details: Cumsums, Chunking, and the Mamba2 Scan}
+
+Some more details about how to compute the recursion solution in Algo.~\ref{algo_mamba2_scan}.
+Similarly to the previous section, let
+\begin{align}
+z _{ sah } &= C _{ sgn }\left (\sum _{ s'=0 }^{ s }e^{ \Delta _{ sa }W^{A} _{ a } }\times \ldots \times e^{ \Delta _{ (s'+1)a }W^{A} _{ a } } \Delta _{ s'a }B _{ s'gn } x _{ s'ah }\right )\nn
+ &\equiv C _{ sgn }\mathcal{A}_{ ss'a }\Delta _{ s'a }B _{ s'gn } x _{ s'ah }\nn
+ &\equiv C _{ sgn }\mathcal{A}_{ ss'a }\mathcal{B}_{ s'ganh }
+\end{align}
+The above is the most complex part of the Mamba2 model and the official \texttt{mamba\_ssm} repo
+takes a multi-step approach to its computation. Two primary points:
+\begin{enumerate}
+    \item The matrix $ \mathcal{A}_{ ss'a  } $ vanishes for $ s' > s  $ (causality).
+    \item As in flash attention, we wish to chunk over the sequence dimension to avoid every
+        realizing the full $ \mathcal{A}_{ ss'a  } $ tensor.
+\end{enumerate}
+The chunked version is then
+\begin{align}
+    z _{ clah } &= C _{ clgn }\mathcal{A}_{cc' ll'a }\mathcal{B}_{ c'l'ganh } \ ,
+\end{align}
+where we have chunked the $ a  $-index into the $ c, l  $ pair (with $ c  $ indexing the chunk).
+The chunked computation breaks down into two further cases, based on the values of the $ c, c'  $
+indices\footnote{ The $ c'>c $ cases are trivial as $ \mathcal{A}_{ cc'll'a  } $ vanishes.}:
+\begin{itemize}
+    \item $ c=c' $: these cases are effectively smaller versions of the entire, unchunked
+        computation, and hence shares in its sparsity in that $ \mathcal{A}_{ cc'll'a  }  $ vanishes
+        for $ l' > l $.
+    \item $ c>c' $: there is no sparsity here, as $ \mathcal{A}_{ cc'll'a  }  $ will be generically
+        non-zero for all $ l, l' $.
+\end{itemize}
+
+\subsubsection{The $ c=c'  $ Cases}
+
+Logically, we compute the scan using cumulative sums and matrix-multiplies. Let $ \Delta_{ sa  }W_{
+a  }^{ A } = A_{ sa  } = A_{ (cl)a  }=A_{ cla } $ so that
+\begin{align}
+    \mathcal{A}_{ ss'a } &=
+    \begin{cases}
+    e^{ A_{ sa }}\times \ldots \times e^{   A_{ (s'+1)a }} =\exp\left ( \sum_{ s''=s'+1 }^{ s }A_{ s''a } \right ) & s \ge s' \\
+    0 &  s < s'
+    \end{cases}\nn
+ &\equiv e^{ \mathsf{A}_{ ss'a } }\ .
+\end{align}
+Sharding and taking only the diagonal terms, the above turns into (no sum over the repeated $ c
+$-index):
+\begin{align}
+    \mathcal{A}_{ ccll'a } &=
+    \begin{cases}
+    e^{ A_{ cla }}\times \ldots \times e^{   A_{ c(l'+1)a }} =\exp\left ( \sum_{ l''=l'+1 }^{ l }A_{ cl''a } \right ) & l \ge l' \\
+    0 &  l < l'
+    \end{cases}\nn
+ &\equiv e^{ \mathsf{A}_{ ccll'a } }\ .
+\end{align}
+The argument $ \mathsf{A}_{ ccll'a } $ can be constructed in various ways\footnote{$
+\texttt{cumsum}_{ s } X_s \equiv \sum_{ s'=0 }^{ s }X_{ s' } $ and $ \texttt{segsum} $ stands for
+``segment sum".}:
+\begin{align}
+     \mathsf{A}_{ ccll'a }&= \texttt{segsum}_{ l }\left ( A_{ cla } \right ) + M _{ ll' }\nn
+     &= \texttt{cumsum}_{ l }A_{ cla } - \texttt{cumsum}_{ l' }A_{ cl'a } + M_{ ll' } \nn
+      &= \texttt{cumsum}_{ l }\left ( A_{ cla }Z_{ ll' } \right ) + M _{ ll' }\nn
+       Z_{ ll' } &\equiv  \begin{cases}
+           0 & l \le l'\\
+           1 & l > l'
+       \end{cases} \ , \quad
+       M_{ ll' } \equiv  \begin{cases}
+           -\infty & l < l'\\
+           0 & l \ge l'
+       \end{cases} \ , \label{app_eq_mamba2_diag_propagator}
+\end{align}
+where the final form with the additional mask $ Z_{ ll' } $ is better behaved numerically, as it
+does not rely on cancellations between sums. Careful attention should be paid to the inequality
+symbols in the masks.  The remainder of these diagonal computations is straightforward.
+
+\subsubsection{The $ c>c'  $ Cases}
+
+Now we compute the remaining off-diagonal terms. Compute one $ (c, c') $ chunk at a time, i.e. we
+compute
+\begin{align}
+    z_{ clah }= C _{ clgn }\mathcal{A}_{ cc'll'a }\mathcal{B}_{ c'l'ganh } \ , \label{app_eq_mamba2_off_diag_chunk}
+\end{align}
+by iterating over the $ c' $ sum, similarly to flash attention.
+
+$ \mathcal{A}_{ cc'll'a } $ is made up of $\sim  e^{ A_{ sa  } } $ factors which each serve to
+propagate $ \mathcal{B }_{ (s-1)ganh } $ forward one step in time. Specifically, $ \mathcal{A}_{
+cc'll'a }$ contains all the factors needed to get from the times specified by the $ (c', l') $
+indices up to the $ (c, l ) $ indices:
+\begin{align}
+    \mathcal{A}_{ cc'll'a } &=\exp \left ( \sum_{ s= c'L + l' + 1 }^{ cL + l  }A _{ sa } \right ) \ , \quad {\rm for}\  c>c' \ .
+\end{align}
+We will break the above into three factors\footnote{In the nomenclature of
+\cite{dao2024transformersssmsgeneralizedmodels}, whose authors also refer to these as the B, A, and
+C blocks, respectively (though we actually differ slightly in detail from what the paper and
+\texttt{mamba-ssm} do).}:
+\begin{enumerate}
+    \item A right-factor which propagates the $ \mathcal{B}_{ c'l'ganh } $ from their disparate
+        times $ (c', l') $ all up to a common point in time.
+    \item A center-factor which propagates the previous element together for a period.
+    \item A left-factor which finally propagates these elements up to their final time slices $ (c,
+        l) $ specified by $ C _{ clgn } $.
+\end{enumerate}
+
+The specific form of the factors comes from the following (non-unique) decomposition of the
+preceding expression:
+\begin{align}
+    \mathcal{A}_{ cc'll'a }\Big|_{ c>c' } &=\exp \left ( \sum_{ s= c'L + l' + 1 }^{ cL + l  }A _{ sa } \right ) \nn
+                            &= \exp \left (\sum _{ l''=0 }^{ l }A_{ cl''a} +\sum_{ c''=c'+1 }^{ c-1 }\sum_{ l=0 }^{ L-1 }A_{ c''la }  + \sum _{ l''=l'+1 }^{ L-1  }A_{ c'l''a} \right )\nn
+                            &= \exp \left (\sum _{ l''=0 }^{ l }A_{ cl''a}\right ) \exp \left (\sum_{ c''=c'+1 }^{ c-1 }\sum_{ l=0 }^{ L-1 }A_{ c''la }  \right ) \exp \left ( \sum _{ l''=l'+1 }^{ L-1  }A_{ c'l''a} \right ) \nn
+                            &\equiv U_{ cla }\texttt{A}_{ cc'a }T_{ c'l'a }\ ,
+\end{align}
+such that we have
+\begin{align}
+z_{ clc'ah }&= C _{ clgn }U_{ cla }\texttt{A}_{ cc'a }T_{ c'l'a }\mathcal{B}_{ c'l'ganh }\nn
+            &= \texttt{C}_{ clgna }\texttt{A}_{ cc'a }\texttt{B}_{ c'anh }\ ,
+\end{align}
+which (I believe) are the C, A, and B blocks from \cite{dao2024transformersssmsgeneralizedmodels}.
+
+
+These factors can be conveniently, and succinctly, vectorized as in\footnote{These can also be written in a form
+similar to \eqref{app_eq_mamba2_diag_propagator} where we use masks instead of relying in
+numerically unstable cancellations. $ T_{ c'l'a  }= \exp\left (\texttt{sum}_{ l }Z_{ ll' }A_{ c'la
+}\right ) $, $ U_{ cla  }= \exp\left (\texttt{sum}_{ l' }\left (1 - Z_{ l'l }\right )A_{ c'l'a  }\right ) $
+with $ Z_{ ll' } $ the mask in \eqref{app_eq_mamba2_diag_propagator}.
+}:
+\begin{align}
+    T_{ c'l'a } &=\exp\left ( \texttt{sum}_{ l' }\left ( A_{ c'l'a } \right ) - \texttt{cumsum}_{ l' }A_{ cl'a } \right )\nn
+    \texttt{A}_{ cc'a }&=\exp \left ( \texttt{segsum}_{ c }A_{ ca } - A_{ ca }  \right ) \quad {\rm where}  \quad A_{ ca  }\equiv \texttt{sum}_{ l }A_{ cla  }\nn
+    U_{ cla } &=\exp\left ( \texttt{cumsum}_{ l }\left ( A_{ cla } \right ) \right ) \ .
+\end{align}
+
+The full solution decomposed in this way is then:
+\begin{align}
+    z _{ clah } &= C _{ clgn }e^{ \mathsf{A}_{ ccll'a } }\mathcal{B}_{ cl'ganh } + M_{ cc' }C _{ clgn }U_{ cla }\texttt{A}_{ cc'a }T_{ c'l'a }\mathcal{B}_{ cl'ganh }\nn
+    M_{ cc' } & = \begin{cases}
+           1 & c > c'\\
+           0 & c \le c'
+       \end{cases} \ .
+\end{align}
+
 
 \subsection{Aren't These Just RNNs?\label{subsec_rnns_and_ssm}}
 
