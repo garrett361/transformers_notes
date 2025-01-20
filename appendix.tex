@@ -556,7 +556,11 @@ extends to more general cases.
 
 \subsection{A Toy Limit: Deep Linear Networks and SGD\label{app_mup_toy_limit}}
 
-Take the model to be very simple: a deep linear model without any biases,
+Take the model to be very simple: a deep linear model without any biases.  Though simple, the
+conclusions we reach for this model will essentially all carry over to more complex cases. Whatever
+general prescription we come up with should work in this limit, at the very least.
+
+The model is:
 \begin{align}
     z _{ o } \equiv  z ^{ L }_{ o } &= O _{ od } H ^{ L-1 }_{ d d' } \ldots H ^{ 0 } _{ d'' i }I _{ i 'i } x _{ i } \nn
     z ^{ \ell }_{ d } & \equiv H ^{ \ell }_{ d d' } z ^{ \ell-1 }_{ d' }  \ , \ell \in \left \{ 0, \ldots , L-1 \right \}\nn
@@ -682,10 +686,11 @@ The above are useful if we can compute the expectation value of the model output
     + \eta_{ \ell }\frac{ \partial z ^{ L }_{ o' }(x) }{ \partial H^{ \ell }_{ dd' } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial H^{ \ell }_{ dd' } }
     + \eta_{ O }\frac{ \partial z ^{ L }_{ o' }(x) }{ \partial O_{ o''d } }\frac{ \partial z^{ L }_{ o }(y) }{ \partial O_{ o''d  } } \Big ) \Big \rangle \ .
 \end{align}
-This questionable assumption, which appears to be made in \cite{yang2022tensor}, is at least
-justifiable in the limit of a mean-squared-error loss or in the essentially-equivalent limit where
-the loss is well-approximated as a quadratic expansion about its minimum. Using
-\eqref{app_eq_mup_expectation_vals} with this assumption gives
+
+This questionable assumption, which appears to be made in \cite{yang2022tensor} as well as
+\cite{physicalDL}, is at least justifiable in the limit of a mean-squared-error loss or in the
+essentially-equivalent limit where the loss is well-approximated as a quadratic expansion about its
+minimum. Using \eqref{app_eq_mup_expectation_vals} with this assumption gives
 \begin{align}
     \left \langle \Delta z^{ L }_{ o }\left ( y \right ) \right \rangle &\approx
     - \left \langle \frac{ \partial \mathcal{L}(z(x)) }{\partial z ^{ L }_{ o }  }\right\rangle \times  \frac{ \left ( \eta_{ I } x \cdot y
@@ -750,15 +755,17 @@ neural tangent kernel when $ \ell=L $. These obey recursion relations, from the 
 \end{align}
 Demanding that the true neural tangent kernel $ N^{ L }_{ oo' } $ be width-independent and that all
 layers provide parametrically-equal contributions lands us on the same equations and solutions as
-above. Extending this analysis to higher orders in $ \eta $,
+above\footnote{The equivalence follows from the fact that $ \left\langle \Delta z^{ L }_{ o }
+\right\rangle = -  \left\langle \frac{ \partial \Lcal  }{ \partial o' } N^{ L }_{ oo' }
+\right\rangle  $}. Extending this analysis to higher orders in $ \eta $,
 \cite{yaida2022metaprincipledfamilyhyperparameterscaling} derives another bound: $ s\le 1 $, placing
-muTransfer at the edge of the bounded region.
+muTransfer's prescription at the edge of the bounded region.
 
 \subsubsection{Adam}
 
 Since Adam(W), not SGD, is the de facto optimizer of choice, we need to extend the above arguments.
 A quick and dirty assumption which leads to a reasonable (and phenomenologically supported) scaling
-result is to a assume that the SGD and Adam updates generally point in the same direction and that
+result is to assume that the SGD and Adam updates generally point in the same direction and that
 elements of the Adam updates are all $ \Ocal \left( 1 \right)  $.
 
 That is, let the Adam update for some weight $ W_{ de }\in \mathbb{R}^{ D\times E } $ be, schematically,
@@ -768,11 +775,14 @@ That is, let the Adam update for some weight $ W_{ de }\in \mathbb{R}^{ D\times 
  while  $ \Delta^{ {\rm Adam} }    W_{ de } =- \frac{ \partial \Lcal }{ \partial W_{ de } } $,
  omitting the learning rate and where expectation values are really corrected exponential moving
  averages.  Then assume that a relation of the form $ \Delta^{ {\rm Adam} }    W_{ de }\approx
- \alpha_{ W } \Delta^{ {\rm SGD} }    W_{ de } $ holds for some $ \alpha_{ W } $, such that this
- replacement can be made in any expectation value while only inducing small errors, in a way we will
- not attempt to quantify.
+ \alpha_{ W } \Delta^{ {\rm SGD} }    W_{ de } $ holds for some $ \alpha_{ W } $, i.e. that the Adam
+ and SGD updates typically point in the same direction and are approximately related by an overall
+ factor\footnote{This is exactly true in the $ \beta_{ 1  }\longrightarrow 0 $ limit, using the
+ \href{https://pytorch.org/docs/stable/generated/torch.optim.Adam.html}{\texttt{torch}
+parameterization} of Adam (which is the opposite of the usual regime).}, such that this replacement can be made in any expectation value while
+only inducing small errors (whose size we will not attempt to quantify).
 
- We can then determine the value of $ \alpha_{ W } $ through
+With these assumptions, we can determine the value of $ \alpha_{ W } $ through
  \begin{align}
      \left\langle \Delta^{ {\rm Adam} }    W_{ de }\Delta^{ {\rm Adam} }    W_{ de } \right\rangle
      &\approx \alpha_{ W }^{ 2 } \left\langle \Delta^{ {\rm SGD} }    W_{ de }\Delta^{ {\rm SGD} }    W_{ de } \right\rangle \ .
@@ -817,6 +827,28 @@ when $ s=1 $.}
     \eta_{ \ell } \longrightarrow \eta_{ \ell } \lambda^{ \frac{ s-3 }{ 2 } }\ , \quad
     \eta_{ O } \longrightarrow\frac{ \eta_{ O } }{ \lambda } \quad \label{app_eq_mup_lr_lambda_scaling_adam} ({\rm Adam}) \ .
 \end{align}
+
+
+\subsubsection{Activations}
+
+Adding in non-trivial activation functions, such that $ z^{ \ell }_{ d } = W^{ \ell }_{ dd' }
+\phi\left ( z^{ \ell-1 }_{ d' } \right )  $, does not qualitatively change the picture. The two
+relatively minor changes are:
+\begin{itemize}
+    \item The conditions for maintaining $ z^{ \ell }\sim \Ocal \left( 1 \right)  $ in the forwards
+        pass are slightly altered, by $ \Ocal \left( 1  \right)  $ factors\footnote{E.g. for $
+        \texttt{relu} $ we could double the variance to keep unit covariance of the intermediates: $
+        \left\langle W^{ \ell  }_{ de } W^{ \ell }_{
+    d'e'  }  \right\rangle = \frac{ 2 }{ D_{ \ell-1  } }\delta_{ dd'  }\delta_{ ee'  }  \implies
+\left\langle z^{ \ell  }_{ d }z^{ \ell  }_{ d' } \right\rangle= \delta_{ dd' }$.}.
+    \item The chain rule factors which
+    were previously $ \frac{ \partial z^{ \ell }_{ d } }{ \partial z^{ \ell-1 }_{ d' } } = W ^{ \ell }_{
+    dd' } $ now turn into $ \frac{ \partial z^{ \ell }_{ d } }{ \partial z^{ \ell-1 }_{ d' } } = W ^{ \ell }_{
+    dd' }\phi'\left ( z^{ \ell-1 }_{ d' } \right ) $.
+\end{itemize}
+Both of these affect scaling with depth, $ L $, but not the scaling with width
+\eqref{app_eq_mup_width_scaling} in any essential way.
+
 
 
 
