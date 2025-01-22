@@ -16,6 +16,9 @@
 #let CUMSUM = `cumsum`
 #let SEGSUM = `segsum`
 #let SUM = `sum`
+#let MHA = `MHA`
+#let TOPK = `top_k`
+#let TR = `Trace`
 
 
 #let horizontalrule = line(start: (25%, 0%), end: (75%, 0%))
@@ -493,7 +496,7 @@ Sec.~@subsubsec_embedding_and_pe.
 
 ==== All Together
 <all-together>
-It is then relatively straightforward to tie everything together. In
+It is then relatively straightforward to tie every thing together. In
 code, we can first create a transformer block like which corresponds to
 the schematic function
 $
@@ -770,7 +773,7 @@ For flash attention, we no longer shuttle the attention scores off-chip,
 but $k \, v$ are repeatedly moved back and forth. These transfers form
 most of the memory operations in the inner loop above, which access
 $cal(O) ( I J C H ) ~
-cal(O) ( \\frac{ H S ^2 }{ R } )$ elements over the
+cal(O) (  (H S ^2 )/ R  )$ elements over the
 lifetime of the algorithm (per attention head). The factor $H \/ R$
 determines the memory-access advantage, and this number is bound by the
 on-chip memory size. The on-chip bytes from the queries, keys, and
@@ -1073,7 +1076,7 @@ be computed.]
   $
     h_( s e n ) &= exp ( Delta_( s e ) W^(A)_( e n ) ) h_( (s-1)e n) + Delta_( s e )B_( s n )x_( s e )\
     y_( s e ) &= C_( s n )h_( s e n ) + W^( D )_( e )x_( s e ) \
-    => y_( s e ) &= C_( s n ) (sum_( s\'=0 )^( s )e^( Delta_( s e )W^(A)_( e n ) )times ... times e^( Delta_( (s\'+1)e )W^(A)_( e n ) ) Delta_( s\'e ) B_( s\'n ) x_( s\'e ) ) + W^( D )_( e ) x_( s e )\
+    => y_( s e ) &= C_( s n ) (sum_( s\'=0 )^( s )e^( Delta_( s e )W^(A)_( e n ) ) times ... times e^( Delta_( (s\'+1)e )W^(A)_( e n ) ) Delta_( s\'e ) B_( s\'n ) x_( s\'e ) ) + W^( D )_( e ) x_( s e )\
     &= C_( s n ) (sum_( s\'=0 )^( s )product_( s\'\'=s\'+1 )^( s )e^( Delta_( s\'\'e )W^(A)_( e n ) ) Delta_( s\'e ) B_( s\'n ) x_( s\'e ) ) + W^( D )_( e ) x_( s e )
   $
   $y_(s e) in bb(R)^(S times E)$ <algo_mamba1_scan>
@@ -1120,7 +1123,7 @@ The updated model:
   Elementwise non-linearity (`F.silu` default)
   $x_(s e)^4 = mono("selective_scan2") (x_(s e)^3)$ Selective scan (see
   below).
-  $x^( 5 )_( s e ) = NORM (x^( 4 )_( s e )times.circle phi ( x^( 0 )_( s e ) ) )_( e )$
+  $x^( 5 )_( s e ) = NORM (x^( 4 )_( s e ) times.circle phi ( x^( 0 )_( s e ) ) )_( e )$
   Elementwise product, non-linearity, and norm (`RMS` default)
   $z_(s d) = W_(d e)^O x_(s e)^5$ Project back down.
   $z_(s d) in bb(R)^(S times D)$ <algo_mamba_2>
@@ -1147,7 +1150,7 @@ latter optionally applies a norm operator post-projection.];.
   to $h_((- 1) g a h n) = 0$: $
   h _( s g a h n ) &= exp  ( Delta _( s a ) W^(A) _( a )  ) h _( (s-1)g a h n) + Delta _( s a )B _( s g n )x _( s a h )\
   y _( s a h ) &= C _( s g n )h _( s g a h n ) + W ^( D ) _( a )x _( s a h ) \
-  => y _( s a h ) &= C _( s g n ) (sum _( s\'=0 )^( s )e^( Delta _( s a )W^(A) _( a ) )times ... times e^( Delta _( (s\'+1)a )W^(A) _( a ) ) Delta _( s\'a )B _( s\'g n ) x _( s\'a h ) ) + W ^( D ) _( a ) x _( s a h )\
+  => y _( s a h ) &= C _( s g n ) (sum _( s\'=0 )^( s )e^( Delta _( s a )W^(A) _( a ) ) times ... times e^( Delta _( (s\'+1)a )W^(A) _( a ) ) Delta _( s\'a )B _( s\'g n ) x _( s\'a h ) ) + W ^( D ) _( a ) x _( s a h )\
   &= C _( s g n ) (sum _( s\'=0 )^( s )product_( s\'\'=s\'+1 )^( s )e^( Delta _( s\'\'a )W^(A) _( a ) ) Delta _( s\'a )B _( s\'g n ) x _( s\'a h ) ) + W ^( D ) _( a ) x _( s a h )
   $ $y_(s e) = y_(s (a h))$ Concatenate the heads back
   together. $y_(s e) in bb(R)^(S times E)$ <algo_mamba2_scan>
@@ -1197,7 +1200,7 @@ choices just make the analogy more readily recognizable in Mamba2.
 Some more details about how to compute the recursion solution in
 Algo.~@algo_mamba2_scan. Similarly to the previous section, let
 $
-  z_( s a h ) &= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) )times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) )\
+  z_( s a h ) &= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) ) times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) )\
   &eq.triple C_( s g n )cal(A)_( s s\'a )Delta_( s\'a )B_( s\'g n ) x_( s\'a h )\
   &eq.triple C_( s g n )cal(A)_( s s\'a )cal(B)_( s\'g a n h )
 $ The above is the most complex part of the Mamba2
@@ -1233,7 +1236,7 @@ $Delta_(s a) W_a^A = A_(s a) = A_((c l) a) = A_(c l a)$ so that
 $
   cal(A)_( s s\'a ) &=
   cases(
-  e^( A_( s a ))times ... times e^( A_( (s\'+1)a )) =exp ( sum_( s\'\'=s\'+1 )^( s )A_( s\'\'a ) ) wide & s >= s\',
+  e^( A_( s a )) times ... times e^( A_( (s\'+1)a )) =exp ( sum_( s\'\'=s\'+1 )^( s )A_( s\'\'a ) ) wide & s >= s\',
   0 & s \< s\'
   )\
   &eq.triple e^( bold(A)_( s s\'a ) ) .
@@ -1242,7 +1245,7 @@ above turns into (no sum over the repeated $c$-index):
 $
   cal(A)_( c c' l l\'a ) &=
   cases(
-  e^( A_( c l a ))times ... times e^( A_( c(l\'+1)a )) =exp ( sum_( l\'\'=l\'+1 )^( l )A_( c l\'\'a ) ) wide & l >= l\' ,
+  e^( A_( c l a )) times ... times e^( A_( c(l\'+1)a )) =exp ( sum_( l\'\'=l\'+1 )^( l )A_( c l\'\'a ) ) wide & l >= l\' ,
   0 & l \< l\'
   )\
   &eq.triple e^( bold(A)_( c c' l l\'a ) ) .
@@ -1379,17 +1382,16 @@ parameters. Significant factors include:
 Because the activation counting is a little more involved, it is in its
 own section.
 
-/*
 #block[
   Essentials Memory costs count the elements of all tensors in some
   fashion, both from model parameters and intermediate representations.
   The gradient and optimizer state costs scale with the former quantity:
-  $cal(O)  ( N _( "params" )  )  cal(O)  ( L D ^2  )$,
+  $cal(O)  ( N _"params"  )  cal(O)  ( L D ^2  )$,
   only counting the dominant contributions from weight matrices.
   Activation memory scales with the latter, which for a -shaped input
-  gives $cal(O)  ( BDLS  )$ contributions from tensors
+  gives $cal(O)  ( B D L S  )$ contributions from tensors
   which preserve the input shape, as well as
-  $cal(O) ( ABLS ^2 )$ factors from attention matrices.
+  $cal(O) ( A B L S ^2 )$ factors from attention matrices.
 
 ]
 ==== No Sharding
@@ -1409,7 +1411,7 @@ is used, hence we also address that topic, briefly. We will assume the
 use of #footnote[Which stores
 #link("https://pytorch.org/docs/stable/generated/torch.optim.Adam.html")[two different running averages]
 per-model parameter.] throughout, for simplicity and concreteness. It
-will sometimes be useful below to let $p$ to denote the precision in
+will some times be useful below to let $p$ to denote the precision in
 bytes that any given element is stored in, so corresponds to $p = 4$,
 for instance. Ultimately, we primarily consider vanilla training in
 $p = 4$ precision and / ($p = 4$/ $p = 2$) mixed-precision, other,
@@ -1418,15 +1420,13 @@ variable where we can.
 
 Without mixed precision, the total cost of the ($p = 4$ bytes) model and
 optimizer states in bytes is then $
-M _( rm model) & = 4 N _( rm params )  , quad M_( rm optim ) = 8 N _( rm params )
-quad ((rm no  mixed  precision, ) p=4)
-<eq_optimizer_states_mem_no_mp>
-$ where, from the previous section, the pure
+M _"model" & = 4 N _"params"  , quad M_"optim" = 8 N _"params"
+quad ( "no  mixed  precision", ) p=4)
+$<eq_optimizer_states_mem_no_mp> where, from the previous section, the pure
 parameter-count of the decoder-only Transformers architecture is
 $
-N _( rm params ) & approx (4 + 2E) L D ^2 times  ( 1 + cal(O) ( frac( V )( DL )
-) + cal(O) ( frac( 1 )( D ) )  )  . <eq_approx_params_no_sharding>
-$ where the first term comes from the weight
+  N_"params" & approx (4 + 2E) L D^2 times ( 1 + cal(O) ( V / ( D L ) ) + cal(O) ( 1 / D ) ) .
+$<eq_approx_params_no_sharding> where the first term comes from the weight
 matrices#footnote[So, in the usual $E = 4$ case, the layers are twice as
 costly as the layers.];, the first omitted subleading correction term is
 the embedding matrix, and the last comes from biases, instances, and
@@ -1461,10 +1461,10 @@ materialized within the lifetime of the context manager.];:
 Confusingly, the master copy weights are usually accounted for as part
 of the optimizer state, in which case the above is altered to
 $
-M _( rm model) & = 2 N _( rm params )  , quad M_( rm optim ) = 12 N _( rm params )
-quad ((rm mixed  precision)) .
-<eq_optimizer_states_mem_mp>
-$ The optimizer state is now six times the cost of the
+  M_"model" & = 2 N_"params" , quad M_"optim" = 12 N_"params"
+  quad ("mixed precision") .
+$<eq_optimizer_states_mem_mp>
+The optimizer state is now six times the cost of the
 actual model used to process data and the costs of
 #link(<eq_optimizer_states_mem_mp>)[\[eq_optimizer_states_mem_mp\]]
 are more than those of
@@ -1478,8 +1478,8 @@ training is so much more expensive than inference.
 <gradients>
 Gradients are pretty simple and always cost the same regardless of
 whether or not mixed-precision is used: $
-M_( rm grad) & = 4 N _( rm params ) <eq_grad_memory>  .
-$ In mixed precision, even though the gradients are
+M_"grad" & = 4 N _"params"   .
+$<eq_grad_memory> In mixed precision, even though the gradients are
 initially computed in $p = 2$, they
 #link("https://huggingface.co/docs/transformers/v4.20.1/e n/perf_train_gpu_one#anatomy-of-models-memory")[have to be converted]
 to $p = 4$ to be applied to the master weights of the same precision.
@@ -1508,9 +1508,8 @@ order to backpropagate. In torch, the mask is a tensor, but
 these use one #emph[byte] of memory per element, rather than one bit
 #footnote[As you can verify via];. Given this, the total memory cost
 from activations is $
-M _( rm act ) ^texttt(Attention) & = BLS  ( (5p+1)D + (2p+1)AS  )  .
-<eq_att_actmem_vanilla>
-$
+M _"act" ^"Attention" & = B L S  ( (5p+1)D + (2p+1)A S  )  .
+$<eq_att_actmem_vanilla>
 
 ====== MLP Activations
 <mlp-activations>
@@ -1519,15 +1518,14 @@ into the inputs of the non-linearity, whose same-shaped outputs are then
 passed into the last layer, summing to $(2 E + 1) B D S$ total elements
 thus far. Adding in the dropout mask, the total memory requirement
 across all layers is: $
-M _( rm act ) ^texttt(MLP) & = (2Ep+p+1)BDLS .
-<eq_mlp_actmem_vanilla>
-$
+M _"act" ^MLP & = (2 E p+p+1)B D L S .
+$<eq_mlp_actmem_vanilla>
 
 ====== LayerNorm, Residual Connections, and Other Contributions
 <layernorm-residual-connections-and-other-contributions>
 Then the last remaining components. The instances each have $B D S$
 inputs and there are two per transformer block, so
-$M _( "act" ) ^texttt(LayerNorm) = 2pBDLS$, and there is an
+$M _"act" ^LN = 2 p B D L S$, and there is an
 additional instance at the end of the architecture#footnote[Following
 @korthikanti2022reducing we will neglect this in the below sum, an
 $cal(O) ( 1/L
@@ -1537,19 +1535,19 @@ independent of inputs). Then, there are additional contributions from
 pushing the last layer's outputs through the language-model head and
 computing the loss function, but these do not scale with $L$ and are
 ultimately $ cal(O)
-( frac( V )( DL ) )$ suppressed, so we neglect them.
+(  V /( D L ) )$ suppressed, so we neglect them.
 
 ====== Total Activation Memory
 <total-activation-memory>
 Summing up the contributions above, the total activation memory cost
 per-layer is $
-M _( "act" ) ^( "total" ) & approx 2BDLS  ( p(E+4) + 1 + cal(O) ( frac(
-V)( DL ) )  )
-+ ABLS ^2  ( 2p+1 ) <eq_act_mem_total_no_sharding> .
-$ Evaluating in common limits, we have:
+M _"act" ^"total" & approx 2B D L S  ( p(E+4) + 1 + cal(O) (
+V/( D L ) )  )
++ A B L S ^2  ( 2p+1 )  .
+$<eq_act_mem_total_no_sharding> Evaluating in common limits, we have:
 $
-M _( "act" ) ^( "total" ) | _( E=4, p=4 ) & =BLS  ( 66 D+15AS  ) \
-M _( "act" ) ^( "total" ) | _( E=4, p=2 ) & =BLS  ( 34 D+5AS  )
+  M_"act"^"total" |_( E=4, p=4 ) & =B L S ( 66 D+15 A S ) \
+  M_"act"^"total" |_( E=4, p=2 ) & =B L S ( 34 D+5 A S )
 $
 
 ====== When does mixed-precision reduce memory?
@@ -1565,10 +1563,10 @@ parallelism degree $T$ actually drops out in the comparison (since both
 form of memory are decrease by $1 \/ T$, so this restriction can be
 lifted.];, the minimum batch size which leads to memory savings is
 $
-B _( "min" ) & = frac( 6 D ^2 )( 8 D S + A S ^2 )<eq_min_mp_batch_size> .
-$ Plugging in numbers for the typical
+  B_"min" & = ( 6 D^2 ) / ( 8 D S + A S^2 ) .
+$<eq_min_mp_batch_size> Plugging in numbers for the typical
 $cal(O) ( 40  "GiB" )$ model in the Summer of 2023
-gives $B _( "min" )  cal(O) ( 1)$, so
+gives $B _"min"  cal(O) ( 1)$, so
 mixed-precision is indeed an overall savings at such typical scales.
 
 #block[
@@ -1608,9 +1606,9 @@ mixed-precision is indeed an overall savings at such typical scales.
 
   ====== Example
   <example>
-  : is another instance where this occurs, since $
-  partial _( i ) SM  ( x _( j )  ) &= delta _( ij )SM  ( x _( j )  ) - SM  ( x _( i )  ) SM  ( x _( j )  ) <eq_softmax_derivative>
-  $ Because of this, the actual amount of activation
+  $SM$ is another instance where this occurs, since $
+  partial _( i ) SM  ( x _( j )  ) &= delta _( i j )SM  ( x _( j )  ) - SM  ( x _( i )  ) SM  ( x _( j )  )
+  $<eq_softmax_derivative> Because of this, the actual amount of activation
   memory due to the attention layer after the forwards pass is
   #link(<eq_att_actmem_vanilla>)[\[eq_att_actmem_vanilla\]] with
   $2 p arrow.r p$ in the $cal(O) ( S
@@ -1618,54 +1616,13 @@ mixed-precision is indeed an overall savings at such typical scales.
   necessary peak memory.
 
 ]
-==== Case Study: Mixed-Precision GPT3 <subsec_gpt_mem_study>
-Let's run through the numbers for mixed-precision GPT3 with
-#link("https://bmk.sh/2020/05/29/GPT-3-A-Brief-Summary/")[parameters];:
-$
-  L & = 96 med \, quad D = 12288 med \, quad A = 96 med \, quad V = 50257 med .
-$
-We are leaving the sequence-length unspecified, but the block-size
-(maximum sequence-length) is $K = 2048$.
 
-Start by assuming no parallelism at all. The total (not per-layer!)
-non-activation memory is $
-M _( "non-act" ) ^ texttt(GPT-3) & approx 1463 "TiB"
-$ which can be broken down further as
-$
-M _( "params" ) ^ texttt(GPT-3) & approx 162 "TiB"  , quad
-M _( "grads" ) ^ texttt(GPT-3) approx 325 "TiB" , quad
-M _( "optim" ) ^ texttt(GPT-3) approx 975 "TiB" .
-$ The embedding matrix only makes up $approx .3 %$ of
-the total number of parameters, justifying our neglect of its
-contribution in preceding expressions.
-
-The activation memory is $
-M _( "act" ) ^ texttt(GPT-3) & approx 3 times 10 ^( -2 )BStimes  ( 1 + frac( S
-)( 10 ^( 3 ) )  )  "TiB"  .
-$ Note that the attention matrices, which are
-responsible for $cal(O) ( S ^2 )$ term, will provide
-the dominant contribution to activation memory in the usual
-$S gt.tilde 10^3$ regime.
-
-In the limit where we process the max block size ($S = K = 2048$), the
-ratio of activation to non-activation memory is $
-frac( M _( "act" ) ^ texttt(GPT-3))( M _( "non-act" ) ^ texttt(GPT-3) )| _(
-S=2048 ) & approx .2 B  .
-$ So, the activation memory is very significant for
-such models.
-
-Using tensor parallelism into the above with the maximal $T = 8$ which
-can be practically used, the savings are significant. The total memory
-is now $
-M _( "total" ) ^( texttt(GPT-3) ) & approx 187 "TiB" + 10 ^( -2 )BS + 5 times 10 ^(
--6) BS ^2 .
-$
 
 === Training FLOPs <sec_flops_training>
 The total number of floating point operations (FLOPs)#footnote[The
 notation surrounding floating-point operations is very confusing because
 another quantity of interest is the number of floating-point operations
-a given implementation can use #emph[per-second];. Sometimes, people use
+a given implementation can use #emph[per-second];. Some times, people use
 FLOPS or FLOP/s to indicate the rate, rather than the gross-count which
 has the lower case “s\", FLOPs, but there's little consistency in
 general. We will use FLOPs and FLOP/s.] needed to process a given batch
@@ -1687,7 +1644,7 @@ shape throughout.
 #block[
   Essentials The number of FLOPs to push a batch of $B$ of sequence-length
   $S$ examples through the forwards-pass of a decoder-only transformer is
-  approximately $2BS N _( "params" )$ where the number of
+  approximately $2 B S N _"params"$ where the number of
   parameters accounts for any reductions due to tensor- and
   sequence-parallelism#footnote[A quick argument: a computation of the
 form $T_(a_0 dots.h a_n j) = V_(a_0 dots.h a_A i) M_(i j)$ requires
@@ -1699,7 +1656,7 @@ passing a -shaped tensor through the Transformer architecture would give
 $tilde.op 2 B S times$(sum of sizes of all weight-matrices) FLOPs, and
 that this last factor is also approximately the number of parameters in
 the model (since that count is dominated by weights). Thus, FLOPs
-$approx 2BSN _(
+$approx 2B S N _(
                 "params"  )$. This is the correct as long as the
 self-attention FLOPs with
 $cal(O) ( S ^2 )$-dependence which we didn't account
@@ -1708,6 +1665,7 @@ for here are actually negligible (true for $S lt.tilde 10 D$).];. The
   true as long as $S lt.tilde D$).
 
 ]
+
 ==== No Recomputation
 <no-recomputation>
 Start with the case where there is no recomputation activations. These
@@ -1761,12 +1719,13 @@ for brevity, the forward-FLOPs cost of the sub-computation is therefore
 $2 D I J$.
 
 Adding indices, the two derivatives we need are $
-frac( partial cal(L) )( partial W _( ij ) ) & = frac( partial cal(L) )( partial z \'_( d _( 0 ) ... d _( n )i ) )phi\'  ( ( W dot z  ) _( d _( 0 )... d _( n )i )  )
+( partial cal(L) )/( partial W _( i j ) ) & = ( partial cal(L) )/( partial z \'_( d _( 0 ) ... d _( n )i ) )phi\'  ( ( W dot z  ) _( d _( 0 )... d _( n )i )  )
 z _( d _( 0 )... d _( n ) j ) \
-frac( partial cal(L) )(partial z _( d _( 0 )... d _( n )j ) ) & = frac( partial cal(L)
-)( partial z \'_( d _( 0 ) ... d _( n )i ) )phi\'  ( ( W dot z  ) _( d _(
-0 )... d _( n )i )  ) W _( ij ) ,<eq_backprop_derivatives>
-$ which have shapes and , respectively. On the right
+( partial cal(L) )/(partial z _( d _( 0 )... d _( n )j ) ) & = ( partial cal(L)
+)/( partial z \'_( d _( 0 ) ... d _( n )i ) )phi\'  ( ( W dot z  ) _( d _(
+0 )... d _( n )i )  ) W _( i j ) ,
+$<eq_backprop_derivatives>
+which have shapes and , respectively. On the right
 side, $z$ and $W dot.op z$ are cached and the element-wise computation
 of $phi' (W dot.op z)$ has negligible FLOPs count, as discussed
 above: its contribution is $cal(O)
@@ -1800,51 +1759,54 @@ The grand sum is then#footnote[With a large vocabulary, the cost of the
 final language model head matrix multiply can also be significant, but
 we have omitted its $L$-independent, $2 B D S V$ contribution here.];:
 $
-C ^( "model" ) & approx 12 BDLS  ( S +  ( 2+E  )D  ) <eq_model_flops> .
-$ We can also phrase the FLOPs in terms of the number
+  C^"model" & approx 12 B D L S ( S + ( 2+E )D ) .
+$<eq_model_flops>
+We can also phrase the FLOPs in terms of the number
 of parameters
-#link(<eq_approx_params_tensor_parallel>)[\[eq_approx_params_tensor_parallel\]]
+/* #link(<eq_approx_params_tensor_parallel>)[\[eq_approx_params_tensor_parallel\]] */
 as $
-C ^( "model" ) big| _( T=1 ) & = 6BS N _( "params" )times  ( 1 + cal(O) ( S/D)  )
+C ^"model" | _( T=1 ) & = 6B S N _"params" times  ( 1 + cal(O) ( S/D)  )
 $ where we took the $T = 1 \, D gt.double S$ limit for
 simplicity and we note that $B S$ is the number of total tokens in the
 processed batches.
 
 === Training Time <sec_train_time>
-Training is generally compute bound (see App.~@app_compute_mem_bound)
+/* Training is generally compute bound (see App.~@app_compute_mem_bound) */
 and based on the results of Sec.~@sec_flops_training the quickest one
 could possibly push a batch of data through the model is
 $
-t _( "min" ) & = frac( C ^( "model" ) )( lambda _( "FLOP/s" ) ) . <eq_tmin_model>
-$ Expanding to the entire training run, then with
+  t_"min" & = ( C^"model" ) / ( lambda_"FLOP/s" ) .
+$<eq_tmin_model>
+Expanding to the entire training run, then with
 perfect utilization training will take a time $
-t _( "total" ) & approx frac(6N _( "params" ) N _( "tokens" ))( lambda _( "FLOP/s" ) ) . <eq_training_rule_of_thumb>
-$ Adjust $lambda _( "FLOP/s" )$ to the actual
+t _"total" & approx (6N _"params" N _"tokens")/( lambda _"FLOP/s" ) .
+$<eq_training_rule_of_thumb>
+Adjust $lambda _"FLOP/s"$ to the actual
 achievable FLOP/s in your setup to get a realistic estimate.
 
-How many tokens should a model of size $N _( "params" )$?
-Scaling laws (Sec.~@sec_scaling_laws) provide the best known answer, and
+How many tokens should a model of size $N _"params"$?
+/* Scaling laws (Sec.~@sec_scaling_laws) provide the best known answer, and */
 the Summer 2023 best-guess is that we optimally have
-$N _( "tokens" )approx 20 N _( "params" )$. So that the
+$N _"tokens"approx 20 N _"params"$. So that the
 above is $
-t _( "total" ) & approx frac(120N _( "params" ) ^2)( lambda _( "FLOP/s" ) ) ,
+t _"total" & approx (120N _"params" ^2)/( lambda _"FLOP/s" ) ,
 $ leading to quadratic growth in training time.
 
 Note that the above is only correct if we are actually only spending
-$C ^( "model" )$ compute per iteration. This is not correct if
+$C ^"model"$ compute per iteration. This is not correct if
 we use gradient checkpointing and recomputation, in which case we
 alternatively spend true compute
-$C ^( "hardware" ) \> C ^( "model" )$, a distinction
+$C ^"hardware" \> C ^"model"$, a distinction
 between #strong[hardware FLOPs] and #strong[model FLOPs];. Two
 corresponding efficiency measures are #strong[model FLOPs utilization]
 (MFU) and #strong[hardware FLOPs utilization] (HFU). If our iterations
-take actual time $t _( "iter" )$, then these are given by
+take actual time $t _"iter"$, then these are given by
 $
-"MFU" & = frac( t _( "iter" ) )( t _( "min" ) ^( "model" ) )  , quad "HFU" = frac( t _( "iter" ) )( t _( "min" ) ^( "hardware" ) )  , <eq_mfu>
-$ where $t _( "min" ) ^( "model" )$ is
+  "MFU" & = ( t_"iter" ) / ( t_"min"^"model" ) , quad "HFU" = ( t_"iter" ) / ( t_"min"^"hardware" ) ,
+$<eq_mfu> where $t _"min" ^"model"$ is
 #link(<eq_tmin_model>)[\[eq_tmin_model\]] and
-$t _( "min" ) ^( "hardware" )$ is similar but using
-$C ^( "hardware" )$.
+$t _"min" ^"hardware"$ is similar but using
+$C ^"hardware"$.
 
 === Scaling Laws <sec_scaling_laws>
 Empirically-discovered scaling laws have driven the race towards larger
@@ -1861,7 +1823,7 @@ The central parameters are:
 
 - The number of non-embedding model parameters, as excising embedding
   params was found to generate cleaner scaling laws. Because our
-  $N _( "params" )$ has already been typically neglecting these
+  $N _"params"$ has already been typically neglecting these
   parameters, we will just use this symbol in scaling laws and keep the
   above understanding implicit.#footnote[Presumably, the scaling laws
   are cleaner with these neglected because these params do not
@@ -1871,7 +1833,7 @@ The central parameters are:
 - $C$: total compute, often in units like PFLOP/s-days $tilde.op 10^20$
   FLOPs
 
-- $N _( "tokens" )$: dataset-size in tokens
+- $N _"tokens"$: dataset-size in tokens
 
 - $cal(L)$: cross-entropy loss in nats
 
@@ -1893,23 +1855,26 @@ the limit] where only one of this factors is bottlenecking the
 model#footnote[Unclear to me how you know when this is the case?];. The
 laws (in our notation):
 
-- $cal(L) (N _( "params" )) approx  ( N _( "params" )^( star ) / N _( "params"
+- $cal(L) (N _"params") approx  ( N _"params"^( star ) / N _( "params"
   )  ) ^( alpha _( N ) )$, with
   $alpha_N approx 0.076$ and
-  $N _( "params" ) ^( star ) approx
-  8.8times 10 ^( 13 )$
+  $N_"params"^( star ) approx
+    8.8 times 10^( 13 )$
 
-- $cal(L) (N _( "tokens" )) approx  ( N _( "tokens)" ^( star ) / N _( "tokens"
+- $cal(L) (N _"tokens") approx  ( N _( "tokens)" ^( star ) / N _( "tokens"
   )  ) ^( alpha _( T ) )$, with
   $alpha_T approx 0.095$ and
-  $N _("tokens" ) ^( star ) approx
-  5.4times 10 ^( 13 )$
+  $N_("tokens" )^( star ) approx
+    5.4 times 10^( 13 )$
 
 - $cal(L) (C) approx  ( C ^( star ) / C
    ) ^( alpha _( C ) )$, with
   $alpha_C approx 0.050$ and $C^star.op approx 3.1 times 10^8$
   PFLOP/s-days, where the batch size was assumed to be chosen to be
   compute optimal per the criteria they outline
+
+
+
 /*
 #figure(image("figures/SimplePowerLaws.pdf"),
   caption: [
@@ -1931,18 +1896,17 @@ laws (in our notation):
 ==== Chinchilla Scaling Laws
 <chinchilla-scaling-laws>
 As of Summer 2023, the Chinchilla scaling laws in @hoffmann2022training
-are the de facto best scaling laws for guiding training. The central
+are the d e facto best scaling laws for guiding training. The central
 difference between @hoffmann2022training and @kaplan2020scaling is that
 in the former they adjust their cosine learning-rate schedule to reflect
 the amount of planned training, while in the latter they do
 not#footnote[The learning-rate schedule consist of a linear warm-up
 stage from a very small $eta$ up to the largest value
-$eta _( "max" )$, after which the cosine bit kicks in:
-$eta (s)= eta _( "min" ) +  ( eta _( "max" ) - eta  _( (rm
-                min) )  ) times cos  (frac( pi s )( 2 s _( "max" ) )  )$
+$eta _"max"$, after which the cosine bit kicks in:
+$eta (s)= eta _"min" +  ( eta _"max" - eta  _"min"  ) times cos  (( pi s )/( 2 s _"max" )  )$
 with $s$ the step number. In Fig.~A1 of @hoffmann2022training they
 demonstrate that having the planned $s
-            _( "max" )$ duration of the scheduler be longer than
+            _"max"$ duration of the scheduler be longer than
 the actual number of training steps is detrimental to training (they do
 not study the opposite regime), which is effectively what was done in
 @kaplan2020scaling. Probably the more important general point is again
@@ -1952,7 +1916,7 @@ learning-rate scheduler.];.
 
 Several different analyses are performed which all give very similar
 results. The outputs are the optimal values of
-$N _( "params" ), N _( "tokens" )$ given a compute budget
+$N _"params", N _"tokens"$ given a compute budget
 $C$.
 
 - They fix various buckets of model sizes and train for varying lengths.
@@ -1969,21 +1933,18 @@ $C$.
   @hoffmann2022training they model the scaling of the test loss, while
   in @kaplan2020scaling they use the training loss.];:
   $
-  cal(L) (N _( "params" ), N _( "tokens" )) & =E + frac( A )( N _( "params" ) ^( alpha ) ) + frac( B )( N _( "tokens" ) ^( beta ) ) <eq_chinchilla>  ,
-
-  $ fit over a large range of parameter and token
+    cal(L) (N_"params", N_"tokens") & =E + A / ( N_"params"^( alpha ) ) + B / ( N_"tokens"^( beta ) ) ,
+  $<eq_chinchilla> fit over a large range of parameter and token
   choices. The best-fit values are:
   $
     E & = 1.69 med \, quad A = 406.4 med \, quad B = 410.7 med \, quad alpha = 0.34 med \, quad beta = 0.28 med .
   $
-  Using $C approx 6 N _( "params)" N _( "tokens" )$, the
+  Using $C approx 6 N _( "params)" N _"tokens"$, the
   above can be minimized at fixed compute either for number of parameter
   or the size of the dataset.
 
-In all cases, the findings are that at optimality
-$N _( "params" )  N _( "tokens"
-) C ^( .5 )$: both the parameter and tokens budget should
-be scaled in equal measure.
+In all cases, the findings are that at optimality $N _"params"  N _( "tokens") C ^( .5 )$: both
+the parameter and tokens budget should be scaled in equal measure.
 
 = Fine Tuning
 <fine-tuning>
@@ -2013,29 +1974,27 @@ _( w ))$ corresponding to prefixes ($x$) and pairs of preferred and
 dispreferred completions#footnote[I guess the $l \, w$ subscripts are
 for \"lose\" and \"win\"?] ($y_l \, y_w$). The relevant components are:
 
-+ A baseline language model: $pi _( "ref" ) (y|x)$, usually a
-  supervised fine-tuned model trained on high-quality data.
++ A baseline language model: $pi _"ref" (y|x)$, usually a supervised fine-tuned model trained on
+high-quality data.
 
-+ The to-be-trained model: $pi_theta (y \| x)$, usually initialized to
-  $pi _( (rm
-  ref) ) (y|x)$. This is the #emph[policy] in the literature.
++ The to-be-trained model: $pi_theta (y \| x)$, usually initialized to $pi _"ref" (y|x)$. This is
+the #emph[policy] in the literature.
 
-+ A reward model which produces $p (y_w succ y_l \| x)$, the
-  probability#footnote[Whether one completion is preferred over another
-  is a probabalistic question since, e.g., not everyone in the
-  population will agree.] $y_w$ is favored over $y_l$. The reward
-  function $r (x \, y)$ reflects how well $y$ completes the prefix $x$,
-  in this context, and we assume the probability can be expressed in
-  terms of the reward function
-  $p (y_w succ y_l \| x) = p (r (x \, y_w) \, r (x \, y_l))$. The reward
-  model is commonly an LLM with a scalar output head attached.
++ A reward model which produces $p (y_w succ y_l \| x)$, the probability#footnote[Whether one
+    completion is preferred over another is a probabalistic question since, e.g., not everyone in
+    the population will agree.] $y_w$ is favored over $y_l$. The reward function $r (x \, y)$
+reflects how well $y$ completes the prefix $x$, in this context, and we assume the probability can
+be expressed in terms of the reward function $p (y_w succ y_l \| x) = p (r (x \, y_w) \, r (x \,
+y_l))$. The reward model is commonly an LLM with a scalar output head attached.
 
 First, a quick review of RLHF, which proceeds in stages. First,
 $cal(D)$ is used to train a reward model informed by the dataset
 $cal(D)$. The optimal reward model $r_star.op$ minimizes the binary
-cross-entropy loss over $cal(D)$, which is just $
-cal(L) _( r ) &= -E _( x, y _( l ), y _( w )  cal(D) ) ln p(y _( w ) succ y _( l )| x )  . <eq_rlhf_reward_loss>
-$ The reward model embodies human preferences and we
+cross-entropy loss over $cal(D)$, which is just
+$
+  cal(L)_( r ) &= -E_( x, y_( l ), y_( w ) cal(D) ) ln p(y_( w ) succ y_( l )| x ) .
+$<eq_rlhf_reward_loss>
+The reward model embodies human preferences and we
 want to transfer this knowledge to the language model $pi_theta$. This
 can be done by optimizing $pi_theta$ to generate completions of inputs
 that lead to large rewards, reflecting human-preferred generations. In
@@ -2043,50 +2002,47 @@ order to also keep the model from straying too far from its reference
 base, a tunable KL-divergence penalty is also added#footnote[We've
 written the above as a loss so that we're minimizing everywhere.];:
 $
-cal(L) _( "RLHF" ) &= E _(x  cal(D), y  pi _( theta )(y|x) )  ( -r _( star )
-(x, y) + beta D _( "KL" )  ( pi _( theta )(y|x)|| pi _("ref))(y|x"  )
- )  . <eq_rlhf_loss>
-$ Reinforcement-learning methods are typically used to
+  cal(L)_"RLHF" &= E_(x cal(D), y pi_( theta )(y|x) ) ( -r_( star )
+  (x, y) + beta D_"KL" ( pi_( theta )(y|x)|| pi_("ref))(y|x" ) ) .
+$<eq_rlhf_loss>
+Reinforcement-learning methods are typically used to
 optimize the $pi_theta$ model and the generation step is particularly
 costly. In particular, the usual gradient-based optimization methods
 cannot be used because the loss depends on generated tokens which are
 discontinuous (non-differentiable) functions of the model's parameters.
 
-DPO improves upon RLHF by skipping any generation step, removing the
-explicit reward function, and making the optimization problem amenable
-to gradient based methods by choosing a specific functional relation
-between the reward function $r (x \, y)$ and the preference probability
-$p (y_w succ y_l \| x)$. Whereas RLHF minimizes the loss
-$cal(L) _( "rlhf" )$ #link(<eq_rlhf_loss>)[\[eq_rlhf_loss\]]
-subject to a fixed, optimal reward function found by first minimizing
-the reward loss $cal(L) _( r )$
-#link(<eq_rlhf_reward_loss>)[\[eq_rlhf_reward_loss\]];, DPO is
-essentially derived in the opposite direction: first, find the
-functional form of $pi_theta$ which minimizes the RLHF loss for an
-arbitrary reward function, and then use this form when minimizing of the
-cross-entropy defining the reward function#footnote[This is analogous to
-minimizing the regular function $f (x \, y)$ subject to also minimizing
-$g (x)$. This can either be done by solving the second for $x_star.op$
-and minimizing $f (x_star.op \, y)$ (the RLHF strategy), or first
-solving $frac(partial f, partial y) = 0$ to find $x_star.op (y)$ and
-then minimizing $g (x_star.op (y))$ (the DPO strategy).];.
+DPO improves upon RLHF by skipping any generation step, removing the explicit reward function, and
+making the optimization problem amenable to gradient based methods by choosing a specific functional
+relation between the reward function $r (x \, y)$ and the preference probability $p (y_w succ y_l \|
+x)$. Whereas RLHF minimizes the loss $cal(L)_"rlhf"$ #link(<eq_rlhf_loss>)[\[eq_rlhf_loss\]]
+subject to a fixed, optimal reward function found by first minimizing the reward loss $cal(L) _( r
+)$ #link(<eq_rlhf_reward_loss>)[\[eq_rlhf_reward_loss\]];, DPO is essentially derived in the
+opposite direction: first, find the functional form of $pi_theta$ which minimizes the RLHF loss for
+an arbitrary reward function, and then use this form when minimizing of the cross-entropy defining
+the reward function#footnote[This is analogous to minimizing the regular function $f (x \, y)$
+subject to also minimizing $g (x)$. This can either be done by solving the second for
+$x_star.op$ and minimizing $f (x_star.op \, y)$ (the RLHF strategy), or first solving
+$frac(partial f, partial y) = 0$ to find $x_star.op (y)$ and then minimizing $g (x_star.op (y))$
+(the DPO strategy).];.
 
 The $pi_theta$ which minimizes the RLHF loss
 #link(<eq_rlhf_loss>)[\[eq_rlhf_loss\]] for an arbitrary reward
 function $r (x \, y)$ is given by#footnote[This is easy to show using
 the calculus of variations, though it's not the route taken in the
 paper. The explicit RLHF loss is
-$cal(L) _( "RLHF" ) = integral dif x thindif ythinp(x) pi _( theta  )(y|x) ( -r(x,y) +beta ln pi _(
-theta )(y|x) /pi _( "ref" )(y|x)  )$ and we want to
+$cal(L) _"RLHF" = integral dif x thin dif y thin p(x) pi _( theta  )(y|x) ( -r(x,y) +beta ln pi _(
+theta )(y|x) /pi _"ref"(y|x)  )$ and we want to
 minimize this subject to the constraint that $pi_theta (y \| x)$ is
 properly normalized. So, we use a Lagrange multiplier and extremize
-$cal(L)\'  = cal(L) _( "RLHF" )+ integral dif x thindif ythin lambda (x) pi _( theta
+$cal(L)\'  = cal(L) _"RLHF"+ integral dif x thin dif y thin lambda (x) pi _( theta
 )(y|x)$. Solving
-$frac( delta cal(L) \' )( delta pi _( theta  ) (y|x)) =0$
-yields #link(<eq_dpo_soln>)[\[eq_dpo_soln\]];.] $
-pi _(theta)(y|x) &= frac( pi _( "ref)" (y|x)e ^( r(x, y)/ beta ) )( Z(x) )  ,<eq_dpo_soln>
-$ where
-$Z(x) = integral dif ythin pi _( "ref" )(y|x)e^( r(x, y)/ beta )$
+$( delta cal(L) \' )/( delta pi _( theta  ) (y|x)) =0$
+yields #link(<eq_dpo_soln>)[\[eq_dpo_soln\]];.]
+$
+  pi_(theta)(y|x) &= ( pi_"ref" (y|x)e^( r(x, y) / beta ) ) / ( Z(x) ) ,
+$<eq_dpo_soln>
+where
+$Z(x) = integral dif y thin pi_"ref"(y|x)e^( r(x, y) / beta )$
 is a intractable normalization (partition function) factor. However, if
 $p (y_w succ y_l \| x)$ only depends on $r (x \, y_w)$ and
 $r (x \, y_l)$ through their difference#footnote[In
@@ -2100,10 +2056,10 @@ function, this is known as the Bradley-Terry model.] $sigma$, and
 eliminating the reward function in the cross-entropy loss via
 #link(<eq_dpo_soln>)[\[eq_dpo_soln\]] reduces $cal(L) _( r )$ to
 $
-cal(L) _( "DPO" ) &= -E _( x, y _( l ), y _( w )  cal(D) ) ln sigma  (beta  (ln frac( pi _(
-theta )(y_( w )|x ) )( pi _( "ref" )(y_( w )|x ) )-ln frac( pi _( theta )(y _( l )|x) )( pi
-_( "ref" )(y _( l)|x) )  ) )  , <eq_dpo_reward_loss>
-$ which we've now renamed the DPO loss. The loss
+  cal(L)_"DPO" &= -E_( x, y_( l ), y_( w ) cal(D) ) ln sigma (beta (ln ( pi_(
+      theta )(y_( w )|x ) ) / ( pi_"ref"(y_( w )|x ) )-ln ( pi_( theta )(y_( l )|x) ) / ( pi_"ref"(y_( l)|x) ) ) ) ,
+$<eq_dpo_reward_loss>
+which we've now renamed the DPO loss. The loss
 #link(<eq_dpo_reward_loss>)[\[eq_dpo_reward_loss\]] can now be
 minimized by standard, gradient based methods without any generation
 step.
@@ -2128,13 +2084,16 @@ means that $v (z - z_0) + v (z_0 - z) lt.eq 0$ for $z > 0$.];.
 KTO applies this framework to the usual text-prediction problem as in
 the following. The space of outcomes $cal(Z)$ is the reward function
 value taken to be $
-r _( theta )(x, y)&eq.triple ln frac( pi _( theta )(y|x) )( pi _( "ref))(y|x" )  , <eq_kto_reward>
-$ the difference in reference and model surprisal, as
+r _( theta )(x, y)&eq.triple ln ( pi _( theta )(y|x) )/( pi _"ref")(y|x )  ,
+$<eq_kto_reward>
+the difference in reference and model surprisal, as
 inspired by DPO. The reference point is just the expected value of the
 reward function over prefixes and trainable-model-generated completions,
-i.e., the KL divergence averaged over prefixes: $
-z _( 0 ) & eq.triple E _( y  pi _( theta )(y|x) , x  D )r _( theta )(x, y) =E _( x  D ) D _( "KL" )(pi _( theta )(y|x)|| pi _( "ref" )(y|x))  . <eq_kto_ref_pt>
-$ Splitting the space of completions into desirable and
+i.e., the KL divergence averaged over prefixes:
+$
+  z_( 0 ) & eq.triple E_( y pi_( theta )(y|x) , x D )r_( theta )(x, y) =E_( x D ) D_"KL"(pi_( theta )(y|x)|| pi_"ref"(y|x)) .
+$<eq_kto_ref_pt>
+Splitting the space of completions into desirable and
 undesirable ones, $cal(Y) = cal(Y)_D union cal(Y)_U$, the KTO
 loss#footnote[They also add a constant term to the loss for
 normalization purposes which we have omitted. The KTO loss falls into
@@ -2142,12 +2101,13 @@ the broader category of Human Aware Loss Objectives (HALOs) which are a
 general class of objectives that roughly fit into the Kahneman-Tversky
 form. See the paper for a further discussion and comparison of HALO vs
 non-HALO methods.] is taken to be: $
-cal(L)_( "KTO" ) &= - E _( x, y  D )v(r _( theta )(x, y) - z _( 0 ))\
+cal(L)_"KTO" &= - E _( x, y  D )v(r _( theta )(x, y) - z _( 0 ))\
 v(r _( theta )(x, y)-z _( 0 ))&eq.triple cases(
 lambda _( D )sigma  ( beta  ( r _( theta )(x, y) - z _( 0 )  )  ) & y in cal(Y)_( D )\
-lambda _( U )sigma  ( beta  ( -r _( theta )(x, y) + z _( 0 )  )  ) & y in cal(Y)_( U ) <eq_kto_loss>
+lambda _( U )sigma  ( beta  ( -r _( theta )(x, y) + z _( 0 )  )  ) & y in cal(Y)_( U )
 )
-$ for hyperparameters#footnote[Risk aversion would seem
+$<eq_kto_loss>
+for hyperparameters#footnote[Risk aversion would seem
 to require $lambda_U > lambda_D$, but the KTO paper empirically finds
 that the opposite regime performs better.]
 $beta \, lambda_D \, lambda_U in bb(R)^(+)$ and where $sigma$ is the
@@ -2174,7 +2134,7 @@ variety of parallelism strategies. We review some of them below.
   #link("https://www.determined.ai/blog/tp")[here.]
 
 ]
-In #strong[Tensor Parallelism];, sometimes also called #strong[Model
+In #strong[Tensor Parallelism];, some times also called #strong[Model
 Parallelism];, individual weight matrices are split across devices
 @shoeybi2020megatronlm. We consider the and layers in turn. Assume
 $T$-way parallelism such that we split some hidden dimension into
@@ -2193,6 +2153,7 @@ in a group reside on the same node, hence the usual $T = 8$.]
   dimension. In the backwards pass, another is required.
 
 ]
+
 ====== MLP
 <mlp-1>
 It is straightforward to find the reasonable ways in which the weights
@@ -2232,19 +2193,20 @@ $
 $
 The progression of tensor shapes held by any single worker is
 
+*TODO: goon - Fix*
 +
 +
 +
 
-In the backwards pass, another (see App.~@app_collective_communications)
+/* In the backwards pass, another (see App.~@app_collective_communications) */
 is needed for proper gradient computations with respect to the first
 layer's outputs. This is true whenever an operation producing a sharded
 output involved non-sharded tensors: if an operation
 $macron(y)_(macron(r)) = F (x \, dots.h)$ produces a sharded output from
 an unsharded in put $x$ (all other indices suppressed), the derivative
 with respect to $x$ requires a sum over ranks,
-$frac( partial cal(L) )( partial x ) = frac( partial cal(L) )( partial bar(y) _(
-bar(r) ) ) frac( partial bar(y) _( bar(y) ) )( partial x )$.
+$( partial cal(L) )/( partial x ) = ( partial cal(L) )/( partial macron(y) _(
+macron(r) ) ) ( partial macron(y) _( macron(y) ) )/( partial x )$.
 Note that each worker will have to store all components of the input $z$
 for the backward pass.
 
@@ -2269,7 +2231,7 @@ results in the various re-weighted values $y_(b s e a)$
 
 To review, the attention outputs $z'_(s d)$ generated from inputs
 $z_(s d)$ can be expressed as $
-z\' _( sea ) &= "MHA"(q _( sea ), k _( sea ), v _( sea )) O _( ead )\
+z\' _( s e a ) &= MHA(q _( s e a ), k _( s e a ), v _( s e a )) O _( e a d )\
 $ where:
 
 - We have split the $d$-index as in $z_(s d) arrow.r z_(s (e a))$ with
@@ -2278,8 +2240,7 @@ $ where:
 - $q_(s e a) \, k_(s e a) \, v_(s e a)$ are the query, keys and values
   derived from the inputs
 
-- $(rm
-  MHA )$ is the multi-head attention function, whose outputs are
+- $MHA$ is the multi-head attention function, whose outputs are
   the same shape as its value inputs
 
 - The dual sum over head-dimension index ($e$) and attention-head-index
@@ -2290,7 +2251,7 @@ $ where:
 
 In order to parallelize the above $T$-ways, we simply shard across the
 dimension $a$ which indexes the different attention heads. The
-$"MHA"$ computations all process in embarassingly-parallel
+$MHA$ computations all process in embarassingly-parallel
 fashion, and an all-reduce is needed to complete the sum over the
 $a$-index across devices.
 
@@ -2301,22 +2262,22 @@ $cal(O) ( B S D
 backwards-pass.
 
 The progression of tensor shapes held by any single worker is
-
+*TODO: Fix*
 +
 +
 +
 
 It is worth comparing the communications and FLOPs costs of these
 sharded layers. Each layer costs
-$cal(O) ( BS  ( 4+2E  ) D ^2/T )$
+$cal(O) ( B S ( 4+2E ) D^2 / T )$
 FLOPs and communicates $cal(O) ( B S D )$ bytes and so the
 communication-to-compute-time ratio is $
-frac( t _( "compute" ) )( t _( "comms" ) ) &  frac(  ( 4+2E ) D )( T )times frac( lambda _( "comms" ) )( lambda _( "FLOP/s" ))  .
+( t _"compute" )/( t _"comms" ) &  (  ( 4+2E ) D )/( T ) times ( lambda _"comms" )/( lambda _"FLOP/s")  .
 $ Since#footnote[Assuming
-$lambda _(rm  FLOP/s )$100 TFLOP/s and
-$lambda _( "comms" )
+$lambda _"FLOP/s" $100 TFLOP/s and
+$lambda _"comms"
 $ 100 GiB/s.]
-$frac( lambda _( "comms" ) )( lambda _( "FLOP/s" ))  10 ^( -3 )$FLOPs/B,
+$( lambda _"comms" )/( lambda _"FLOP/s")  10 ^( -3 )$FLOPs/B,
 communication and compute take similar times when
 $D  cal(O) ( 10 ^( 3 ) )$ for typical setups with
 $T  cal(O) ( 10 )$ and so tensor-parallelism
@@ -2373,27 +2334,28 @@ The gradient and optimizer state memory cost is proportional to the
 number of parameters local to each worker (later we will also consider
 sharding these components to reduce redundantly-held information). The
 number of parameters per worker is reduced to $
-N _( rm params ) & approx (4 + 2E) frac( L D ^2 )( T ) ,
-<eq_approx_params_tensor_parallel>
-$ counting only the dominant contribution from weights
+N _"params" & approx (4 + 2E) ( L D ^2 )/T ,
+$<eq_approx_params_tensor_parallel>
+counting only the dominant contribution from weights
 which scale with $L$, since every weight is sharded. Since all
 non-activation contributions to training memory scale with
-$N _( "params" )$, this is a pure $1 \/ T$ improvement.
+$N _"params"$, this is a pure $1 \/ T$ improvement.
 
 The per-layer activation memory costs
 #link(<eq_att_actmem_vanilla>)[\[eq_att_actmem_vanilla\]] and
 #link(<eq_mlp_actmem_vanilla>)[\[eq_mlp_actmem_vanilla\]] are altered
 to: $
-M _( rm act ) ^texttt(Attention) & = BS  (  (p + frac( 4p )( T )+1  )D +
-(frac( 2p+1 )( T )  )AS  ) \
-M _( rm act ) ^texttt(MLP) & =  (frac( 2Ep )( T )+p+1  )BDS .
-<eq_act_mem_attn_mlp>
-$ The derivation is similar to before. Adding in the
+M _"act" ^"Attention" & = B S  (  (p + ( 4p )/T+1  )D +
+(( 2p+1 )/T  )A S  ) \
+M _"act" ^MLP & =  (( 2E p )/ T +p+1  )B D S .
+$<eq_act_mem_attn_mlp>
+The derivation is similar to before. Adding in the
 (unchanged) contributions from instances, the total, leading order
 activation memory sums to $
-M _( "act" ) ^( "total" ) & approx 2BDLS  ( p  (2+ frac( E+2 )( T ) ) + 1  )
-+ ABLS ^2  ( frac( 2p+1 )( T ) ) <eq_act_mem_total_tensor_parallel> .
-$ Again, the terms which did not receive the $1 \/ T$
+M _"act" ^"total" & approx 2B D L S  ( p  (2+ ( E+2 )/T  ) + 1  )
++ A B L S ^2  ( ( 2p+1 )/ T  )  .
+$<eq_act_mem_total_tensor_parallel>
+Again, the terms which did not receive the $1 \/ T$
 enhancement correspond to activations from unsharded and instances and
 the $1 \/ T$'s improvements can be enacted by layering sequence
 parallelism on top (Sec.~@subsec_seq_parallelism).
@@ -2452,9 +2414,9 @@ performing an extra when needed during the backwards pass. Schematics
 can be s e n in Fig.~@fig_tensor_seq_parallel and
 Fig.~@fig_tensor_seq_parallel_detail below. The activation memory is
 then reduced to: $
-M _( "act" ) ^( "total" ) & =frac( 2BDLS  ( p(E+4) + 1  ) )( T )
-+ frac( ABLS ^2  ( 2p+1 ) )( T ) + cal(O) ( BSV ) <eq_act_mem_total_seq_parallel> .
-$
+M _"act" ^"total" & =( 2B D L S  ( p(E+4) + 1  )/T
++ ( A B L S ^2  ( 2p+1 ) )/ T + cal(O) ( B S V )  .
+$<eq_act_mem_total_seq_parallel>
 
 In more detail:
 
@@ -2519,10 +2481,10 @@ presentation.
 Then in Ring Attention, we shard over $R$ devices via
 $z_(s d) arrow.r z_(macron(r) t d)$, and similar for other tensors, to
 compute the sharded outputs $
-z _( bar(r)td ) &= SM _( bar(w) x )  ( q _( bar(r)t d\' ) k _( bar(w)x d\' )  ) v _( bar(w)x d )\
-&= frac( exp  ( q _( bar(r)t d\' ) k _( bar(w)x d\' )  ) )( sum _( bar(w)\'x\' ) exp  (q _( bar(r)t d\'\' ) k _( bar(w)\'x\' d\'\' ) ) ) v _( bar(w)xd )\
-&eq.triple frac( Z _(bar(r)td ) )( sum _( bar(w)\'x\' ) exp  (q _( bar(r)t d\'\' ) k _( bar(w)\'x\' d\'\' )  ) )\
-&eq.triple frac( Z _(bar(r)td ) )(L _( bar(r)t ))
+z _( macron(r)t d ) &= SM _( macron(w) x )  ( q _( macron(r)t d\' ) k _( macron(w)x d\' )  ) v _( macron(w)x d )\
+&= ( exp  ( q _( macron(r)t d\' ) k _( macron(w)x d\' )  ) )/( sum _( macron(w)\'x\' ) exp  (q _( macron(r)t d\'\' ) k _( macron(w)\'x\' d\'\' ) ) ) v _( macron(w)x d )\
+&eq.triple ( Z _(macron(r)t d ) )/( sum _( macron(w)\'x\' ) exp  (q _( macron(r)t d\'\' ) k _( macron(w)\'x\' d\'\' )  ) )\
+&eq.triple ( Z _(macron(r)t d ) )/(L _( macron(r)t ))
 $ where we introduced some notation which will be
 useful blow. Ring Attention is essentially an algorithm for computing
 the sharded sums over barred indices via communication. Since the MLP
@@ -2613,7 +2575,7 @@ in the subsequent iterations:
   since rank $r = 0$, which owns sequence positions
   $(0 \, R \, dots.h \, S - R - 1)$ is only ever able to attend to
   $frac(S / R (S / R - 1), 2)$ positions, since its zero-position
-  component can never attend to anything after the first iteration. This
+  component can never attend to any thing after the first iteration. This
   mismatch between ranks is suboptimal.
 
 + For zig-zag attention, there are two scenarios. Each produces the same
@@ -2704,9 +2666,8 @@ The original CLIP recipe:
 
 + Compute the cross-entropy losses in both directions and average:
   $
-  cal(L) &= frac( 1 )( 2B )sum _( b )  (ln P  ( i_b|t_b  ) + ln P  ( t_b|i_b  ) ) <eq_clip_loss>  .
-
-  $
+    cal(L) &= 1 / ( 2B )sum_( b ) (ln P ( i_b|t_b ) + ln P ( t_b|i_b ) ) .
+  $<eq_clip_loss>
 
 They also add a temperature to the loss, which they also train.
 
@@ -2731,7 +2692,7 @@ given point: inference and training just take too long. Mixture of
 Experts#footnote[The original MoE research came out of Google: see
 @fedus2022switchtransformersscalingtrillion,
 @shazeer2017outrageouslylargeneuralnetworks and related work by these
-authors. An excellent MoE paper with open-source everything is here
+authors. An excellent MoE paper with open-source every thing is here
 @muennighoff2024olmoeopenmixtureofexpertslanguage.] (MoE) models address
 this concern by splitting single MLP layer into a number of “expert\"
 MLP layers and route a subset of the tokens to a subset of the
@@ -2739,23 +2700,19 @@ experts.\" MoE is a lever for changing the relation between the
 per-token FLOPs count and the overall parameter count. Example:
 comparing a dense and a MoE model at similar parameter counts, the
 expert layer's intermediate dimension is reduced by
-$cal(O) ( N _( "ex" ) )$ (the number of experts)
+$cal(O) ( N _"ex" )$ (the number of experts)
 and the FLOPs count is also reduced by this factor. Perhaps
 unsurprisingly, MoE experts outperform and train faster than their FLOPs
 equivalent dense models (at the cost of more engineering complexity and
 a higher memory burden).
 
-The general form of the MoE layer output is
-$ z'_(s d) & = G_(s e) (z_(s d) \, dots.h) E_(e s d) (z_(s d)) $ where
-$G _( s e )(z _( s d ), ... ) in mathbb(R) ^( S times N _( "ex" ) )$
-is a gating (i.e., weighting) function and
-$E _( esd )  ( z _( s d )  ) in mathbb(R) ^( N _( "ex"
-)times S times D )$ is the usual MLP operation performed by the
-$e$-th expert. Many of the entries $G_(e s)$ are zero in practice, and
-only the computations $E_(e s d) (z_(s d))$ corresponding to non-trivial
-gating values are performed, of course. Different MoE variants are
-essentially differentiated by the specific form of their weighting
-function.
+The general form of the MoE layer output is $ z'_(s d) & = G_(s e) (z_(s d) \, dots.h) E_(e s d)
+(z_(s d)) $ where $G_( s e )(z_( s d ), ... ) in RR^( S times N_"ex" )$ is a gating (i.e.,
+weighting) function and $E _( e s d )  ( z _( s d )  ) in RR ^( N _"ex" times S times D )$ is the
+usual MLP operation performed by the $e$-th expert. Many of the entries $G_(e s)$ are zero in
+practice, and only the computations $E_(e s d) (z_(s d))$ corresponding to non-trivial gating values
+are performed, of course. Different MoE variants are essentially differentiated by the specific form
+of their weighting function.
 
 === Routing
 <routing>
@@ -2765,51 +2722,37 @@ There are two dominant schemes:
 
 + #strong[Token Choice];: each token selects a fixed number of experts.
   $G_(s e)$ is sparse over the expert index; see
-  #link(<eq_general_moe>)[\[eq_general_moe\]];.
+  /* #link(<eq_general_moe>)[\[eq_general_moe\]];. */
 
 + #strong[Expert Choice];: each expert selects a fixed number of tokens.
   $G_(s e)$ is sparse over the token index; see
-  #link(<eq_general_moe>)[\[eq_general_moe\]];.
+  /* #link(<eq_general_moe>)[\[eq_general_moe\]];. */
 
 Layered on top of this choice are the details of the routing mechanisms.
 
 ==== Token Choice vs Expert Choice
 <token-choice-vs-expert-choice>
 Token and expert choice both introduce a tensor
-$W _( de ) in mathbb(R) ^( Dtimes N _( "ex"
+$W _( d e ) in RR ^( D times N _( "ex"
 ) )$ which is used to produce a score between each token and expert:
 $S_(s e) = z_(s d) W_(d e)$. In each case, we perform a `topk`
 computation and output a weighted sum of expert outputs: the two methods
 just differ in the dimension over which the `topk` is performed.
 
 For token choice, the gating function is: $
-G ^( "token" )_( s e )(z _( s d ), W) &= SM_( e )  ( texttt(topk) _( e )  ( z _( s d ) dot W _( de )  )  )  , <eq_token_choice>
-$ where this `topk` just sets all non-top-$k$ entries
-to $- oo$. $G_(s e)$ is sparse in its expert dimension and has $S k$
-non-trivial elements. While every token will get routed to $k$ experts
-with token choice routing, the per-expert load can be very unbalanced.
-Some token-choice implementations require setting a maximum tokens per
-expert limit which in turn defines the capacity factor $c$:
-$texttt(maxtok) = c times frac( S )( N _( "ex" ) )$.
-Tokens exceeding this limit are just not sent through the expert MLP at
-all (but remain in the residual stream, of course).
-
-Expert choice just performs the and `topk` on the sequence dimension,
-instead. The gating function is $
-G ^( "expert" )_( s e )(z _( s d ), W) &= SM_( s )  ( texttt(topk) _( s )  ( z _( s d ) dot W _( de )  )  )  , <eq_expert_choice>
-$ with `topk` acting as in the token choice case.
+G ^"expert"_( s e )(z _( s d ), W) &= SM_( s )  ( TOPK _( s )  ( z _( s d ) dot W _( d e )  )  )  ,
+$<eq_expert_choice> with `topk` acting as in the token choice case.
 $G_(s e)$ is sparse along the sequence dimension and has
-$N _( "ex" )k$ non-trivial elements. A (potential) disadvantage
+$N _"ex"k$ non-trivial elements. A (potential) disadvantage
 of expert choice is that some tokens may not be routed to any expert at
 all, but every expert is at least guaranteed an equal load. In this
-case, we effectively have $k = c times frac( S )( N _( (rm
-ex) ) )$, with $c$ the capacity factor above.
+case, we effectively have $k = c times  (S )/( N _"ex" )$, with $c$ the capacity factor above.
 
 === MegaBlocks
 <megablocks>
 The MoE computation maps awkwardly to the typical GPU primitives.
 Ideally the expert computations in
-#link(<eq_general_moe>)[\[eq_general_moe\]] are parallelized as much
+/* #link(<eq_general_moe>)[\[eq_general_moe\]] are parallelized as much */
 as possible, but
 #link("https://pytorch.org/docs/stable/generated/torch.bmm.html")[batched matrix multiplies]
 (the closet common primitive) enforces equal token counts per expert,
@@ -2904,7 +2847,7 @@ guard against this:
 
 - #strong[Top-];$p$: Only choose from the top-however-many most-probable
   examples whose probabilities sum to $p$ (again re-normalizing
-  probabilities). This is also sometimes called #strong[nucleus
+  probabilities). This is also some times called #strong[nucleus
   sampling];.
 
 ==== Beam Search <subsec_beam_search>
@@ -2933,18 +2876,18 @@ Informally, the algorithm is:
 
 + Pass the prefix and all $gamma$ generated tokens $z_t$ through the
   full model, which computes probabilities via its distribution
-  $p(x _( t )|x _( "prefix" ))$.
+  $p(x _( t )|x _"prefix")$.
 
 + For every generated token $z_t$, accept it unconditionally if
-  $q(z_t| x _( "prefix" ))<= p(x_t| z _( "prefix" ))$.
+  $q(z_t| x _"prefix")<= p(x_t| z _"prefix")$.
   If
-  $q(z_t| x _( "prefix" )) \> p(z_t| x _( "prefix" ))$,
+  $q(z_t| x _"prefix") \> p(z_t| x _"prefix")$,
   instead accept the token with only probability#footnote[This choice is
   not fundamental; it just makes following expressions nicer.] $p / q$.
 
 + If only the first $n < gamma$ tokens are accepted, generate token
   $n + 1$ from a modified distribution
-  $p\'(x_t| x _( "prefix" )) = F  \[ p(x), q(x)  \]$
+  $p\'(x_t| x_"prefix") = F \[ p(x), q(x) \]$
   built from the two model predictions and chosen (as will be shown)
   such that the entire algorithm generates the correct distribution.
   $n + 1$ tokens are created in this case#footnote[We cannot generate
@@ -2955,33 +2898,31 @@ Informally, the algorithm is:
   from the full model's outputs.
 
 Proof of correctness and the derivation of $p' (x)$: let
-$Q(x_t| x _( "prefix" ))$ be the distribution described
+$Q(x_t| x _"prefix")$ be the distribution described
 above. Then this can be broken down according to conditioning on the
 draft token and whether or not the draft token was accepted. Dropping
 the prefix condition for brevity and $A$ and $R$ stand for rejected and
 accepted, respectively, we have $
 Q(x_t) &=sum _( z _( t ) ) Q(x_t|z _( t ) , A)P(A|z _( t )) q(z _( t )) + Q(x_t|z _( t ) , R)P(R|z _( t )) q(z _( t )) \
-&=sum _( z _( t ) ) delta _( x _( t ), z _( t ) ) timesmin  (1, frac( p(z _( t )) )( q( z _( t ))
-) ) times q (z _( t )) + p\'(x _( t )) (1 - min  (1, frac( p(z _( t )) )( q( z _( t ))
+&=sum _( z _( t ) ) delta _( x _( t ), z _( t ) ) times min  (1, ( p(z _( t )) )/( q( z _( t ))
+) ) times q (z _( t )) + p\'(x _( t )) (1 - min  (1, ( p(z _( t )) )/( q( z _( t ))
 ) ) ) times q(z _( t )) \
-&= min  (q(x _( t )), p(x _( t )) ) + p\'(x _( t ))sum _( z _( t ) ) (1 - min  (1, frac( p(z _( t )) )( q( z _( t ))
+&= min  (q(x _( t )), p(x _( t )) ) + p\'(x _( t ))sum _( z _( t ) ) (1 - min  (1, ( p(z _( t )) )/( q( z _( t ))
 ) ) ) times q(z _( t ))
 $ The sum is just some constant (denoted by $1 - beta$
 in the paper, which should really have a $t$ subscript) and so choosing
 $
-p\'(x _( t )| x_"prefix)" &eq.triple frac( p(x _( t )| x_"prefix)" - min  ( q(x _( t )| x_"prefix)", p(x _( t )| x_"prefix)"  ) )( 1- beta )
+  p\'(x_( t )| x_"prefix)" &eq.triple ( p(x_( t )| x_"prefix)" - min ( q(x_( t )| x_"prefix)", p(x_( t )| x_"prefix)" ) ) / ( 1- beta )
 $ achieves the goal of getting
 $Q(x _( t )| x_"prefix)" = p(x _( t )| x_"prefix)"$. It
 can be verified that this distribution is properly normalized.
 
 An approximate analysis for choosing the optimal value of $gamma$ can be
 found in the paper.
-*/
 
 === The Bare Minimum and the kv-Cache
 <sec_kv_cache>
 
-/*
 There are two separate stages during generation. First, an original,
 to-be-continued series of prompts $x_(b s)$ can be processed in parallel
 to both generate the first prediction and populate any intermediate
@@ -3032,10 +2973,11 @@ old key and query vectors for generation. The cache represents a
 tradeoff: fewer FLOPs are needed for inference, but the memory costs are
 potentially enormous, since the size of the cache grows with batch size
 and sequence length: $
-M _( "kv-cache" ) & = 2pBDLS /T , <eq_kv_cache_memory>
-$ in the general case with tensor-parallelism. This can
+M _"kv-cache" & = 2p B D L S /T ,
+$<eq_kv_cache_memory>
+in the general case with tensor-parallelism. This can
 easily be larger than the memory costs of the model parameter:
-$M _( "params" ) ^( "inference" )  p N _( "params" )  p LD
+$M _"params" ^"inference"  p N _"params"  p D L
 ^2$ (dropping $cal(O) ( 1 )$ factors), so that the
 cache takes up more memory when $B S gt.tilde D$, i.e. when the total
 number of token exceeds the hidden dimension. Using the kv-cache
@@ -3054,34 +2996,34 @@ The essentials of inference-time math, much of it based on
 ====== Naive Inference
 <naive-inference>
 Processing a single -shaped tensor to generate a single next input costs
-the $2BSN _( "params" )$ FLOPs we found for the forwards-pass
+the $2B S N _"params"$ FLOPs we found for the forwards-pass
 in Sec.~@sec_flops_training (assuming $S lt.tilde D$). Memory costs just
 come from the parameters themselves:
-$M _( "infer" )^( "naive" )=pN _( "params" )$. Per
-the analysis of App.~@app_compute_mem_bound, naive inference is
+$M _"infer"^"naive"=p N _"params"$. Per
+/* the analysis of App.~@app_compute_mem_bound, naive inference is */
 generally compute-bound and so the per-token-latency is
 approximately#footnote[Assuming we do the naive thing here and generate
 the next token in a similarly naive way, shifting over the context
-window.] $2BSN _( "params"
-)/ lambda _( "FLOP/s" )$ where the FLOPs bandwidth in the
-denominator is again defined in App.~@app_compute_mem_bound.
+window.] $2B S N _( "params"
+)/ lambda _"FLOP/s"$ where the FLOPs bandwidth in the
+/* denominator is again defined in App.~@app_compute_mem_bound. */
 
 ====== kv-Cache Inference
 <kv-cache-inference>
 The FLOPs requirements for the hidden-dimension matrix multiplies during
-generation are $2BN _( "params" )$, since we are only
+generation are $2 B N _"params"$, since we are only
 processing a single token, per previous results. This is in addition to
-the up-front cost of $2BSN _(
+the up-front cost of $2B S N _(
 "params)"$ for the prefill. But, the memory
 requirements are raised to $
-M _( "infer" )^( "kv-cache" ) & =pN _( "params" ) + 2pBDLS/T .
+M _"infer"^"kv-cache" & =p N _"params" + 2 p B D L S/T .
 $ Inference now has a computational-intensity of
 $
-frac( C _( "infer" ) ^( "kv-cache" ) )( M _( "infer" )^( "kv-cache" ) ) &  frac( BD )( S )  ,
+  ( C_"infer"^"kv-cache" ) / ( M_"infer"^"kv-cache" ) & ( B D ) / S ,
 $ dropping $cal(O) ( 1 )$ factors, is
-now memory-bound (again, see App.~@app_compute_mem_bound), and has
-per-token-latency of approximately $M _( "infer" )/
-lambda _( "mem" )$, unless the batch-size is very large.
+/* now memory-bound (again, see App.~@app_compute_mem_bound), and has */
+per-token-latency of approximately $M _"infer"/
+lambda _"mem"$, unless the batch-size is very large.
 
 ====== Intra-Node Communication
 <intra-node-communication>
@@ -3090,44 +3032,21 @@ layer, where each accelerator is sending $p B D S$ bytes of data (see
 Sec.~@subsec_tensor_parallelism). This requires a total of
 $4 (T - 1) p B D S \/ T approx 4 p B D S$ bytes to be transferred
 between workers in the tensor-parallel group (see
-Foot.~@foot_all_reduce), taking a total of $ 4pBDLS/
-lambda _( "comms" )$ time for the model as a whole. For an
+/* Foot.~@foot_all_reduce), */
+taking a total of $ 4p B D L S/
+lambda _"comms"$ time for the model as a whole. For an
 A100 80GiB, setup, this is $
-BDS times 10 ^( -11 )  "sec"$
+B D S times 10 ^( -11 )  "sec"$
 
 ====== Latency
 <latency>
 TODO
 
-=== Case Study: #link("https://huggingface.co/tiiuae/falcon-40b-instruct?_sm_vck=j230jZ2ssDkkPfJTfRt6tjQNTQZJ65N7VDWmj5Ff6f3jZ3mhh2Pq")[Falcon-40B]
-<case-study-falcon-40b>
-Let's work through the details of the kv-cache for
-Falcon-40B#footnote[Falcon actually uses multi-query attention, which
-changes the computations here, but we will pretend it does not in this
-section for simplicity.] with $D = 8192$, $L = 60$, $S = 2048$. In half,
-$p = 2$ precision, the model weights just about fit on an 80GiB A100,
-but this leaves no room for the cache, so we parallelize $T$ ways across
-$T$ GPUs, assumed to be on the same node. The total memory costs are
-then $
-M _( "total" ) & approx frac( "80GiB" + "4GiB"times B )( T )  .
-$ This means that in order to hit the compute-bound
-threshold of $B tilde.op 200$ (see App.~@app_compute_mem_bound) we need
-at least $T = 4$ way parallelism. Taking $T = 4$, and running at
-capacity with $B tilde.op 200$ so that we are compute-bound, the
-per-iteration latency from computation alone is approximately
-$frac(2BN _( "params" ) )( lambda _( "FLOP/s" ) T) $13ms,
-i.e. we can give $tilde.op$200 customers about $tilde.op$75
-tokens-per-second at this rate#footnote[Average human reading speed is
-about $tilde.op 185$ words/minute, or $tilde.op 4$tokens/sec.];, if this
-were the only latency consideration.
-
-*/
 === Conventions and Notation
 <app_conventions>
 We loosely follow the conventions of @korthikanti2022reducing. Common
 parameters:
 
-/*
 - $A$: number of attention heads
 
 - $B$: microbatch size
@@ -3146,9 +3065,9 @@ parameters:
 
 - $L$: number of transformer layers
 
-- $N _( "params" )$: total number of model parameters
+- $N _"params"$: total number of model parameters
 
-- $N _( "ex" )$: number of experts for MoE models.
+- $N _"ex"$: number of experts for MoE models.
 
 - $P$: pipeline parallel size
 
@@ -3162,7 +3081,7 @@ parameters:
 
 - $p$: the precision of the elements of a tensor in bytes
 
-- $lambda$: various rates, e.g. $lambda _( "mem" )$ is memory
+- $lambda$: various rates, e.g. $lambda _"mem"$ is memory
   bandwidth
 
 Where it makes sense, we try to use the lower-case versions of these
@@ -3171,7 +3090,7 @@ instance, an input tensor with the above batch size, sequence length,
 and vocabulary size would be written as $x_(b s v)$, with
 $b in (0 \, dots.h \, B - 1)$, $s in (0 \, dots.h \, S - 1)$, and
 $v in (0 \, dots.h \, V - 1)$ in math notation, or as
-#raw(lang:"python", "x[b, s, v]") in code.
+`x[b, s, v]` in code.
 
 Typical transformers belong to the regime
 $ V gt.double D \, S gt.double L \, A gt.double P \, T med . $ For
@@ -3223,7 +3142,7 @@ split this index as $A_i = A_((j k)) equiv macron(A)_(j k)$, then the
 indices $j \, k$ will range over $j in ( 0 \, dots.h \, J )$,
 $k in ( 0 \, dots.h \, K )$ with $I = J times K$ and where numerically
 $i = j times K + k$. More complex cases follow by induction.];. We will
-sometimes use a bar to indicate tensors which are derived from other
+some times use a bar to indicate tensors which are derived from other
 tensors through such splitting operations, usually in the context of
 tensor-sharding where devices only locally hold some shard of the
 tensor. In this context, only some of the dimensions will be sharded
@@ -3231,18 +3150,18 @@ across devices, and we may also put a bar over the corresponding sharded
 index. For instance, consider a two-dimensional tensor $M_(a b)$ of
 shape : sharding this tensor across two devices across the final index
 results in a tensor $macron(M)_(a macron(b))$ which is of shape on each
-device. As here, we will sometimes use bars to denote indices which are
+device. As here, we will some times use bars to denote indices which are
 sharded over different devices.
 
 We also put explicit indices on operators such as $SM$ to help
 clarify the relevant dimension, e.g. we would write the softmax
 operation over the $b$-index of some batched tensor $x_(b v d dots.h)$
 as $
-s _( bvd... ) & = frac( e^( x _( bv d...) ) )( sum _( v = 0 ) ^( v= V-1 ) e^( x _(
-bvd... ) ) ) eq.triple
-SM _( v )  x _( bvd... )
- , <app_eq_einstein_softmax>
-$ indicating that the sum over the singled-out
+s _( b v d... ) & = ( e^( x _( b v d...) ) )/( sum _( v = 0 ) ^( v= V-1 ) e^( x _(
+b v d... ) ) ) eq.triple
+SM _( v )  x _( b v d... )
+ ,
+$<app_eq_einstein_softmax> indicating that the sum over the singled-out
 $v$-index is gives unity.
 
 === Collective Communications <app_collective_communications>
@@ -3324,19 +3243,19 @@ given GPU, e.g. 32GiB for the top-of-the-line A100];, relatively-fast
 on-chip SRAM, and a number of #strong[streaming multiprocessors] (SMs)
 which perform the parallel computations. Inside more-recent GPUs, the
 SMs carry both “CUDA cores\" and \"Tensor cores\", where the latter are
-used for matrix-mulitiplies and the former for everything else.
+used for matrix-mulitiplies and the former for every thing else.
 
 A few numbers of primary importance:
 
 - The rate at which data can be transferred from DRAM to SRAM
-  ($lambda _( "mem" )$)
+  ($lambda _"mem"$)
 
 - The number of FLOP/s, which is more fundamentally computed by
   multiplying the number of SMs by the FLOPS/cycle of each SM for the
   specific operation under consideration (see the NVIDIA docs) by the
   clock rate:
-  $N _( "SM" )dot lambda _( "FLOPs/cycle" )dot lambda _(
-  "clock" )$
+  $N_"SM"dot lambda_"FLOPs/cycle"dot lambda_(
+    "clock" )$
 
 The terminology and structure of the memory hierarchy is also important
 to understand. Types of memory, from slowest to fastest:
@@ -3406,10 +3325,10 @@ Summary of some relevant NVIDIA GPU statistics:
         table.header(
           [GPU],
           [Memory],
-          [$lambda _( (rm FLOP/s ) )$],
-          [$lambda _( "mem" )$],
-          [$lambda _( "math" )$],
-          [$lambda _( "comms" )$],
+          [$lambda_"FLOP/s"$],
+          [$lambda_"mem"$],
+          [$lambda_"math"$],
+          [$lambda_"comms"$],
         ),
         table.hline(),
         [#link("https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf")[A100];], [80GiB], [312
@@ -3425,58 +3344,58 @@ Summary of some relevant NVIDIA GPU statistics:
 ]
 where
 
-- $lambda _( "FLOP/s" )$ is flops bandwidth (for
+- $lambda _"FLOP/s"$ is flops bandwidth (for
   multiply-accumulate ops)
 
-- $lambda _( "mem" )$ is memory bandwidth
+- $lambda _"mem"$ is memory bandwidth
 
-- $lambda _( "math" ) = frac( lambda _( "FLOP/s" ) )( lambda _( "mem" ) )$
+- $lambda_"math" = ( lambda_"FLOP/s" ) / ( lambda_"mem" )$
   is
   #link("https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch")[math bandwidth]
 
-- $lambda _( "comms" )$ is one-way communication bandwidth
+- $lambda _"comms"$ is one-way communication bandwidth
 
 A useful approximate conversion rate is that
 $1  "TFLOP/s" approx 100 "PFLOP/day"$.
 
-Important practical note: the $lambda _( "FLOP/s" )$ numbers
+Important practical note: the $lambda _"FLOP/s"$ numbers
 should be taken as aspirational. Out-of-the box, matrix-multiplies in
 with well-chosen dimensions tops out around $tilde.op 250$ FLOPS/s
 
 === Compute-bound vs Memory-bound <app_compute_mem_bound>
 If your matrix-multiplies are not sufficiently large on, you are wasting
 resources @he2022brrrrfromfirstprinciples. The relevant parameters which
-determine sufficiency are $lambda _( "FLOP/s" )$ and
-$lambda _( "mem" )$, the FLOPs and memory bandwidth,
+determine sufficiency are $lambda _"FLOP/s"$ and
+$lambda _"mem"$, the FLOPs and memory bandwidth,
 respectively. The ratio
-$lambda _( "math" ) eq.triple frac( lambda _( "FLOP/s" ) )(
-lambda _( "mem" ) )$ determines how many FLOPS you
+$lambda _"math" eq.triple ( lambda _"FLOP/s" )/(
+lambda _"mem" )$ determines how many FLOPS you
 must perform for each byte loaded from memory; see App.~@app_gpu_stats.
 If your computations have a FLOPs/B ratio which is larger than
-$lambda _( "math" )$, then you are compute-bound (which is
+$lambda _"math"$, then you are compute-bound (which is
 good, as you're maximizing compute), and otherwise you are
 memory(-bandwidth)-bound (which is bad, since your compute capabilities
-are idling). The FLOPs/B ratio of your computation is sometimes called
+are idling). The FLOPs/B ratio of your computation is some times called
 the #strong[compute intensity] or #strong[arithmetic intensity];. When
 compute bound, a process takes time
-$ F/lambda _( "FLOP/s" )$, while memory-bound processes
+$ F/lambda _"FLOP/s"$, while memory-bound processes
 take time#footnote[Note that the time is not additive, e.g.
 compute-bound tasks do not take time
 $ F/lambda _( "FLOP/s"
-        ) +M/lambda _( "mem" )$ because they are not
+        ) +M/lambda _"mem"$ because they are not
 sequential: compute and memory-communications can be concurrent.]
-$ M/lambda _( "mem" )$.
+$ M/lambda _"mem"$.
 
 ==== Matrix-Multiplications vs. Element-wise Operations
 <matrix-multiplications-vs.-element-wise-operations>
 For instance, to multiply a -shaped tensor $z_(b s d)$ by a -shaped
 weight-matrix $W_(d d')$, $p (B D S + D^2)$ bytes must be transferred
-from DRAM to SRAM at a rate $lambda _( "mem" )$, after which
+from DRAM to SRAM at a rate $lambda _"mem"$, after which
 we perform $2 B S D^2$ FLOPs, and write the -shaped result back to DRAM
 again, for a ratio of $
-frac( 1 )( p ) frac( BDS )( 2BS + D )   ( "FLOPs/B"  )  .
+1/p ( B D S )/( 2B S + D )   ( "FLOPs/B"  )  .
 $ We want to compare this against
-$lambda _( "math" )$, which from App.~@app_gpu_stats we take
+$lambda _"math"$, which from App.~@app_gpu_stats we take
 to be $cal(O) ( 100 "FLOPs/B" )$, and plugging in
 any realistic numbers, shows that such matrix-multiplies are essentially
 always compute-bound. Compare this to the case of some element-wise
@@ -3494,13 +3413,13 @@ Finally, we note that the above has implications for the Transformers
 architecture as a whole, and in particular it highlights the
 difficulties in efficient inference. Under the assumptions of
 Sec.~@sec_flops_training,
-$ cal(O) ( BSN _( "params" ) )$ total FLOPs
+$ cal(O) ( B S N _"params" )$ total FLOPs
 needed during training, while the number of bytes loaded from and
 written to memory are
-$cal(O) ( BDLS + N _( "params" ) )  cal(O) ( frac( BS N _( "params" ) )( D)+ N _( "params" ) )$
-which is $cal(O) ( N _( "params" ) )$ for
+$cal(O) ( B D L S + N_"params" ) cal(O) ( ( B S N_"params" ) / ( D)+ N_"params" )$
+which is $cal(O) ( N _"params" )$ for
 not-super-long sequence lengths. The arithmetic intensity is therefore
-$cal(O) ( BS )$ and so training is compute-bound in any
+$cal(O) ( B S )$ and so training is compute-bound in any
 usual scenario, even at small $B  cal(O) ( 1 )$
 batch sizes (as long as individual operations in the network don't
 suffer from outlandish memory-boundedness). The problem during inference
@@ -3522,15 +3441,15 @@ $B  cal(O) ( 1
 $cal(O) ( B )$, which is insufficient to be
 compute-bound. In the large $B gt.tilde D \/ S$ limit, they at least
 become $cal(O) ( D
-)$ and $cal(O) ( 1 + frac( D )( S ) )$,
+)$ and $cal(O) ( 1 + D/S )$,
 respectively, which may be enough to be compute-bound, but it's hard to
 even get into this regime. Note, the importance of the ratio $D \/ S$.
 The hidden dimension fixes the context length scale at which inference
 can never be compute-bound, in the absence of additional tricks not
 considered here#footnote[One such trick: the multi-query attention of
-Sec.~@subsec_multi_query_attn improves everything a factor of $A$: the
+Sec.~@subsec_multi_query_attn improves every thing a factor of $A$: the
 large batch regime is $B gt.tilde frac(D, A S)$ and the intensity ratio
-becomes $cal(O) ( 1 + frac( D )( AS ) )$. An analysis
+becomes $cal(O) ( 1 + D/( A S ) )$. An analysis
 equivalent to the one performed here can be found in the original paper
 @shazeer2019fast.];.
 
@@ -3541,13 +3460,13 @@ NVLink, generally.
 
 - #link("https://blogs.nvidia.com/blog/2023/03/06/what-is-nvidia-nvlink/")[NVLink]
   interconnects are continually updated and achieve speeds of
-  $lambda _( "comm" ) ^(
+  $lambda _"comm" ^(
   "intra" )  300$ GiB/s.
 
 For inter-node communication, nodes are often connected by:
 
 - #link("https://e n.wikipedia.org/wiki/InfiniBand")[InfiniBand]
-  apparently also achieves speeds $lambda _( "comm" ) ^(
+  apparently also achieves speeds $lambda _"comm" ^(
   "intra" )  100$ GiB/s? Haven't found a
   clear reference. But in any case, the bandwidth is divided amongst the
   GPUs in the node, leading to a reduction by $tilde.op 8$.
@@ -3556,8 +3475,8 @@ For inter-node communication, nodes are often connected by:
 The amount of compute directly determines the training time, but not all
 ways of spending compute are equivalent. We follow the discussion in
 @mccandlish2018empirical which gives a rule of thumb for determining the
-optimal batch size which is sometimes used in practice. The basic point
-is that all of the optimization steps take the gradient $bfg$ as an
+optimal batch size which is some times used in practice. The basic point
+is that all of the optimization steps take the gradient $bold(g)$ as an
 input, and since the gradient is the average over randomly selected
 datapoints, steps are more precise as the batch size increases (with
 diminishing returns, past a certain point, but the computational cost
@@ -3569,42 +3488,40 @@ step. We randomly sample $B$ datapoints $x in cal(D)$ from the
 dataset through some i.i.d. process#footnote[The below uses sampling
 with replacement, while in practice we sample without replacement, but
 the different is negligible for all practical cases.];. Each
-corresponding gradient $bfg (x) = partial _( w) cal(L)
+corresponding gradient $bold(g) (x) = partial _( w) cal(L)
  ( w, x  )$ is itself a random variable whose average
-is the true gradient across the entire dataset $bar(bfg)$ and we
+is the true gradient across the entire dataset $bar(bold(g))$ and we
 take the variance to be $
-"Var"\[bfg (x), bfg (x\')\] & =Sigma
+"Var"\[bold(g) (x), bold(g) (x\')\] & =Sigma
 $ for some matrix $Sigma$ with (supressed) indices
 spanning the space of model weights. Taking instead the mean of a sum of
 such estimates,
-$bfg _( B )eq.triple frac( 1 )( B ) sum _( x in cal(B)) bfg (x)$,
+$bold(g) _( B )eq.triple 1/B sum _( x in cal(B)) bold(g) (x)$,
 the mean stays the same, but the variance reduces in the usual way:
-$"Var"\[bfg _( B ) (x),
-bfg _( B )(x\')\]=Sigma /B$.
+$"Var"\[bold(g) _( B ) (x),
+bold(g) _( B )(x\')\]=Sigma /B$.
 
 Study the mean loss across the entire dataset:
-$cal(L)  ( w  ) = langle
-cal(L)  ( w, x ) rangle$. Using SGD we take a step
-$w longrightarrow w -eta bfg _( B )$ and change the loss as
+$cal(L)  ( w  ) = angle.l cal(L)  ( w, x ) angle.r$. Using SGD we take a step
+$w --> w -eta bold(g) _( B )$ and change the loss as
 $
-cal(L)  ( w -eta bfg _( B )  ) = cal(L)  ( w  ) -eta bar(bfg )dot
-bfg _( B ) + frac( 1 )( 2 ) bfg _( B )dot H dot bfg _( B ) + cal(O) ( bfg _( B )
-^( 3 ) ) ,
+  cal(L) ( w -eta bold(g)_( B ) ) = cal(L) ( w ) -eta overline(bold(g))dot
+  bold(g)_( B ) + 1 / 2 bold(g)_( B )dot H dot bold(g)_( B ) + cal(O) ( bold(g)_( B )^( 3 ) ) ,
 $ where $H$ is the true hessian of the loss over the
 entire dataset at this value of the weights. Taking the expectation
 value and minimizing the results over $eta$ gives the optimal choice:
 $
-eta _( star ) & = frac( eta _( "max" ) )( 1 + frac( B _( "noise" ) )( B ) ) , quad eta _( "max" )eq.triple frac( bar(bfg ) ^2 )( bar(bfg )dot H dot bar(bfg ) ) , quad B _( "noise" ) eq.triple frac( Tr H dot Sigma )( bar(bfg )dot H dot bar(bfg )) .
+  eta_( star ) & = ( eta_"max" ) / ( 1 + ( B_"noise" ) / B ) , quad eta_"max"eq.triple ( bar(bold(g) )^2 ) / ( bar(bold(g) )dot H dot bar(bold(g) ) ) , quad B_"noise" eq.triple ( TR H dot Sigma ) / ( bar(bold(g) )dot H dot bar(bold(g) )) .
 $ Notably, the above supports the usual rule of thumb
 that the learning rate should be increased proportionally to the batch
-size, at least whenever $B l l B _( "noise" )$. The
-diminishing returns of pushing batch sizes past $B _( "noise" )$
+size, at least whenever $B l l B _"noise"$. The
+diminishing returns of pushing batch sizes past $B _"noise"$
 are also evident. In practice it is too expensive to compute the
 Hessian, but thankfully the entirely unjustified approximation in which
 the Hessian is multiple of the identity such that $
-B _( "noise" ) & approx B _( "simple" ) eq.triple frac( Tr Sigma )( bar(bfg ) ^2 ) ,
+B _"noise" & approx B _"simple" eq.triple ( TR Sigma )/( bar(bold(g) ) ^2 ) ,
 $ is somehow a decent approximation empirically, and an
-estimator can be created for $B _( "noise" )$ in a data-parallel
+estimator can be created for $B _"noise"$ in a data-parallel
 setup; see @mccandlish2018empirical or
 #link("https://github.com/crowsonkb/k-diffusion/blob/ab527a9a6d347f364e3d185ba6d714e22d80cb3c/k_diffusion/gns.py#L1")[Katherine Crowson's implementation]
 or
@@ -3614,35 +3531,34 @@ for more.
 We can further characterize the trade-off between compute and
 optimization steps. The expected decrease in loss per update is then
 $
-langle delta cal(L) rangle & approx frac( eta _( "max" ) )( 1 + frac( B _( "noise" ) )( B ) ) bar(bfg ) ^(2 ) + cal(O) ( eta _( "max" ) ^2 )  ,
+  angle.l delta cal(L) angle.r & approx eta_"max" / ( 1 + B_"noise" / B ) bar(bold(g) )^(2 ) + cal(O) ( eta_"max"^2 ) ,
 $ that is, we would need
-$1 + frac( B _( "noise" ) )( B )$ times as many SGD steps to
+$1 +  B _"noise" / B $ times as many SGD steps to
 make the same progress we would have as compared to full-batch SGD. If
-$S _( "min" )$ is the number of steps that would have been
-needed for full-batch SGD, we would need $S=S _( "min" ) + S _(
-"min" ) frac( B _( "noise" ) )( B )$ steps
+$S _"min"$ is the number of steps that would have been
+needed for full-batch SGD, we would need $S=S _"min" + S _(
+"min" )  B _"noise" / B $ steps
 for minibatch SGD. The total number of examples seen is correspondingly
-$E = S _( "min" ) times  ( B _( "noise" ) +B
-)eq.triple E _( "min" )+ S _( "min" )B$, and so
+$E = S _"min" times  ( B _"noise" +B
+)eq.triple E _"min"+ S _"min"B$, and so
 we see the trade-off between SGD steps $S$ and compute $E$ alluded to
 above. These relations can be written as#footnote[The analysis here is
 simplified in that it assumes that the noise scale and the chosen batch
 size are both time-independent. There is confusing logic treating the
-more general case where both $B _( "noise" )$ and $B$ vary with
+more general case where both $B _"noise"$ and $B$ vary with
 step in @mccandlish2018empirical, but in any case, the ultimate
 relations they use are effectively the same.] $
- ( frac( S )( S _( "min" ) )-1  ) ( frac( E )( E _( "min" ) )-1  ) & =1
+ (S / (S _"min" )-1  ) (  E /( E _"min" )-1  ) & =1
 $ which represent hyperbolic Pareto frontier curves.
 So, solutions are of the form $S= ( alpha
-+1  )S _( "min" )$,
-$E= ( frac( 1 )( alpha ) +1  )E _( "min" )$
++1  )S _"min"$,
+$E= ( 1 / alpha +1 )E_"min"$
 and since $E = B S$ the corresponding batch size is
-$B _( "crit" ) eq.triple frac( 1 )( alpha )
-B _( "noise" )$. The parameter $alpha$ characterizes how much
+$B _"crit" eq.triple 1 / alpha
+B _"noise"$. The parameter $alpha$ characterizes how much
 you value the trade-off between these two factors and a reasonable
-balance is the $alpha = 1$ solution for which $S = 2S _( (rm
-min) )$, $E=2E _( "min" )$ and
-$B _( "crit" )= B _( "noise" )$ exactly.
+balance is the $alpha = 1$ solution for which $S = 2S _"min"$, $E=2E _"min"$ and
+$B _"crit"= B _"noise"$ exactly.
 
 Correspondingly, in @mccandlish2018empirical they suggest training at
 precisely this batch size. But it seems much more relevant to balance
@@ -3652,18 +3568,17 @@ $T approx S (kappa B + sigma)$ for some $kappa \, sigma$ to model
 compute costs#footnote[Computation and communication costs each scale
 with $B$, the optimizer step does not (and maybe some overhead?), for
 instance.];, then the above is equivalent to $
-T & = frac( ( E _( "min" ) + S _( "min" ) B )  ( kappa B+ sigma  ) )( B ) .
+T & = ( ( E _"min" + S _"min" B )  ( kappa B+ sigma  ) / B  .
 $ which has a minimum at $
-B & = sqrt(frac( sigma E _( "min" ) )( kappa S _( "min" ) )) .
+B & = sqrt(( sigma E _"min" )/( kappa S _"min" )) .
 $ for which the total time is $
-T _( "min" ) & =  ( sqrt(kappa E _( "min" )) - sqrt(sigma S _( "min" ))  ) ^2 .
+T _"min" & =  ( sqrt(kappa E _"min") - sqrt(sigma S _"min")  ) ^2 .
 $ In comparison, the total time for the
-$B _( "crit" ) = frac( E _( "min" ) )( S _( (rm
-min) ) )$ strategy of @mccandlish2018empirical
-gives $T _( "min" ) = 2  ( kappa E
-_( "min" ) + sigma S _( "min" )  )$ which is a
-factor of $frac( 2 )( 1- frac(
-sqrt(sigma kappa B _( "noise" ) ) )( kappa B _( "noise" ) + sigma ) )$
+$B _"crit" = ( E _"min" )/( S _"min" )$ strategy of @mccandlish2018empirical
+gives $T _"min" = 2  ( kappa E
+_"min" + sigma S _"min"  )$ which is a
+factor of $ 2 /( 1- (
+sqrt(sigma kappa B _"noise" ) )/( kappa B _"noise" + sigma ) )$
 larger. So, this seems like a better choice of optimal batch size, if
 you value your time.
 
@@ -3699,18 +3614,18 @@ transformation of other data elements. For example, for an LLM the
 $z_i^0$ come from looking up the normally-distributed embedding vectors
 corresponding to the relevant tokens in the sequence.];:
 $E( z^( 0 )_( i )) = 0$, $E( z ^( 0 )_( i )z ^( 0 )_( j ))
-= delta _( ij )$. Here, $i in (0 \, dots.h \, D - 1)$ and the batch
+= delta _( i j )$. Here, $i in (0 \, dots.h \, D - 1)$ and the batch
 and any other indices are suppressed.
 
 Examine the statistics of the first layer. Choosing the weights to be
-normally distributed as well, with $E( W^( ell )_( ij )) = 0$,
-$E( W ^( ell )_( ij )W ^( ell )_( jk
-)) = frac( C _( ell ) )( D ) delta _( ij )$ for some $C_ell$ it
+normally distributed as well, with $E( W^( ell )_( i j )) = 0$,
+$E( W ^( ell )_( i j )W ^( ell )_( j k
+)) = ( C _( ell ) )/( D ) delta _( i j )$ for some $C_ell$ it
 straightforward to show that $
 E( z^( 1 )_( i )) &= 0 \
-E( z^( 1 )_( i )z^( 1 )_( j )) &= C _( 1 )delta _( ij ) langle phi(z )^2rangle
+E( z^( 1 )_( i )z^( 1 )_( j )) &= C _( 1 )delta _( i j ) angle.l phi(z )^2angle.r
 $ where
-$langle phi(z)^( n )rangle eq.triple integral difthin rho(z) phi(z)^( n )$
+$angle.l phi(z)^( n )angle.r eq.triple integral dif thin rho(z) phi(z)^( n )$
 with $rho (z)$ a single-variable standard normal Gaussian#footnote[This
 is similar notation as used in @physicalDL, with $E(dot)$ being a
 multivariate expectation value and $angle.l dot.op angle.r$ an
@@ -3730,12 +3645,12 @@ k )z^( ell )_( l)) - "perms"$.] show the presence of
 non-gaussianity most directly. Symmetries fix the result to be of the
 form $
 E( z^( ell )_( i )z^( ell )_( j )z^( ell )_(
-k )z^( ell )_( l)) _( c ) &= V ^( ell ) _( 4 )delta _( ij )delta _( kl ) + "perms"  ,
+k )z^( ell )_( l)) _( c ) &= V ^( ell ) _( 4 )delta _( i j )delta _( k l ) + "perms"  ,
 $ for some coefficient $V_4^ell$ for all $ell$. We can
 fix the coefficient by computing the term, say, where
 $i = j \, k = l \, i eq.not k$. The result for the $ell = 1$ layer is:
 $
-V ^(ell = 1 ) _( 4 ) &= frac( C _( 1 ) ^2 )( D ^2 )  \[ E(  ( phi(z ^( 0 )))dot phi(z ^( 0 ))) ) ^2 ) -  ( E( phi(z ^( 0 )))dot phi(z ^( 0 )))) ) ^2  \]
+  V^(ell = 1 )_( 4 ) &= ( C_( 1 )^2 ) / ( D^2 ) \[ E( ( phi(z ^( 0 )))dot phi(z ^( 0 ))) )^2 ) - ( E( phi(z ^( 0 )))dot phi(z ^( 0 )))) )^2 \]
 $ where the expectation is over the distribution of
 $z_i^0$ and $W_(i j)^1$ and the dot-product is over hidden-dimension
 indices. This can be written in terms of the single-variable expectation
@@ -3745,9 +3660,9 @@ $
 $
 So, there is indeed non-gaussianity (even for a linear network
 $phi (x) = x$) and is it of $cal(O)
-( frac( 1 )( D ) ) l l 1$. Perhaps unsurprisingly,
+( 1 / D  ) l l 1$. Perhaps unsurprisingly,
 we can continue on to deeper layers via perturbation theory and find
-$V ^( ell ) _( 4 )  cal(O) ( frac( ell )( D )
+$V ^( ell ) _( 4 )  cal(O) (  ell / D
 )$; the non-linearity is additive in the $L \/ D lt.double 1$
 regime. Similar results also hold for higher-order, even-point
 functions.
@@ -3781,10 +3696,11 @@ prescription we come up with should work in this limit, at the very
 least.
 
 The model is: $
-z _( o ) eq.triple z ^( L )_( o ) &= O _( od ) H ^( L-1 )_( d d\' ) ... H ^( 0 ) _( d\'\' i )I _( i \'i ) x _( i ) \
+z _( o ) eq.triple z ^( L )_( o ) &= O _( o d ) H ^( L-1 )_( d d\' ) ... H ^( 0 ) _( d\'\' i )I _( i \'i ) x _( i ) \
 z ^( ell )_( d ) & eq.triple H ^( ell )_( d d\' ) z ^( ell-1 )_( d\' )  , ell in  ( 0, ... , L-1  )\
-z ^(-1)_( i ) & eq.triple I _( i i\' ) x _( i\' )  . <app_eq_deep_linear_model>
-$ Typically, $ell$ is only used to index the hidden
+z ^(-1)_( i ) & eq.triple I _( i i\' ) x _( i\' )  .
+$<app_eq_deep_linear_model>
+Typically, $ell$ is only used to index the hidden
 layers, and we suppress any batch or sequence dimensions for simplicity.
 The $H_(d d')^ell in bb(R)^(D_ell times D_(ell - 1))$ are the hidden
 layer weights, such that $z_d^ell in bb(R)^(D_ell)$,
@@ -3808,18 +3724,18 @@ $lambda$ independent at first non-trivial order, in a way made more
 precise below. We require#footnote[In general, we define the size of a
 random variable $Z$ through the size of its first non-vanishing moment:
 if it's the $n$-th moment, then we write
-$Z  cal(O) ( langle Z^( n
-) rangle^(1/n) )$. The common cases are when the $Z$ has a
+$Z  cal(O) ( angle.l Z^( n
+) angle.r^(1/n) )$. The common cases are when the $Z$ has a
 non-trivial mean, $Z
-cal(O) ( langle Z rangle )$, and the case where the
+cal(O) ( angle.l Z angle.r )$, and the case where the
 mean is zero, but the second moment is non-trivial:
-$Z  cal(O) ( sqrt(langle Z Z rangle) )$.];:
+$Z  cal(O) ( sqrt(angle.l Z Z angle.r) )$.];:
 
 - All intermediate tensors
   $z ^( ell ) _(d )  cal(O) ( 1 )$.
 
 - Model outputs are
-  $z ^( ell ) _( d )  cal(O) ( 1 )$ #emph[after]
+  $z^( ell )_( d ) cal(O) ( 1 )$ #emph[after]
   taking an optimizer step.
 
 These requirements fix the scaling of every parameter of interest with
@@ -3853,7 +3769,7 @@ distributed, however: their higher-point, connected correlation
 functions are non-trivial @physicalDL. This is expected, since the
 $z^ell$ for $ell gt.eq 0$ are products of Gaussian random variables, and
 such a product is not Gaussian. However, the degree of non-Gaussianity
-is small: $cal(O) ( frac( ell )( D ) )$.] if we
+is small: $cal(O) ( ell/D )$.] if we
 initialize the $H_(d d')^ell$ as
 $
   angle.l H_(d e)^ell H_(d' e')^ell angle.r & = frac(delta_(d d') delta_(e e'), D_(ell - 1)) arrow.r.double.long angle.l z_d^ell angle.r = 0 med \, quad angle.l z_d^ell z_(d')^ell angle.r = delta_(d d') med .
@@ -3876,17 +3792,16 @@ an input $y_i$ (possibly different from $x_i$), the updated model's
 outputs $z^L (y_i \, t = 1)$ are related to the value it would have had
 at initialization, $z^L (y_i \, t = 0) equiv z^L (y_i)$, via
 $
-z^( L )_( o ) ( y, t=1  ) &= z^( L )_( o ) ( y  )
-+ frac( partial z^( L )_( o )(y) )( partial I_( di ) ) Delta I_( di )(x)
-+ frac( partial z^( L )_( o )(y) )( partial H^( ell )_( od ) ) Delta H^( ell )_( od )(x)
-+ frac( partial z^( L )_( o )(y) )( partial O_( od ) ) Delta O_( od )(x)+cal(O) ( Delta X^2 ) \
-&= z^( L )_( o ) ( y  )
-- frac( partial cal(L)(z(x)) )(partial z ^( L )_( o\' ) )( eta_( I ) frac( partial z ^( L )_( o\' )(x) )( partial I_( di ) )frac( partial z^( L )_( o )(y) )( partial I_( di ) )
-+ eta_( ell )frac( partial z ^( L )_( o\' )(x) )( partial H^( ell )_( dd\' ) )frac( partial z^( L )_( o )(y) )( partial H^( ell )_( dd\' ) )
-+ eta_( O )frac( partial z ^( L )_( o\' )(x) )( partial O_( o\'\'d ) )frac( partial z^( L )_( o )(y) )( partial O_( o\'\'d ) )  ) \
-& quad+cal(O) ( eta^2 )  ,
-<app_eq_general_output_update>
-$ sum over $ell$ and all other repeated indices
+  z^( L )_( o ) ( y, t=1 ) &= z^( L )_( o ) ( y )
+  + ( partial z^( L )_( o )(y) ) / ( partial I_( d i ) ) Delta I_( d i )(x)
+  + ( partial z^( L )_( o )(y) ) / ( partial H^( ell )_( o d ) ) Delta H^( ell )_( o d )(x)
+  + ( partial z^( L )_( o )(y) ) / ( partial O_( o d ) ) Delta O_( o d )(x)+cal(O) ( Delta X^2 ) \
+  &= z^( L )_( o ) ( y )
+  - ( partial cal(L)(z(x)) ) / (partial z^( L )_( o\' ) )( eta_( I ) ( partial z^( L )_( o\' )(x) ) / ( partial I_( d i ) )( partial z^( L )_( o )(y) ) / ( partial I_( d i ) )
+    + eta_( ell )( partial z^( L )_( o\' )(x) ) / ( partial H^( ell )_( d d\' ) )( partial z^( L )_( o )(y) ) / ( partial H^( ell )_( d d\' ) )
+    + eta_( O )( partial z^( L )_( o\' )(x) ) / ( partial O_( o\'\'d ) )( partial z^( L )_( o )(y) ) / ( partial O_( o\'\'d ) ) ) \
+  & quad+cal(O) ( eta^2 ) ,
+$<app_eq_general_output_update> sum over $ell$ and all other repeated indices
 implicit. The above uses SGD with per-weight learning rates, with the
 final line obtained after specializing weight updates
 $W arrow.r W + Delta W$ to SGD#footnote[The term in parentheses is the
@@ -3897,27 +3812,29 @@ We are interested in the typical size of the updates in
 #link(<app_eq_general_output_update>)[\[app_eq_general_output_update\]];,
 for which we compute the following expectation values:
 $
- langle frac( partial z ^( L )_( o\' )(x) )( partial I_( di ) )frac( partial z^( L )_( o )(y) )( partial I_( di ) )  rangle &= langle O_( o\'d\' )H^( L-1 )_(d\'e\' ) ... H^( 0 )_( f\'d )times O_( od\'\' )H^( L-1 )_(d\'\'e\'\' ) ... H^( 0 )_( f\'\'d ) rangle x_( i ) y_( i )\
-&= delta_( oo\' )frac( x dot y )( D^( s )_( L-1 ) ) \
- langle frac( partial z ^( L )_( o\' )(x) )( partial H^( ell )_( dd\' ) )frac( partial z^( L )_( o )(y) )( partial H^( ell )_( dd\' ) )  rangle &=  langle O_( o\'e\' )H^( L-1 )_(e\'f\' ) ... H^( ell+1 )_( g\'d ) z^( ell-1 )_( d\' )times O_( oe )H^( L-1 )_(ef ) ... H^( ell+1 )_( gd ) z^( ell-1 )_( d\' )  rangle \
-&= delta_( oo\' ) frac( langle z^( ell-1 )(x)dot z^( ell-1 )(y) rangle )( D^( s )_( L-1 ) )\
-&= delta_( oo\' ) frac(D_( ell-1 ))( D^( s )_( L-1 ) )times cases( xdot y & x, y  "one-hot" frac( xdot y )( D_( I ) ) & x, y  "normal)"\
- langle frac( partial z ^( L )_( o\' )(x) )( partial O_( o\'\'d ) )frac( partial z^( L )_( o )(y) )( partial O_( o\'\'d ) )  rangle &= delta_( o\'o\'\'\' )delta_( oo\'\' )  langle z^( L-1 )(x)dot z^( L-1 )(y)  rangle \
-&= delta_( oo\' ) D_( L-1 )times cases( xdot y & x, y  "one-hot" frac( xdot y )( D_( I ) ) & x, y  "normal)" . <app_eq_mup_expectation_vals>
-$
+  angle.l ( partial z^( L )_( o\' )(x) ) / ( partial I_( d i ) )( partial z^( L )_( o )(y) ) / ( partial I_( d i ) ) angle.r &= angle.l O_( o\'d\' )H^( L-1 )_(d\'e\' ) ... H^( 0 )_( f\'d ) times O_( o d\'\' )H^( L-1 )_(d\'\'e\'\' ) ... H^( 0 )_( f\'\'d ) angle.r x_( i ) y_( i )\
+  &= delta_( o o' )( x dot y ) / ( D^( s )_( L-1 ) ) \
+  angle.l ( partial z^( L )_( o\' )(x) ) / ( partial H^( ell )_( d d\' ) )( partial z^( L )_( o )(y) ) / ( partial H^( ell )_( d d\' ) ) angle.r &= angle.l O_( o\'e\' )H^( L-1 )_(e\'f\' ) ... H^( ell+1 )_( g\'d ) z^( ell-1 )_( d\' ) times O_( o e )H^( L-1 )_(e f ) ... H^( ell+1 )_( g d ) z^( ell-1 )_( d\' ) angle.r \
+  &= delta_( o o' ) ( angle.l z^( ell-1 )(x)dot z^( ell-1 )(y) angle.r ) / ( D^( s )_( L-1 ) )\
+  &= delta_( o o' ) (D_( ell-1 )) / ( D^( s )_( L-1 ) ) times cases( x dot y wide & x "and" y  "one-hot", ( x dot y )/( D_( I ) ) & x "and" y  "normal")\
+  angle.l ( partial z^( L )_( o\' )(x) ) / ( partial O_( o\'\'d ) )( partial z^( L )_( o )(y) ) / ( partial O_( o\'\'d ) ) angle.r &= delta_( o\'o\'\'\' )delta_( o o'\' ) angle.l z^( L-1 )(x)dot z^( L-1 )(y) angle.r \
+  &= delta_( o o' ) D_( L-1 ) times cases( x dot y wide & x "and" y  "one-hot", ( x dot y )/( D_( I ) ) & x "and" y  "normal") .
+$<app_eq_mup_expectation_vals>
 
 The above are useful if we can compute the expectation value of the
 model output updates, $Delta z_o^L equiv z_o^L (t = 1) - z_o^L (t = 0)$,
 #link(<app_eq_general_output_update>)[\[app_eq_general_output_update\]]
 as in $
- langle Delta z^( L )_( o ) ( y  )  rangle &approx
--  langle frac( partial cal(L)(z(x)) )(partial z ^( L )_( o\' ) )( eta_( I ) frac( partial z ^( L )_( o\' )(x) )( partial I_( di ) )frac( partial z^( L )_( o )(y) )( partial I_( di ) )
-+ eta_( ell )frac( partial z ^( L )_( o\' )(x) )( partial H^( ell )_( dd\' ) )frac( partial z^( L )_( o )(y) )( partial H^( ell )_( dd\' ) )
-+ eta_( O )frac( partial z ^( L )_( o\' )(x) )( partial O_( o\'\'d ) )frac( partial z^( L )_( o )(y) )( partial O_( o\'\'d ) )  )  rangle\
+ angle.l Delta z^( L )_( o ) ( y  )  angle.r &approx
+-  angle.l ( partial cal(L)(z(x)) )/(partial z ^( L )_( o\' ) )( eta_( I ) ( partial z ^( L )_( o\'
+   )(x) )/( partial I_( d i ) )( partial z^( L )_( o )(y) )/( partial I_( d i ) )
++ eta_( ell )( partial z ^( L )_( o\' )(x) )/( partial H^( ell )_( d d\' ) )( partial z^( L )_( o )(y) )/( partial H^( ell )_( d d\' ) )
++ eta_( O )( partial z ^( L )_( o\' )(x) )/( partial O_( o\'\'d ) )( partial z^( L )_( o )(y) )/( partial O_( o\'\'d ) )  )  angle.r\
 &approx
--  langle frac( partial cal(L)(z(x)) )(partial z ^( L )_( o\' ) )rangle langle( eta_( I ) frac( partial z ^( L )_( o\' )(x) )( partial I_( di ) )frac( partial z^( L )_( o )(y) )( partial I_( di ) )
-+ eta_( ell )frac( partial z ^( L )_( o\' )(x) )( partial H^( ell )_( dd\' ) )frac( partial z^( L )_( o )(y) )( partial H^( ell )_( dd\' ) )
-+ eta_( O )frac( partial z ^( L )_( o\' )(x) )( partial O_( o\'\'d ) )frac( partial z^( L )_( o )(y) )( partial O_( o\'\'d ) )  )  rangle  .
+-  angle.l ( partial cal(L)(z(x)) )/(partial z ^( L )_( o\' ) )angle.r angle.l( eta_( I ) ( partial
+  z ^( L )_( o\' )(x) )/( partial I_( d i ) )( partial z^( L )_( o )(y) )/( partial I_( d i ) )
++ eta_( ell )( partial z ^( L )_( o\' )(x) )/( partial H^( ell )_( d d\' ) )( partial z^( L )_( o )(y) )/( partial H^( ell )_( d d\' ) )
++ eta_( O )( partial z ^( L )_( o\' )(x) )/( partial O_( o\'\'d ) )( partial z^( L )_( o )(y) )/( partial O_( o\'\'d ) )  )  angle.r  .
 $
 
 This questionable assumption, which appears to be made in
@@ -3932,7 +3849,7 @@ $
 $
 
 Some conclusions from
-#link(<app_eq_deltaz_scaling>)[\[app_eq_deltaz_scaling\]];:
+/* #link(<app_eq_deltaz_scaling>)[\[app_eq_deltaz_scaling\]];: */
 
 - Assuming all the $D_ell$ are of roughly the same size, collectively
   called $D$, it is fairly natural to use per-layer learning rates of
@@ -3948,7 +3865,7 @@ Some conclusions from
   )$ (and $D$-independent) shift to the model's outputs.
   With this choice, the model updates will be $lambda$-independent under
   the scaling
-  #link(<app_eq_mup_width_scaling>)[\[app_eq_mup_width_scaling\]];,
+  /* #link(<app_eq_mup_width_scaling>)[\[app_eq_mup_width_scaling\]];, */
   at the current order of approximation. Note that it's not at all
   obvious whether such a stability condition also implies optimal
   learning.
@@ -3957,7 +3874,7 @@ Some conclusions from
   $(eta_I \, eta_ell \, eta_O)$ to find the optimal learning rates for
   fixed model widths $(D_I \, D_ell \, D_O)$. Then, one should be able
   to scale up the model as in
-  #link(<app_eq_mup_width_scaling>)[\[app_eq_mup_width_scaling\]]
+  /* #link(<app_eq_mup_width_scaling>)[\[app_eq_mup_width_scaling\]] */
   while simultaneously scaling
   $
     eta_I & arrow.r eta_I lambda^s med \, quad eta_ell arrow.r eta_ell lambda^(s - 1) med \, quad eta_O arrow.r eta_O / lambda med \,
@@ -3967,12 +3884,12 @@ Some conclusions from
 
 - The parameter $s$ is currently undetermined. The muTransfer limit
   @yang2022tensor corresponds
-  to#footnote[#link(<app_eq_mup_lr_lambda_scaling_adam>)[\[app_eq_mup_lr_lambda_scaling_adam\]]
+  /* to#footnote[#link(<app_eq_mup_lr_lambda_scaling_adam>)[\[app_eq_mup_lr_lambda_scaling_adam\]] */
   agrees with Table 3 of @yang2022tensor when $s = 1$.] $s = 1$, for
-  which the model outputs at initialization scale as
-  $z_d^L tilde.op 1 / sqrt(D)$, an undesirable scaling which is
-  compensated for by the $D$-independent SGD updates which eventually
-  make the model outputs approximately independent of model width.
+which the model outputs at initialization scale as
+$z_d^L tilde.op 1 / sqrt(D)$, an undesirable scaling which is
+compensated for by the $D$-independent SGD updates which eventually
+make the model outputs approximately independent of model width.
 
 - One reasonable constraint is $s gt.eq 0$, since the model outputs at
   initialization are $z_d^L tilde.op D^(- s \/ 2)$ and we want the
@@ -3990,24 +3907,24 @@ $
 where various terms are zero depending on the value of $ell$ and which
 coincides with the full neural tangent kernel when $ell = L$. These obey
 recursion relations, from the chain rule: $
-N^( L )_( oo\' )(y, x) &=eta_( O )delta_( oo\' ) z^( L-1 )(x)dot z^( L-1 )(y) + O_( od )O_( o\'d\' )N^( L-1 )_( dd\' )\
-N^( ell )_( dd\' )(y, x) &=eta_( ell )delta_( dd\' ) z^( ell-1 )(x)dot z^( ell-1 )(y) + H^( ell )_( de )H^(ell )_( d\'e\' )N^( ell-1 )_( ee\' )  , quad L-1 g e ell g e 1\
-N^(0)_( dd\' )(y, x) &=eta_(0)delta_( dd\' ) z^( -1 )(x)dot z^( -1 )(y) + I_( di )I_( d\'i\' ) N^( -1 )_( ii\' )\
-N^( -1 )_( dd\' )(y, x)&=eta_( I )delta_( dd\') xdot y  .
+N^( L )_( o o' )(y, x) &=eta_( O )delta_( o o' ) z^( L-1 )(x)dot z^( L-1 )(y) + O_( o d )O_( o\'d\' )N^( L-1 )_( d d\' )\
+N^( ell )_( d d\' )(y, x) &=eta_( ell )delta_( d d\' ) z^( ell-1 )(x)dot z^( ell-1 )(y) + H^( ell )_( d e )H^(ell )_( d\'e\' )N^( ell-1 )_( e e' )  , quad L-1 g e ell g e 1\
+N^(0)_( d d\' )(y, x) &=eta_(0)delta_( d d\' ) z^( -1 )(x)dot z^( -1 )(y) + I_( d i )I_( d\'i\' ) N^( -1 )_( i i' )\
+N^( -1 )_( d d\' )(y, x)&=eta_( I )delta_( d d\') x dot y  .
 $ Demanding that the true neural tangent kernel
 $N_(o o')^L$ be width-independent and that all layers provide
 parametrically-equal contributions lands us on the same equations and
 solutions as above#footnote[The equivalence follows from the fact that
-$langle Delta z^( L )_( o )
-rangle = -  langle frac( partial cal(L)  )( partial o\' ) N^( L )_( oo\' )
-rangle$];. Extending this analysis to higher orders in $eta$,
+$angle.l Delta z^( L )_( o )
+angle.r = -  angle.l ( partial cal(L)  )/( partial o\' ) N^( L )_( o o' )
+angle.r$];. Extending this analysis to higher orders in $eta$,
 @yaida2022metaprincipledfamilyhyperparameterscaling derives another
 bound: $s lt.eq 1$, placing muTransfer's prescription at the edge of the
 bounded region.
 
 ===== Adam
 <adam>
-Since Adam(W), not SGD, is the de facto optimizer of choice, we need to
+Since Adam(W), not SGD, is the d e facto optimizer of choice, we need to
 extend the above arguments. A quick and dirty assumption which leads to
 a reasonable (and phenomenologically supported) scaling result is to
 assume that the SGD and Adam updates generally point in the same
@@ -4015,15 +3932,15 @@ direction and that elements of the Adam updates are all
 $cal(O) ( 1 )$.
 
 That is, let the Adam update for some weight
-$W_(d e) in bb(R)^(D times E)$ be, schematically, $
-Delta^( "Adam" ) W_( de ) =- frac( langle frac( partial cal(L) )( partial W_( de ) ) rangle )( sqrt( langle  (frac( partial cal(L) )( partial W_( de ) ) )^2 rangle ) )  ,
-
+$W_(d e) in RR^(D times E)$ be, schematically,
+$
+  Delta^"Adam" W_( d e ) =- ( angle.l ( partial cal(L) ) / ( partial W_( d e ) ) angle.r ) / ( sqrt( angle.l  (( partial cal(L) )/( partial W_( d e ) ) )^2 angle.r ) ) ,
 $ while
-$Delta^( "Adam" ) W_( de ) =- frac( partial cal(L) )( partial W_( de ) )$,
+$Delta^"Adam" W_( d e ) =- ( partial cal(L) )/( partial W_( d e ) )$,
 omitting the learning rate and where expectation values are really
 corrected exponential moving averages. Then assume that a relation of
-the form $Delta^( "Adam" ) W_( de )approx
-alpha_( W ) Delta^( "SGD" ) W_( de )$ holds for some
+the form $Delta^"Adam" W_( d e )approx
+alpha_( W ) Delta^"SGD" W_( d e )$ holds for some
 $alpha_W$, i.e. that the Adam and SGD updates typically point in the
 same direction and are approximately related by an overall
 factor#footnote[This is exactly true in the $beta_1 arrow.r 0$ limit,
@@ -4035,37 +3952,39 @@ small errors (whose size we will not attempt to quantify).
 
 With these assumptions, we can determine the value of $alpha_W$ through
 $
-langle Delta^( "Adam" ) W_( de )Delta^( "Adam" ) W_( de ) rangle
-&approx alpha_( W )^2 langle Delta^( "SGD" ) W_( de )Delta^( "SGD" ) W_( de ) rangle  .
+  angle.l Delta^"Adam" W_( d e )Delta^"Adam" W_( d e ) angle.r
+  &approx alpha_( W )^2 angle.l Delta^"SGD" W_( d e )Delta^"SGD" W_( d e ) angle.r .
+$
 
-$ The left hand side is approximately $D times E$ (the
+The left hand side is approximately $D times E$ (the
 number of components of the weight, more generally) via the assumption
-that all components $Delta^( "Adam" ) W_( de )$ are
+that all components $Delta^"Adam" W_( d e )$ are
 $cal(O)
 ( 1 )$. For instance, this is exactly true in the limit
 where every gradient in the history has taken on the same value, in
 which case all components#footnote[Ignoring the $epsilon.alt$ term in
 the Adam implementation. This result is also exactly true for the LION
 optimizer @chen2023symbolicdiscoveryoptimizationalgorithms for which
-$Delta^( "LION" )    W_( de )
-=pm 1$ for all components.] are 1. The right side can be approximated
+$Delta^"LION"    W_( d e ) = plus.minus 1$ for all components.] are 1. The right side can be approximated
 using the same assumptions used in App.~@app_mup_toy_limit:
 $
-langle Delta^( "SGD" ) W_( de )Delta^( "SGD" ) W_( de ) rangle &= langle frac( partial cal(L) )( partial W_( de ) )frac( partial cal(L) )( partial W_( de ) ) rangle\
-&=langle frac( partial cal(L) )( partial z_( o ) )frac( partial z_( o ) )( partial W_( de ) )frac(partial cal(L) )( partial z_( o\' ) )frac( partial z_( o\' ) )( partial W_( de ) ) rangle\
-&approx langle frac( partial cal(L) )( partial z_( o ) )frac(partial cal(L) )( partial z_( o\' ) )rangle  langle frac( partial z_( o ) )( partial W_( de ) )frac( partial z_( o\' ) )( partial W_( de ) ) rangle  .
+  angle.l Delta^"SGD" W_( d e )Delta^"SGD" W_( d e ) angle.r &= angle.l ( partial cal(L) ) / ( partial W_( d e ) )( partial cal(L) ) / ( partial W_( d e ) ) angle.r\
+  &=angle.l ( partial cal(L) ) / ( partial z_( o ) )( partial z_( o ) ) / ( partial W_( d e ) )(partial cal(L) ) / ( partial z_( o\' ) )( partial z_( o\' ) ) / ( partial W_( d e ) ) angle.r\
+  &approx angle.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o\' ) )angle.r angle.l ( partial z_( o ) ) / ( partial W_( d e ) )( partial z_( o\' ) ) / ( partial W_( d e ) ) angle.r .
 $
 
 These final factors were computed in
 #link(<app_eq_mup_expectation_vals>)[\[app_eq_mup_expectation_vals\]]
-and the relations for the various weights become: $
-D_( -1 )D_( I ) &=alpha_( I )^2 langle frac( partial cal(L) )( partial z_( o ) )frac(partial cal(L) )( partial z_( o ) )rangle frac( x dot y )( D^( s )_( L-1 ) )\
-D_( ell )D_( ell-1 ) &=alpha_( ell )^2 langle frac( partial cal(L) )( partial z_( o ) )frac(partial cal(L) )( partial z_( o ) )rangle frac( D_( ell-1 ) )( D_( L-1 )^( s ) ) times cases( xdot y & x, y  "one-hot" frac( xdot y )( D_( I ) ) & x, y  "normal)"\
-D_( O )D_( L-1 ) &=alpha_(O)^2 langle frac( partial cal(L) )( partial z_( o ) )frac(partial cal(L) )( partial z_( o ) ) rangle D_( L-1) times cases( xdot y & x, y  "one-hot" frac( xdot y )( D_( I ) ) & x, y  "normal)"\
-$ Considering the scaling
-#link(<app_eq_mup_width_scaling>)[\[app_eq_mup_width_scaling\]];, we
-assume the $langle frac(
-partial cal(L) )( partial z_( o ) )frac(partial cal(L) )( partial z_( o ) ) rangle$
+and the relations for the various weights become:
+$
+  D_( -1 )D_( I ) &=alpha_( I )^2 angle.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o ) )angle.r ( x dot y ) / ( D^( s )_( L-1 ) )\
+  D_( ell )D_( ell-1 ) &=alpha_( ell )^2 angle.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o ) )angle.r ( D_( ell-1 ) ) / ( D_( L-1 )^( s ) ) times cases( x dot y & x, y  "one-hot" ( x dot y )/( D_( I ) ) & x, y  "normal")\
+  D_( O )D_( L-1 ) &=alpha_(O)^2 angle.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o ) ) angle.r D_( L-1) times cases( x dot y & x, y  "one-hot" ( x dot y )/( D_( I ) ) & x, y  "normal")\
+$
+Considering the scaling
+/* #link(<app_eq_mup_width_scaling>)[\[app_eq_mup_width_scaling\]];, we */
+assume the $angle.l (
+partial cal(L) )/( partial z_( o ) )(partial cal(L) )/( partial z_( o ) ) angle.r$
 factors to be $lambda$-independent (since the goal of muTransfer is to
 keep the model outputs $z_0^L$ $lambda$-independent) and matching the
 remaining factors gives:
@@ -4076,14 +3995,14 @@ $
 Repeating the analysis of App.~@app_mup_toy_limit with the Adam updates
 and the preceding assumptions amounts to replacing
 $eta_X arrow.r eta_X alpha_X$ everywhere, which changes
-#link(<app_eq_mup_lr_lambda_scaling_sgd>)[\[app_eq_mup_lr_lambda_scaling_sgd\]]
-to#footnote[#link(<app_eq_mup_lr_lambda_scaling_adam>)[\[app_eq_mup_lr_lambda_scaling_adam\]]
+/* #link(<app_eq_mup_lr_lambda_scaling_sgd>)[\[app_eq_mup_lr_lambda_scaling_sgd\]] */
+/* to#footnote[#link(<app_eq_mup_lr_lambda_scaling_adam>)[\[app_eq_mup_lr_lambda_scaling_adam\]] */
 agrees with Table 3 of @yang2022tensor when $s = 1$.]
 $
-eta_( I ) &longrightarrow eta_( I ) lambda^( frac( s-1 )( 2 ) ) ,quad
-eta_( ell ) longrightarrow eta_( ell ) lambda^( frac( s-3 )( 2 ) ) , quad
-eta_( O ) longrightarrowfrac( eta_( O ) )( lambda ) quad <app_eq_mup_lr_lambda_scaling_adam> ("Adam)"  .
-$
+  eta_( I ) &--> eta_( I ) lambda^( ( s-1 ) / ( 2 ) ) ,quad
+  eta_( ell ) --> eta_( ell ) lambda^( ( s-3 ) / ( 2 ) ) , quad
+  eta_( O ) --> eta_( O ) / ( lambda ) quad ("Adam)" .
+$<app_eq_mup_lr_lambda_scaling_adam>
 
 ===== Activations
 <activations-1>
@@ -4105,7 +4024,7 @@ qualitatively change the picture. The two relatively minor changes are:
 
 Both of these affect scaling with depth, $L$, but not the scaling with
 width
-#link(<app_eq_mup_width_scaling>)[\[app_eq_mup_width_scaling\]] in
+/* #link(<app_eq_mup_width_scaling>)[\[app_eq_mup_width_scaling\]] in */
 any essential way.
 
 === Cheat Sheet <app_cheat_sheet>
@@ -4113,21 +4032,20 @@ Collecting all of the most fundamental equations, given to various
 degrees of accuracy.
 
 Number of model parameters: $
-N _( "params" ) & = (4+2E)LD ^2 + VD+ cal(O) ( DL ) approx  ( 4+2E  )LD ^2 ,
+N _"params" & = (4+2E)L D ^2 + V D+ cal(O) ( D L ) approx  ( 4+2E  )L D ^2 ,
 $ assuming no sharding of the embedding matrix.
 
 ====== Training
 <training-1>
 Memory costs for mixed-precision training: $
-M _( "model" ) & =p _( "model" ) N _( "params" ) \
-M _( "optim" ) & =  ( s _( "states" )+1 ) times p _( (rm master ) ) N _( "params" ) \
-M _( "act" ) ^( "total" ) & =frac( 2BDLS  ( p(E+4) + 1  ) )( T )
-+ frac( ABLS ^2  ( 2p+1 ) )( T ) + cal(O) ( BSV )
-$ where $s _( "states" )$ is the number of
+M _"model" & =p _"model" N _"params" \
+M _"optim" & =  ( s _"states"+1 ) times p _"master" N _"params" \
+M _"act" ^"total" & =( 2B D L S  ( p(E+4) + 1  ) )/( T )
++ ( A B L S ^2  ( 2p+1 ) )/( T ) + cal(O) ( B S V )
+$ where $s _"states"$ is the number of
 optimizer states, e.g. $s = 0$ for SGD and $s = 2$ for Adam. FLOPs
 total: $
-F _( "total" ) ^( "model" ) & approx 12 BDLS  ( S +  ( 2+E  )D  ) .
+F _"total" ^"model" & approx 12 B D L S  ( S +  ( 2+E  )D  ) .
 $
-*/
 
 #bibliography("bibliography.bib")
