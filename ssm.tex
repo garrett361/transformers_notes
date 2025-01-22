@@ -194,7 +194,7 @@ latter optionally applies a norm operator post-projection.}.
 \State $ C _{ sgn } = K ^{ C } _{ gnss' }\star C_{ sgn }$
 \State Solve recursion, subject to $ h _{ (-1)gahn }=0 $:
 \begin{align}
-    h _{ sgahn } &= \exp \left ( \Delta  _{ sa } W^{A} _{ a } \right ) h _{ (s-1)gah n} + \Delta _{ sa }B _{ sgn }x _{ se }\nn
+    h _{ sgahn } &= \exp \left ( \Delta  _{ sa } W^{A} _{ a } \right ) h _{ (s-1)gah n} + \Delta _{ sa }B _{ sgn }x _{ sah }\nn
     y _{ sah } &= C _{ sgn }h _{ sgahn } +  W ^{ D } _{ a }x _{ sah } \nn
     \implies y _{ sah } &= C _{ sgn }\left (\sum _{ s'=0 }^{ s }e^{ \Delta _{ sa }W^{A} _{ a } }\times \ldots \times e^{ \Delta _{ (s'+1)a }W^{A} _{ a } } \Delta _{ s'a }B _{ s'gn } x _{ s'ah }\right ) + W ^{ D } _{ a } x _{ sah }\nn
    &= C _{ sgn }\left (\sum _{ s'=0 }^{ s }\prod_{ s''=s'+1 }^{ s  }e^{ \Delta _{ s''a }W^{A} _{ a } } \Delta _{ s'a }B _{ s'gn } x _{ s'ah }\right ) + W ^{ D } _{ a } x _{ sah }
