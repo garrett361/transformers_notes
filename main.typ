@@ -3182,17 +3182,17 @@ operations are easiest to describe by forming the logical super-tensor
 of shape such that the tensor on rank is . Then, the primitive
 operations are:
 
-- : all workers receive the chief's data, $x^((0))$.
+- `Broadcast`: all workers receive the chief's data, $x^((0))$.
 
-- : all workers communicate their data $x_n$ to the chief, e.g. in a
+- `Gather`: all workers communicate their data $x_n$ to the chief, e.g. in a
   concatenated array $[x^0 \, x^1 \, dots.h \, x^(R - 1)]$. E.g., the
   chief gets .
 
-- : data is -ed to the chief, which then performs some operation (, , ,
+- `Reduce`: data is -ed to the chief, which then performs some operation (, , ,
   etc.) producing a new tensor $x'$ on the chief worker. E.g., for the
   chief gets .
 
-- : a reducing operation (e.g. ) is applied to the $x^((r))$ to produce
+- `ReduceScatter`: a reducing operation (e.g. ) is applied to the $x^((r))$ to produce
   a $x'$ of the same shape (e.g. $x' = sum x^((r))$) and each worker
   only receives a $1 \/ R$ slice (and hence $M \/ R$ byte) of the
   result#footnote[Note that and are morally conjugate to each other. In
@@ -3204,13 +3204,13 @@ operations are:
   A ring implementation sends $M times frac(R - 1, R)$ bytes over each
   link in the ring. E.g., for rank gets output .
 
-- : all data $x^((r))$ is communicated to all workers; each worker ends
+- `AllGather`: all data $x^((r))$ is communicated to all workers; each worker ends
   up with the array $[x^0 \, x^1 \, dots.h \, x^(R - 1)]$. Functionally
   equivalent to a followed by . A ring implementation sends
   $M times (R - 1)$ bytes over each link in the ring. E.g., all ranks
   get .
 
-- : all workers receive the same tensor $x'$ produced by operating on
+- `AllReduce`: all workers receive the same tensor $x'$ produced by operating on
   the $x^((r))$ with , , etc. Functionally equivalent to a followed by ,
   or a followed by a (the more efficient choice#footnote[The former
   strategy scales linearly with the number of worker, while the latter
@@ -3223,12 +3223,12 @@ operations are:
   $2 M times frac(R - 1, R)$, due to -ing the initial $M$-sized data,
   and then -ing the $M \/ R$-sized reductions. E.g., for all ranks get .
 
-- : One worker gives shards of a tensor to all workers. If the worker is
+- `Scatter`: One worker gives shards of a tensor to all workers. If the worker is
   scattering tensor $T_x$ over the given index, a effectively shards
   this as $T_x arrow.r T_((macron(r) y))$, each worker getting a
   $macron(r)$-shard. If is the chief's data, rank receives .
 
-- : All workers receive shards of all others worker's tensors. If every
+- `AllToAll`: All workers receive shards of all others worker's tensors. If every
   worker has a tensor $T_(macron(r) y)$, for one value of $macron(r)$,
   which we imagine came from a sharding a tensor
   $T_x = T_((macron(r) y))$, then an over the $y$ index produces
