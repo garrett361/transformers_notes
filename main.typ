@@ -3,6 +3,8 @@
  * - Eq numbering
  * - Sec numbering
  * - Fix algos
+ * - TOC styling
+ * - Multi-citation fmt
  * */
 
 /* Custom objects */
@@ -148,13 +150,15 @@
 )
 
 
-#block[
-  #strong[Decoder-Only Transformers]
 
-]
 
 #set heading(numbering: "1.")
 #set math.equation(numbering: "1.")
+#show outline.entry.where(level: 1): it => {
+  v(12pt, weak: true)
+  strong(it)
+}
+#outline(indent: auto)
 
 = Architecture
 <architecture>
@@ -264,7 +268,7 @@ the positional encoding tensor.
 The above components require $(V + S) D approx V D$ parameters per
 model.
 
-==== Layer Norm <layer_norm>
+=== Layer Norm <layer_norm>
 The original transformers paper @vaswani2017attention put instances
 after the #strong[attention] and #strong[MLP] blocks, but now it is
 common @xiong2020layer to put them before these blocks#footnote[Which
@@ -472,7 +476,7 @@ class CausalAttention(nn.Module):
 The parameter count is dominated by the weight matrices which carry
 $4 D^2$ total parameters per layer.
 
-==== MLP <subsubsec_mlp>
+=== MLP <subsubsec_mlp>
 The feed-forward network is straightforward and corresponds to
 $
   z_( b s d ) & -> DR (phi ( z_( b s d' )W^( 0 )_( d'e ) ) W^( 1 )_( e d ) )
@@ -487,14 +491,14 @@ did in in Sec.~@attn_layer.
 This bock requires $2 E D^2$ parameters per layer, only counting the
 contribution from weights.
 
-==== Language Model Head <subsubsec_language_model_head>
+=== Language Model Head <subsubsec_language_model_head>
 The layer which converts the -shaped outputs, $z_(b s d)$, to -shaped
 predictions over the vocabulary, $y_(b s v)$, is the #strong[Language
 Model Head];. It is a linear layer, whose weights are often tied to be
 exactly those of the initial embedding layer of
 Sec.~@subsubsec_embedding_and_pe.
 
-==== All Together
+=== All Together
 <all-together>
 It is then relatively straightforward to tie every thing together. In
 code, we can first create a transformer block like which corresponds to
@@ -506,7 +510,7 @@ indices suppressed.
 
 And then the entire architecture:
 
-==== The Loss Function
+=== The Loss Function
 <the-loss-function>
 The last necessary component is the loss function. The training loop data is the -shaped#footnote[is
 the block size, the maximum sequence-length for the model. See App.~@app_conventions.] token
@@ -567,12 +571,12 @@ outputs_flat, targets_flat = outputs.reshape(-1, outputs.shape[-1]), targets.res
 loss = F.cross_entropy(outputs_flat, targets_flat)
 ```
 
-=== Architecture and Algorithm Variants
+== Architecture and Algorithm Variants
 <architecture-and-algorithm-variants>
 There are, of course, many variants on the basic architecture. Some
 particularly important ones are summarized here.
 
-==== GLU Variants<subsec_glu_variants>
+=== GLU Variants<subsec_glu_variants>
 In @shazeer2020gluvariantsimprovetransformer, Shazeer advocated for
 replacing the usual linear-then-activation function pattern,
 $ z_(d') & = phi (W_(d' d) x_d) $ to
@@ -583,7 +587,7 @@ included. This construction is typically called “$phi$GLU\" where
 $phi$ is the name of the activation function: ReGLU, SwiGLU/SiGLU
 ($phi = x sigma (x)$ used in the LLaMA models), etc.
 
-==== Multi-Query Attention <subsec_multi_query_attn>
+=== Multi-Query Attention <subsec_multi_query_attn>
 In @shazeer2019fast, the $A$ different key and value matrices are
 replaced by a single matrix each, while $A$ different query-heads
 remain. The mechanisms are otherwise unchanged: where there were
@@ -597,7 +601,7 @@ decreasing the memory-burden of the cache by a factor of $A$. This
 strategy also reduces activation memory during training, but that is
 more of a side-effect.
 
-==== Grouped Attention <subsec_grouped_attn>
+=== Grouped Attention <subsec_grouped_attn>
 #strong[Grouped Query Attention] (GQA) @ainslie2023gqa is the natural
 extension of multi-query-attention to using $1 < G < A$ matrices for key
 and value generation. Each of the $G$ different keys gets matched up
@@ -606,7 +610,7 @@ with $A \/ G$ heads (nice divisibility assumed)#footnote[Llama-2
 group can be sharded and put on its own GPU within a standard 8-GPU
 node.];.
 
-==== Parallel and Layers
+=== Parallel and Layers
 <parallel-and-layers>
 Rather than first pass inputs into the layer of each block, and then
 pass those outputs on to in series,
@@ -624,7 +628,7 @@ above).]
 $ z arrow.l z + MLP (z) + CA (z) med . $
 Note that a instance is also removed.
 
-==== RoPE Embeddings
+=== RoPE Embeddings
 <rope-embeddings>
 A shortcoming of traditional embeddings
 $x_(b s d) arrow.r x_(b s d) + p_(s d)$ is that they do not generalize
@@ -682,7 +686,7 @@ where $ theta_d & = 10^(- 8 d \/ D) med . $ The RoPE memory costs are thus $cal(
 @eq_rope] can be computed in $cal(O) ( B S D )$ time, rather than $cal(O) ( B S D ^2 )$, as it would
 be for a general rotation matrix. See the paper for explicit expressions.
 
-==== Flash Attention <subsec_flash_attention>
+=== Flash Attention <subsec_flash_attention>
 Flash Attention @dao2022flashattention@dao2023flashattention2 optimizes
 the self attention computation by never materializing the
 $cal(O) ( S ^2 )$ attention scores in off-chip
@@ -795,7 +799,7 @@ from the $cal(O) ( A B S )$ elements in the $ell_(a b s)$
 statistics, which are dominated by the $cal(O) ( B S D )$
 costs from needing to save inputs, and hence negligible.
 
-===== The Details <subsubsec_fa_details>
+==== The Details <subsubsec_fa_details>
 Here we give more detailed descriptions of the flash-attention forwards
 and backwards passes.
 
@@ -880,7 +884,7 @@ guideline than a strict recipe.];:
 
 ]
 
-==== Linear Attention <subsec_linear_attn>
+=== Linear Attention <subsec_linear_attn>
 Linear attention @katharopoulos2020transformersrnnsfastautoregressive
 removes the $SM$ operation in the attention layer in order to reduce
 the inference costs in terms of compute and time, both.
@@ -917,7 +921,7 @@ of the $cal(O) ( S D ^2 )$ elements at once.
 
 = State Space Models
 <state-space-models>
-=== Intro<sec_ssm_intro>
+== Intro<sec_ssm_intro>
 Needing to re-reference the entire previously-generated prefix at
 generation time is a major pain point for transformers models. Token
 generation is $cal(O) ( S )$ State space models return,
@@ -925,7 +929,7 @@ more or less, to the old LSTM type strategy of encoding the conditional
 history which informs generation into a finite-sized state. The dream is
 faster generation and better memory efficiency.
 
-=== S4 <sec_s4>
+== S4 <sec_s4>
 The S4 model of @s4 is a good starting point. These are based off a
 continuous representation in which some input signal#footnote[We use the
 notation of the mamba paper @mamba, which differs from that of the S4
@@ -977,7 +981,7 @@ $cal(O) ( D ^2 )$ (via the representation
 sequence-length dependence for next-output generation, unlike for
 transformers, which is the main draw here: constant-time generation.
 
-=== Mamba<sec_mamba>
+== Mamba<sec_mamba>
 A large limitation of the S4 model
 #link(<eq_s4_discrete>)[\[eq_s4_discrete\]] is that the various
 weights are fixed quantities which do not adjust to the
@@ -1086,7 +1090,7 @@ As noted above, the creation of the intermediates
 $x_(s e)^0 \, x_(s e)^1 \, B_(s n) \, C_(s n)$ and part of $Delta_(s e)$
 can all be formed in a single large matmul.
 
-==== Mamba 2
+=== Mamba 2
 <mamba-2>
 Mamba2 introduces some changes:
 
@@ -1162,7 +1166,7 @@ convolution. The two algorithms Algo.~@algo_mamba1_scan and
 Algo.~@algo_mamba2_scan are nearly identical; they just differ in some
 tensor shapes.
 
-==== Mamba2 Duality with Attention
+=== Mamba2 Duality with Attention
 <mamba2-duality-with-attention>
 There are only two steps in which tokens at different temporal positions
 interact in the Mamba2 model:
@@ -1195,7 +1199,7 @@ $cal(O) ( S ^2 )$ tensors.
 Similar statements hold for the original Mamba; the index names and
 choices just make the analogy more readily recognizable in Mamba2.
 
-==== Details: Cumsums, Chunking, and the Mamba2 Scan
+=== Details: Cumsums, Chunking, and the Mamba2 Scan
 <details-cumsums-chunking-and-the-mamba2-scan>
 Some more details about how to compute the recursion solution in
 Algo.~@algo_mamba2_scan. Similarly to the previous section, let
@@ -1228,7 +1232,7 @@ $c' > c$ cases are trivial as $cal(A)_(c c' l l' a)$ vanishes.];:
 - $c > c'$: there is no sparsity here, as $cal(A)_(c c' l l' a)$ will be
   generically non-zero for all $l \, l'$.
 
-===== The $c = c'$ Cases
+==== The $c = c'$ Cases
 <the-cc-cases>
 Logically, we compute the scan using cumulative sums and
 matrix-multiplies. Let
@@ -1276,7 +1280,7 @@ computations is straightforward.
 
 
 
-===== The $c > c'$ Cases
+==== The $c > c'$ Cases
 <the-cc-cases-1>
 Now we compute the remaining off-diagonal terms. Compute one
 $(c \, c ')$ chunk at a time, i.e. we compute
@@ -1338,7 +1342,7 @@ M_( c c\' ) & = cases(
 )  .
 $
 
-==== Aren't These Just RNNs?<subsec_rnns_and_ssm>
+=== Aren't These Just RNNs?<subsec_rnns_and_ssm>
 Yes, but very special ones with the important computational difference
 that the recursion relations are #emph[linear] in the hidden state $h$.
 This crucial difference makes it possible to parallelize the operations
@@ -1356,7 +1360,7 @@ scan algorithms @prefixSumsBlelloch.
 
 = Training
 <training>
-=== Memory <sec_memory_training>
+== Memory <sec_memory_training>
 In this section we summarize the train-time memory costs of Transformers
 under various training strategies#footnote[A nice related blog post is
 #link("https://blog.eleuther.ai/transformer-math/")[here];.
@@ -1394,14 +1398,14 @@ own section.
   $cal(O) ( A B L S ^2 )$ factors from attention matrices.
 
 ]
-==== No Sharding
+=== No Sharding
 <no-sharding>
 Start with the simplest case where there is no sharding of the model
 states. Handling the different parallelism strategies later will be
 relatively straightforward, as it involves inserting just a few factors
 here and there.
 
-===== Parameters, Gradients, Optimizer States, and Mixed Precision <sec_params_grads_optim_mem>
+==== Parameters, Gradients, Optimizer States, and Mixed Precision <sec_params_grads_optim_mem>
 
 Memory from the bare parameter cost, gradients, and optimizer states are
 fixed costs independent of batch size and sequence-length (unlike
@@ -1474,7 +1478,7 @@ offset these increased costs, and we get the added benefit of increased
 speed due to specialized hardware. The above also demonstrates why
 training is so much more expensive than inference.
 
-===== Gradients
+==== Gradients
 <gradients>
 Gradients are pretty simple and always cost the same regardless of
 whether or not mixed-precision is used: $
@@ -1484,14 +1488,14 @@ initially computed in $p = 2$, they
 #link("https://huggingface.co/docs/transformers/v4.20.1/e n/perf_train_gpu_one#anatomy-of-models-memory")[have to be converted]
 to $p = 4$ to be applied to the master weights of the same precision.
 
-===== Activations
+==== Activations
 <activations>
 Activations will require a more extended analysis
 @korthikanti2022reducing. Unlike the above results, the activation
 memory will depend on both the batch size and input sequence length, $B$
 and $S$, scaling linearly with both.
 
-====== Attention Activations
+===== Attention Activations
 <attention-activations>
 We will count the number of input elements which need to be cached. Our
 \-shaped inputs to the attention layer with $B D S$ elements are first
@@ -1511,7 +1515,7 @@ from activations is $
 M _"act" ^"Attention" & = B L S  ( (5p+1)D + (2p+1)A S  )  .
 $<eq_att_actmem_vanilla>
 
-====== MLP Activations
+===== MLP Activations
 <mlp-activations>
 First we pass the -shaped inputs into the first MLP layer. These turn
 into the inputs of the non-linearity, whose same-shaped outputs are then
@@ -1521,7 +1525,7 @@ across all layers is: $
 M _"act" ^MLP & = (2 E p+p+1)B D L S .
 $<eq_mlp_actmem_vanilla>
 
-====== LayerNorm, Residual Connections, and Other Contributions
+===== LayerNorm, Residual Connections, and Other Contributions
 <layernorm-residual-connections-and-other-contributions>
 Then the last remaining components. The instances each have $B D S$
 inputs and there are two per transformer block, so
@@ -1537,7 +1541,7 @@ computing the loss function, but these do not scale with $L$ and are
 ultimately $ cal(O)
 (  V /( D L ) )$ suppressed, so we neglect them.
 
-====== Total Activation Memory
+===== Total Activation Memory
 <total-activation-memory>
 Summing up the contributions above, the total activation memory cost
 per-layer is $
@@ -1550,7 +1554,7 @@ $
   M_"act"^"total" |_( E=4, p=2 ) & =B L S ( 34 D+5 A S )
 $
 
-====== When does mixed-precision reduce memory?
+==== When does mixed-precision reduce memory?
 <when-does-mixed-precision-reduce-memory>
 (Answer: usually.) We saw in Sec.~@sec_params_grads_optim_mem that mixed
 precision #emph[increases] the fixed costs of non-activation memory, but
@@ -1604,7 +1608,7 @@ mixed-precision is indeed an overall savings at such typical scales.
   of the backwards pass, they are garbage collected in soon after
   creation.
 
-  ====== Example
+  ===== Example
   <example>
   $SM$ is another instance where this occurs, since $
   partial _( i ) SM  ( x _( j )  ) &= delta _( i j )SM  ( x _( j )  ) - SM  ( x _( i )  ) SM  ( x _( j )  )
@@ -1618,7 +1622,7 @@ mixed-precision is indeed an overall savings at such typical scales.
 ]
 
 
-=== Training FLOPs <sec_flops_training>
+== Training FLOPs <sec_flops_training>
 The total number of floating point operations (FLOPs)#footnote[The
 notation surrounding floating-point operations is very confusing because
 another quantity of interest is the number of floating-point operations
@@ -1666,13 +1670,13 @@ for here are actually negligible (true for $S lt.tilde 10 D$).];. The
 
 ]
 
-==== No Recomputation
+=== No Recomputation
 <no-recomputation>
 Start with the case where there is no recomputation activations. These
 are the #strong[model FLOPs] of @korthikanti2022reducing, as compared to
 the #strong[hardware FLOPs] which account for gradient checkpointing.
 
-====== : Forwards
+==== : Forwards
 <forwards>
 The FLOPs costs:
 
@@ -1684,13 +1688,13 @@ The FLOPs costs:
 
 - Final projection: $2 B S D^2$
 
-====== : Forwards
+==== : Forwards
 <forwards-1>
 Passing a through the layer, the FLOPs due to the first and second
 matrix-multiplies are equal, with total matrix-multiply FLOPs
 $4 B S E D^2$.
 
-====== Backwards Pass: Approximate
+==== Backwards Pass: Approximate
 <backwards-pass-approximate>
 The usual rule of thumb is to estimate the backwards pass as costing
 twice the flops as the forwards pass. This estimate comes from just
@@ -1749,11 +1753,11 @@ perform the second term in
 we do not need to backpropagate to the inputs, so the total backwards
 flops is more precisely $4 D I J (L - 1) + 2 D I J$.];.
 
-====== Backwards Pass: More Precise
+==== Backwards Pass: More Precise
 <backwards-pass-more-precise>
 #strong[TODO]
 
-====== Total Model FLOPs
+==== Total Model FLOPs
 <total-model-flops>
 The grand sum is then#footnote[With a large vocabulary, the cost of the
 final language model head matrix multiply can also be significant, but
@@ -1948,7 +1952,7 @@ the parameter and tokens budget should be scaled in equal measure.
 
 = Fine Tuning
 <fine-tuning>
-=== Instruction Fine Tuning
+== Instruction Fine Tuning
 <instruction-fine-tuning>
 Generally, instruction fine-tuning is a follow-on step after model
 pre-training#footnote[A terminology note: pre-training is standard
@@ -1962,7 +1966,7 @@ failure mode this corrects for: next-token training would do best by
 replicating common mistakes in grammar or statements of fact which can
 be corrected for using these methods.];.
 
-==== Direct Preference Optimization <subsec_dpo>
+=== Direct Preference Optimization <subsec_dpo>
 Direct Preference Optimization (DPO)
 @rafailov2024directpreferenceoptimizationlanguage is a vast
 simplification of previous reinforcement-learning based methods (namely
@@ -2064,7 +2068,7 @@ which we've now renamed the DPO loss. The loss
 minimized by standard, gradient based methods without any generation
 step.
 
-==== KTO: Preference Finetuning without Pairs <subsec_kto>
+=== KTO: Preference Finetuning without Pairs <subsec_kto>
 DPO requires a dataset of triplets: a prefix, one preferred completion,
 and one dispreferred completion. KTO alignment
 @ethayarajh2024ktomodelalignmentprospect attempts to reduce the inputs a
@@ -2128,7 +2132,7 @@ rough estimate of the scale and do not backpropagate through $z_0$,
 The simplicity of the Transformers architecture lends itself to a deep
 variety of parallelism strategies. We review some of them below.
 
-==== Tensor Parallelism <subsec_tensor_parallelism>
+== Tensor Parallelism <subsec_tensor_parallelism>
 #block[
   Side Note: I wrote a blog post on this
   #link("https://www.determined.ai/blog/tp")[here.]
@@ -2154,7 +2158,7 @@ in a group reside on the same node, hence the usual $T = 8$.]
 
 ]
 
-====== MLP
+=== MLP
 <mlp-1>
 It is straightforward to find the reasonable ways in which the weights
 can be partitioned. We suppress all indices apart from those of the
@@ -2221,7 +2225,7 @@ for the backward pass.
 )
 <fig_mlp_tensor_parallel>
 
-====== Attention
+=== Attention
 <attention>
 Because the individual attention head computations are independent, they
 can be partitioned across $T$ workers without collectively
@@ -2294,7 +2298,7 @@ non-tensor-parallel implementations.
 )
 <fig_attn_tensor_parallel>
 
-====== Embedding and LM Head
+=== Embedding and LM Head
 <embedding-and-lm-head>
 Last, we can apply tensor parallelism to the language model head, which
 will also necessitate sharding the embedding layer, if the two share
@@ -2315,7 +2319,7 @@ For a weight-tied embedding layer, the former construction requires in
 order for every worker to get the full continuous representation of the
 input.
 
-====== LayerNorm and Dropout
+=== LayerNorm and Dropout
 <layernorm-and-dropout>
 instances are not sharded in pure tensor parallelism both because there
 is less gain in sharding them parameter-wise, but also sharding in
@@ -2325,7 +2329,7 @@ possible in pure tensor parallelism, but sharding the post-attention
 layer is unavoidable. It is the goal of sequence parallelism is to shard
 these layers efficiently; see Sec.~@subsec_seq_parallelism.
 
-====== Effects on Memory
+=== Effects on Memory
 <effects-on-memory>
 The per-worker memory savings come from the sharding of the weights and
 the reduced activation memory from sharded intermediate representations.
@@ -2360,7 +2364,7 @@ enhancement correspond to activations from unsharded and instances and
 the $1 \/ T$'s improvements can be enacted by layering sequence
 parallelism on top (Sec.~@subsec_seq_parallelism).
 
-==== Sequence Parallelism <subsec_seq_parallelism>
+== Sequence Parallelism <subsec_seq_parallelism>
 In
 #link(<eq_act_mem_total_tensor_parallel>)[\[eq_act_mem_total_tensor_parallel\]];,
 not every factor is reduced by $T$. #strong[Sequence Parallelism] fixes
@@ -2464,7 +2468,7 @@ In more detail:
 )
 <fig_tensor_seq_parallel_detail>
 
-==== Ring Attention <subsec_ring_attention>
+== Ring Attention <subsec_ring_attention>
 Ring Attention @liu2023ringattentionblockwisetransformers is roughly a
 distributed version of Flash Attention @subsec_flash_attention: it
 enables extremely long sequence-length processing by never realizing the
@@ -2527,7 +2531,7 @@ flash attention kernels can be found
 The full forms of the forwards and backwards passes are again similar to
 those of flash attention; see Sec. @subsubsec_fa_details.
 
-===== The Causal Mask
+==== The Causal Mask
 <the-causal-mask>
 A naive, row-major sharding of the queries, keys, and vectors is highly
 suboptimal for causal attention because it leads to idling GPUs.
@@ -2594,14 +2598,14 @@ in the subsequent iterations:
   again $frac(S^2, 2 R^2)$ operations. So work is perfectly distributed
   and no rank serves as a bottleneck.
 
-==== Pipeline Parallelism <subsec_pipe_parallelism>
+== Pipeline Parallelism <subsec_pipe_parallelism>
 TODO
 
 = Vision
 <vision>
 Notes on the usage of Transformers for vision tasks.
 
-=== Vision Transformers <sec_vit>
+== Vision Transformers <sec_vit>
 The original application of the Transformers architecture
 @dosovitskiy2021imageworth16x16words divides 2D images into patches of
 size $P times P$, e.g. flattening a three-channel $i_(x y c)$ image to
@@ -2620,7 +2624,7 @@ classification, for instance, by adding a classification head. The
 original training objective was just that: standard classification
 tasks.
 
-=== CLIP <sec_clip>
+== CLIP <sec_clip>
 CLIP (Contrastive Language-Image Pre-Training)
 @radford2021learningtransferablevisualmodels is a technique for
 generating semantically meaningful representations of images. The method
@@ -2682,7 +2686,7 @@ Post-training, the CLIP models can be used in many ways:
 
 = Mixture of Experts
 <mixture-of-experts>
-=== Basics
+== Basics
 <basics>
 The $cal(O) ( D ^2 )$ FLOPs count due to MLP
 layers#footnote[The $cal(O) ( S
@@ -2714,7 +2718,7 @@ practice, and only the computations $E_(e s d) (z_(s d))$ corresponding to non-t
 are performed, of course. Different MoE variants are essentially differentiated by the specific form
 of their weighting function.
 
-=== Routing
+== Routing
 <routing>
 Choosing which experts process which tokens is crucial, affecting both
 the downstream model and engineering (i.e. throughput) performance.
@@ -2730,7 +2734,7 @@ There are two dominant schemes:
 
 Layered on top of this choice are the details of the routing mechanisms.
 
-==== Token Choice vs Expert Choice
+=== Token Choice vs Expert Choice
 <token-choice-vs-expert-choice>
 Token and expert choice both introduce a tensor
 $W _( d e ) in RR ^( D times N _( "ex"
@@ -2748,7 +2752,7 @@ of expert choice is that some tokens may not be routed to any expert at
 all, but every expert is at least guaranteed an equal load. In this
 case, we effectively have $k = c times  (S )/( N _"ex" )$, with $c$ the capacity factor above.
 
-=== MegaBlocks
+== MegaBlocks
 <megablocks>
 The MoE computation maps awkwardly to the typical GPU primitives.
 Ideally the expert computations in
@@ -2763,11 +2767,11 @@ proper sparse kernels to handle general MoE computations without the
 need to enforce any hard per-expert token limits or introduce
 unnecessary padding. They call their method dropless MoE (dMoE).
 
-=== MoE Variants
+== MoE Variants
 <moe-variants>
 A collections of other MoE architecture choices.
 
-==== Shared Experts
+=== Shared Experts
 <shared-experts>
 Shared experts forces one particular expert to always be used, with the
 motivation of having the differentiated expert serve as a common pool of
@@ -2775,7 +2779,7 @@ knowledge.
 
 = Inference
 <inference>
-=== Basics and Problems
+== Basics and Problems
 <basics-and-problems>
 The essentials of decoder-only inference is that a given input sequence
 $x_(b s)$ is turned into a probability distribution $p_(b s v)$ over the
@@ -2993,7 +2997,7 @@ Purely pedagogical.] is below:
 The essentials of inference-time math, much of it based on
 @kipply_inference_math.
 
-====== Naive Inference
+==== Naive Inference
 <naive-inference>
 Processing a single -shaped tensor to generate a single next input costs
 the $2B S N _"params"$ FLOPs we found for the forwards-pass
@@ -3008,7 +3012,7 @@ window.] $2B S N _( "params"
 )/ lambda _"FLOP/s"$ where the FLOPs bandwidth in the
 /* denominator is again defined in App.~@app_compute_mem_bound. */
 
-====== kv-Cache Inference
+==== kv-Cache Inference
 <kv-cache-inference>
 The FLOPs requirements for the hidden-dimension matrix multiplies during
 generation are $2 B N _"params"$, since we are only
@@ -3025,7 +3029,7 @@ $ dropping $cal(O) ( 1 )$ factors, is
 per-token-latency of approximately $M _"infer"/
 lambda _"mem"$, unless the batch-size is very large.
 
-====== Intra-Node Communication
+==== Intra-Node Communication
 <intra-node-communication>
 For $T$-way tensor parallelism, two s are needed, one for each and each
 layer, where each accelerator is sending $p B D S$ bytes of data (see
@@ -3038,11 +3042,12 @@ lambda _"comms"$ time for the model as a whole. For an
 A100 80GiB, setup, this is $
 B D S times 10 ^( -11 )  "sec"$
 
-====== Latency
+==== Latency
 <latency>
 TODO
 
-=== Conventions and Notation
+= Appendix
+== Conventions and Notation
 <app_conventions>
 We loosely follow the conventions of @korthikanti2022reducing. Common
 parameters:
@@ -3164,7 +3169,7 @@ SM _( v )  x _( b v d... )
 $<app_eq_einstein_softmax> indicating that the sum over the singled-out
 $v$-index is gives unity.
 
-=== Collective Communications <app_collective_communications>
+== Collective Communications <app_collective_communications>
 A quick refresher on common distributed
 #link("https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html")[communication primitives];.
 Consider $R$ ranks with tensor data $x^((r))$ of some arbitrary shape ,
@@ -3229,13 +3234,13 @@ operations are:
   produces the tensor $T_(z macron(r))$ defined by
   $T_(z macron(r)) = T_x$ on all workers. E.g. rank receives .
 
-=== Hardware
+== Hardware
 <hardware>
 Basic information about relevant hardware considerations. Much of the
 following is from the
 #link("https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html")[NVIDIA docs];.
 
-==== NVIDIA GPU Architecture
+=== NVIDIA GPU Architecture
 <nvidia-gpu-architecture>
 NVIDIA GPUs consist of some amount of relatively-slow off-chip DRAM
 memory#footnote[This is the number usually reported when discussing a
@@ -3283,7 +3288,7 @@ to understand. Types of memory, from slowest to fastest:
 
 #link("https://www.youtube.com/watch?v=QQceTDjA4f4&t=2124s")[An excellent video overview of CUDA and NVIDIA GPU architecture which covers some of the above is here.]
 
-==== CUDA Programming Model
+=== CUDA Programming Model
 <cuda-programming-model>
 The CUDA programming model uses a hierarchy of concepts:
 
@@ -3314,7 +3319,7 @@ be launched can also read sequentially from memory and efficient usage
 implies that choosing the block size such that we are doing these reads
 as often as possible is ideal.
 
-==== NVIDIA GPU Stats <app_gpu_stats>
+=== NVIDIA GPU Stats <app_gpu_stats>
 Summary of some relevant NVIDIA GPU statistics:
 
 #block[
@@ -3453,7 +3458,7 @@ becomes $cal(O) ( 1 + D/( A S ) )$. An analysis
 equivalent to the one performed here can be found in the original paper
 @shazeer2019fast.];.
 
-==== Intra- and Inter-Node Communication
+=== Intra- and Inter-Node Communication
 <intra--and-inter-node-communication>
 For intra-node communication, GPUs are connected by either PCIe or
 NVLink, generally.
@@ -3471,7 +3476,7 @@ For inter-node communication, nodes are often connected by:
   clear reference. But in any case, the bandwidth is divided amongst the
   GPUs in the node, leading to a reduction by $tilde.op 8$.
 
-=== Batch Size, Compute, and Training Time <app_batch_size>
+== Batch Size, Compute, and Training Time <app_batch_size>
 The amount of compute directly determines the training time, but not all
 ways of spending compute are equivalent. We follow the discussion in
 @mccandlish2018empirical which gives a rule of thumb for determining the
@@ -3582,7 +3587,7 @@ sqrt(sigma kappa B _"noise" ) )/( kappa B _"noise" + sigma ) )$
 larger. So, this seems like a better choice of optimal batch size, if
 you value your time.
 
-=== Initialization, Learning Rates, $mu$-Transfer etc <app_init_lr_mup>
+== Initialization, Learning Rates, $mu$-Transfer etc <app_init_lr_mup>
 A quick review of common initialization strategies and arguments for
 learning rate choices and $mu$-transfer. We follow some mix of
 @physicalDL@yang2022tensor@yaida2022metaprincipledfamilyhyperparameterscaling@doshi2023criticalinitializationwidedeep.
@@ -3602,7 +3607,7 @@ easiest limit to reason about.
 We mostly specialize to very simple cases in the following: MLP-only
 models which may have trivial non-linearities.
 
-==== Wide Models are Nearly Gaussian <app_nearly_gaussian_wide_models>
+=== Wide Models are Nearly Gaussian <app_nearly_gaussian_wide_models>
 First we discuss the justification of an assumption we make throughout:
 the outputs of every block (suitably defined) at initialization are
 approximately normally distributed.
@@ -4027,7 +4032,7 @@ width
 /* #link(<app_eq_mup_width_scaling>)[\[app_eq_mup_width_scaling\]] in */
 any essential way.
 
-=== Cheat Sheet <app_cheat_sheet>
+== Cheat Sheet <app_cheat_sheet>
 Collecting all of the most fundamental equations, given to various
 degrees of accuracy.
 
@@ -4035,7 +4040,7 @@ Number of model parameters: $
 N _"params" & = (4+2E)L D ^2 + V D+ cal(O) ( D L ) approx  ( 4+2E  )L D ^2 ,
 $ assuming no sharding of the embedding matrix.
 
-====== Training
+=== Training
 <training-1>
 Memory costs for mixed-precision training: $
 M _"model" & =p _"model" N _"params" \
