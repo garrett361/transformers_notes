@@ -927,6 +927,7 @@ faster generation and better memory efficiency:
 - Parallelizable#footnote[Better parallelization support is what differentiated S4 models from their
   RNN/LSTM predecessors; see @rnns_and_ssm.] $cal(O)( S )$ training.
 - Constant $cal(O)( 1 )$ generation.
+- Sequence-length-independent state, reducing the inference-time memory bandwidth burden compared to the kv-cache; @sec_kv_cache.
 
 
 == S4 <sec_s4>
