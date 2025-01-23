@@ -1083,20 +1083,20 @@ learnable weights as $W_dots.h^X$.
 
 Mamba blocks then perform the following logical operation:
 
-#block[
-  Mamba #strong[Inputs]: tensor $x_(s d) in bb(R)^(S times D)$
-  $x_(s e)^0 = W_(e d)^(I_0) x_(s d)$, $x_(s e)^1 = W_(e d)^(I_1) x_(s d)$
-  Create expanded tensors from inputs (can fuse)
-  $x_(s e)^2 = K_(e s s') star.op x_(s e)^1$ 1D grouped convolution over
-  the sequence dimension using $W_(e c)^K$.
-  $x_(s e)^3 = phi (x_(s e)^2)$ Elementwise non-linearity (`F.silu`
-  default) $x_(s e)^4 = mono("selective_scan") (x_(s e)^3)$ Selective scan
-  (see below). $x_(s e)^5 = x_(s e)^4 times.circle phi (x_(s e)^0)$
-  Elementwise product and non-linearity (`F.silu` default)
-  $z_(s d) = W_(d e)^O x_(s e)^5$ Project back down.
-  $z_(s d) in bb(R)^(S times D)$ <algo_mamba_1>
-
-]
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [Mamba],
+  pseudocode-list(booktabs: true)[
+    + *Inputs*: tensor $x_(s d) in bb(R)^(S times D)$
+    + $x_(s e)^0 = W_(e d)^(I_0) x_(s d)$, $x_(s e)^1 = W_(e d)^(I_1) x_(s d)$ #h(1fr) `# Create expanded tensors from inputs (can fuse)`
+    + $x_(s e)^2 = K_(e s s') star.op x_(s e)^1$ #h(1fr) `# Grouped conv. over the seq dim using W^K.`
+    + $x_(s e)^3 = phi (x_(s e)^2)$ #h(1fr) `# Elementwise non-linearity (silu)`
+    + $x_(s e)^4 = mono("selective_scan") (x_(s e)^3)$ #h(1fr) `# Selective scan`
+    + $x_(s e)^5 = x_(s e)^4 times.circle phi (x_(s e)^0)$ #h(1fr) `# Elementwise product and non-linearity (silu)`
+    + *Return* $z_(s d) = W_(d e)^O x_(s e)^5$ #h(1fr) `#Project back down.`
+  ],
+)<algo_mamba_1>
 where `selective_scan` operation is the above is#footnote[The
 `mamba_ssm` and `mamba.py` implementations differ in the first step in
 that the latter optionally applies a norm operator post-projection. The
@@ -1104,21 +1104,28 @@ exponentials here might seem odd, but are probably motivated by the
 existence of good cumulative sum kernels, which is how the exponents can
 be computed.]
 
-#block[
-  Selective Scan: `selective_scan` #strong[Inputs]: tensor
-  $x_(s e) in bb(R)^(S times E)$ $B_(s n) = W_(n e)^B x_(s e)$ Create
-  intermediates $B \, C \, Delta$ (can fuse). $C_(s n) = W_e^C x_(s e)$
-  $Delta_(s e) = W_(e r)^(Delta_1) W_(r e)^(Delta_0) x_(s e)$. Solve
-  recursion, subject to $h_((- 1) e n) = 0$:
-  $
-    h_( s e n ) &= exp ( Delta_( s e ) W^(A)_( e n ) ) h_( (s-1)e n) + Delta_( s e )B_( s n )x_( s e )\
-    y_( s e ) &= C_( s n )h_( s e n ) + W^( D )_( e )x_( s e ) \
-    => y_( s e ) &= C_( s n ) (sum_( s\'=0 )^( s )e^( Delta_( s e )W^(A)_( e n ) ) times ... times e^( Delta_( (s\'+1)e )W^(A)_( e n ) ) Delta_( s\'e ) B_( s\'n ) x_( s\'e ) ) + W^( D )_( e ) x_( s e )\
-    &= C_( s n ) (sum_( s\'=0 )^( s )product_( s\'\'=s\'+1 )^( s )e^( Delta_( s\'\'e )W^(A)_( e n ) ) Delta_( s\'e ) B_( s\'n ) x_( s\'e ) ) + W^( D )_( e ) x_( s e )
-  $
-  $y_(s e) in bb(R)^(S times E)$ <algo_mamba1_scan>
 
-]
+
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [Selective Scan],
+  pseudocode-list(booktabs: true)[
+    + *Inputs*: $x_(s e) in bb(R)^(S times E)$
+    + $B_(s n) = W_(n e)^B x_(s e)$ #h(1fr) `# Create intermediates B, C, Delta (can fuse).`
+    + $C_(s n) = W_e^C x_(s e)$
+    + $Delta_(s e) = W_(e r)^(Delta_1) W_(r e)^(Delta_0) x_(s e)$.
+    + Solve recursion, subject to $h_((- 1) e n) = 0$:
+    - $h_( s e n ) &= exp ( Delta_( s e ) W^(A)_( e n ) ) h_( (s-1)e n) + Delta_( s e )B_( s n )x_( s e )$
+    - $y_( s e ) &= C_( s n )h_( s e n ) + W^( D )_( e )x_( s e )$
+    - $=> y_( s e ) &= C_( s n ) (sum_( s\'=0 )^( s )e^( Delta_( s e )W^(A)_( e n ) ) times ... times e^( Delta_( (s\'+1)e )W^(A)_( e n ) ) Delta_( s\'e ) B_( s\'n ) x_( s\'e ) ) + W^( D )_( e ) x_( s e )$
+    - $=> y_( s e )&= C_( s n ) (sum_( s\'=0 )^( s )product_( s\'\'=s\'+1 )^( s )e^( Delta_( s\'\'e
+          )W^(A)_( e n ) ) Delta_( s\'e ) B_( s\'n ) x_( s\'e ) ) + W^( D )_( e ) x_( s e)$
+    + *Return* $y_(s e) in bb(R)^(S times E)$
+  ],
+)<algo_mamba1_scan>
+
+
 As noted above, the creation of the intermediates
 $x_(s e)^0 \, x_(s e)^1 \, B_(s n) \, C_(s n)$ and part of $Delta_(s e)$
 can all be formed in a single large matmul.
@@ -1151,48 +1158,52 @@ Mamba2 introduces some changes:
 
 The updated model:
 
-#block[
-  Mamba2 #strong[Inputs]: tensor $x_(s d) in bb(R)^(S times D)$
-  $x_(s e)^0 = W_(e d)^(I_0) x_(s d)$, $x_(s e)^1 = W_(e d)^(I_1) x_(s d)$
-  Create expanded tensors from inputs (can fuse)
-  $x_(s e)^2 = K_(e s s') star.op x_(s e)^1$ 1D grouped convolution over
-  the sequence dimension (fused) $x_(s e)^3 = phi (x_(s e)^2)$
-  Elementwise non-linearity (`F.silu` default)
-  $x_(s e)^4 = mono("selective_scan2") (x_(s e)^3)$ Selective scan (see
-  below).
-  $x^5_( s e ) = NORM (x^4_( s e ) times.circle phi ( x^0_( s e ) ) )_( e )$
-  Elementwise product, non-linearity, and norm (`RMS` default)
-  $z_(s d) = W_(d e)^O x_(s e)^5$ Project back down.
-  $z_(s d) in bb(R)^(S times D)$ <algo_mamba_2>
 
-]
+
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [Mamba2],
+  pseudocode-list(booktabs: true)[
+    + *Inputs* $x_(s d) in bb(R)^(S times D)$
+    + $x_(s e)^0 = W_(e d)^(I_0) x_(s d)$, $x_(s e)^1 = W_(e d)^(I_1) x_(s d)$ #h(1fr) `# Create expanded tensors from inputs (can fuse)`
+    + $x_(s e)^2 = K_(e s s') star.op x_(s e)^1$ #h(1fr) `# 1D grouped convolution over the sequence dimension (fused)`
+    + $x_(s e)^3 = phi (x_(s e)^2)$ #h(1fr) `# Elementwise non-linearity (silu)`
+    + $x_(s e)^4 = mono("selective_scan2") (x_(s e)^3)$ #h(1fr) `# Selective scan`
+    + $x^5_( s e ) = NORM (x^4_( s e ) times.circle phi ( x^0_( s e ) ) )_( e )$ #h(1fr) `# Elementwise product, non-linearity, and norm (RMS)`
+    + *Return* $z_(s d) = W_(d e)^O x_(s e)^5$ #h(1fr) `# Project back down.`
+  ],
+)<algo_mamba_2>
+
+
+
 The mechanical differences are the normalization step and the details of
 the `selective_scan2` operation, which is essentially the same as
 before, but now the hidden $e$ is split into multiple attention heads,
 analogously to transformer models:
 
-#block[
-  Selective Scan 2: `selective_scan2` #strong[Inputs]: tensor
-  $x_(s e) in bb(R)^(S times E)$ $x_(s a h) = x_(s (a h)) = x_(s e)$ Break
-  the inputs up into attention heads. $B_(s g n) = W_(g n e)^B x_(s e)$
-  Create intermediates $B \, C \, Delta$ (can fuse)#footnote[The
-`mamba_ssm` and `mamba.py` implementations differ here in that the
-latter optionally applies a norm operator post-projection.].
-  $C_(s g n) = W_(g n e)^C x_(s e)$ $Delta_(s a) = W_(a e)^Delta x_(s e)$.
-  $Delta_(s a) = mono("Softplus") (Delta_(s a))$. For some reason.
-  $mono("Softplus") (x) equiv ln (1 + e^x)$.
-  $B_(s g n) = K_(g n s s')^B star.op B_(s g n)$ 1D grouped convolution
-  over the sequence dimension (fused)
-  $C_(s g n) = K_(g n s s')^C star.op C_(s g n)$ Solve recursion, subject
-  to $h_((- 1) g a h n) = 0$: $
-  h _( s g a h n ) &= exp  ( Delta _( s a ) W^(A) _( a )  ) h _( (s-1)g a h n) + Delta _( s a )B _( s g n )x _( s a h )\
-  y _( s a h ) &= C _( s g n )h _( s g a h n ) + W ^( D ) _( a )x _( s a h ) \
-  => y _( s a h ) &= C _( s g n ) (sum _( s\'=0 )^( s )e^( Delta _( s a )W^(A) _( a ) ) times ... times e^( Delta _( (s\'+1)a )W^(A) _( a ) ) Delta _( s\'a )B _( s\'g n ) x _( s\'a h ) ) + W ^( D ) _( a ) x _( s a h )\
-  &= C _( s g n ) (sum _( s\'=0 )^( s )product_( s\'\'=s\'+1 )^( s )e^( Delta _( s\'\'a )W^(A) _( a ) ) Delta _( s\'a )B _( s\'g n ) x _( s\'a h ) ) + W ^( D ) _( a ) x _( s a h )
-  $ $y_(s e) = y_(s (a h))$ Concatenate the heads back
-  together. $y_(s e) in bb(R)^(S times E)$ <algo_mamba2_scan>
 
-]
+
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [Selective Scan 2: `selective_scan2`],
+  pseudocode-list(booktabs: true)[
+    + *Inputs*: $x_(s e) in bb(R)^(S times E)$ $x_(s a h) = x_(s (a h)) = x_(s e)$ #h(1fr) `# Break the inputs up into attention heads.`
+    + $B_(s g n) = W_(g n e)^B x_(s e)$ #h(1fr) `# Create intermediates B, C, Delta (can fuse)`#footnote[The `mamba_ssm` and `mamba.py` implementations differ here in that the latter optionally applies a norm operator post-projection.].
+    + $C_(s g n) = W_(g n e)^C x_(s e)$ $Delta_(s a) = W_(a e)^Delta x_(s e)$.
+    + $Delta_(s a) = mono("Softplus") (Delta_(s a))$. #h(1fr) `# For some reason.` $mono("Softplus") (x) equiv ln (1 + e^x)$.
+    + $B_(s g n) = K_(g n s s')^B star.op B_(s g n)$ #h(1fr) `# 1D grouped conv. over the seq. dim. (fused)`
+    + $C_(s g n) = K_(g n s s')^C star.op C_(s g n)$
+    + Solve recursion, subject to $h_((- 1) g a h n) = 0$:
+    - $h_( s g a h n ) &= exp ( Delta_( s a ) W^(A)_( a ) ) h_( (s-1)g a h n) + Delta_( s a )B_( s g n )x_( s a h )$
+    - $y_( s a h ) &= C_( s g n )h_( s g a h n ) + W^( D )_( a )x_( s a h )$
+    - $=> y_( s a h ) &= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) ) times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) ) + W^( D )_( a ) x_( s a h )$
+    - $=> y_( s a h )&= C_( s g n ) (sum_( s\'=0 )^( s )product_( s\'\'=s\'+1 )^( s )e^( Delta_( s\'\'a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) ) + W^( D )_( a ) x_( s a h)$
+    + *Return* $y_(s e) = y_(s (a h))$ #h(1fr) `# Concatenate the heads back together. `
+  ],
+)<algo_mamba2_scan>
+
 As before, many of the matmuls can be performed as one big operation,
 and the three short convolutions can be similarly fused into a single
 convolution. The two algorithms Algo.~@algo_mamba1_scan and
