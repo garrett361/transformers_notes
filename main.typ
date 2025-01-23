@@ -487,7 +487,31 @@ respectively (see App.~@app_conventions for notation) and $phi$ is a
 non-linearity#footnote[The `GeLU`
 #link("https://pytorch.org/docs/stable/generated/torch.nn.GELU.html")[non-linearity]
 is common.]. In code, where we again separate out the last $DR$ layer as we
-did in in @attn_layer.
+did in in @attn_layer:
+```python
+class MLP(nn.Module):
+    def __init__(
+        self,
+        hidden_dim=D,
+        expansion_factor=E,
+        dropout=0.1,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.expansion_factor = expansion_factor
+        self.dropout = dropout
+
+        linear_1 = nn.Linear(hidden_dim, expansion_factor * hidden_dim)
+        linear_2 = nn.Linear(expansion_factor * hidden_dim, hidden_dim)
+        gelu = nn.GELU()
+        self.layers = nn.Sequential(linear_1, gelu, linear_2)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, inputs):
+        z = self.layers(inputs)
+        z = self.dropout(z)
+        return z
+```
 
 This bock requires $2 E D^2$ parameters per layer, only counting the
 contribution from weights.
@@ -509,7 +533,6 @@ $
 $
 indices suppressed.
 
-And then the entire architecture:
 
 === The Loss Function
 <the-loss-function>
@@ -552,8 +575,7 @@ probabilities:
 $"perplexity" = e^( cal(L) ) = (product_( b, s )p(x _( b
         (s+1) )=| x _( b s ), x _( b (s-1) ), ..., x _( b 0 )) ) ^(  -1 /( B K ) )$.].
 
-In `torch` code, the loss computation might look like the following (using fake
-data):
+In `torch` code, the loss computation might look like the following (using fake data):
 ```python
 model = DecoderOnly(
     num_attn_heads=A,
@@ -2971,9 +2993,6 @@ number of token exceeds the hidden dimension. Using the kv-cache
 eliminates a would-be $cal(O) ( S ^2 )$ factor in the
 FLOPs needed to compute a new token, reducing it to linear-in-$S$
 dependence everywhere.
-
-A very minimal implementation#footnote[Warning: very non-optimized code!
-Purely pedagogical.] is below:
 
 === Basic Memory, FLOPs, Communication, and Latency
 <basic-memory-flops-communication-and-latency>
