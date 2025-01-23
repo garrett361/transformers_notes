@@ -23,7 +23,6 @@
 #let TR = `Trace`
 
 
-#let horizontalrule = line(start: (25%, 0%), end: (75%, 0%))
 
 #show terms: it => {
   it
@@ -213,11 +212,11 @@ token in the sequence. Given some initial text, transformers can be used
 to give a prediction for the likelihood of any possible continuation of
 that text. An outline of the mechanics#footnote[This describes the
 vanilla architecture; almost every component is modified in the
-available variants.];:
+available variants.]:
 
 + Raw text is #strong[tokenized] and turned into a series of
   integers#footnote[There are about
-  #link("https://github.com/ray-project/llm-numbers")[1.3 tokens per word];,
+  #link("https://github.com/ray-project/llm-numbers")[1.3 tokens per word],
   on average.] whose values lie in , with $V$ the vocabulary size.
 
 + The tokenized text is chunked and turned into -shaped (batch size and
@@ -260,7 +259,7 @@ available variants.];:
   probabilities can be combined to form the probability that any
   sequence of tokens follows a given initial seed#footnote[In more
   detail, these probabilities are created by products:
-  $P (t_(s + n) dots.h t_(s + 1) \| t_s dots.h t_0) = P (t_(s + n) \| t_(s + n - 1) dots.h t_s dots.h t_0) times dots.h times P (t_(s + 1) \| t_s dots.h t_0)$.];.
+  $P (t_(s + n) dots.h t_(s + 1) \| t_s dots.h t_0) = P (t_(s + n) \| t_(s + n - 1) dots.h t_s dots.h t_0) times dots.h times P (t_(s + 1) \| t_s dots.h t_0)$.].
 
 Each batch (the $b$-index) is processed independently. We omitted and
 layers above, as well as the causal mask; these will be covered below as
@@ -294,7 +293,7 @@ The original transformers paper @vaswani2017attention put instances
 after the #strong[attention] and #strong[MLP] blocks, but now it is
 common @xiong2020layer to put them before these blocks#footnote[Which
 makes intuitive sense for the purposes of stabilizing the matrix
-multiplications in the blocks];.
+multiplications in the blocks].
 
 The operations acts over the hidden dimension (since this is the
 dimension the subsequent instances act on). Spelling it out, given the
@@ -330,7 +329,7 @@ absorbed. Also, because the usual training algorithms are not invariant
 under parameter redefinitions, the above unfortunately does not imply
 that removing the learnable parameters ( in ) will have no effect on
 training dynamics. $gamma_d \, beta_d$ can shoved into the layer's
-parameters as a small inference-time optimization, though.];.
+parameters as a small inference-time optimization, though.].
 
 === Causal Attention <attn_layer>
 #strong[Causal attention] is the most complex layer. It features $A$
@@ -350,7 +349,7 @@ variant which is popular in Summer 2023 is multi-query attention
 vectors and only the query changes across heads, as this greatly reduces
 /* inference costs. See @subsec_multi_query_attn.  */
 
- ];.
+ ].
 
 Using the above tensors, we will then build up an #strong[attention map]
 $w_(b s s' a)$ which corresponds to how much attention the token at
@@ -395,7 +394,7 @@ $<eq_reweighted_values>
 and these -shaped tensors are then concatenated along
 the $e$-direction to re-form a -shaped tensor $u_(b s d)$
 $ u_(b s d) & = y_(b s (e a)) $ in
-#link("https://einops.rocks/1-einops-basics/")[einops];-like notation for
+#link("https://einops.rocks/1-einops-basics/")[einops]-like notation for
 concatenation. Finally, another weight matrix $O_(d' d)$ and dropout
 layer transform the output once again to get the final output
 $
@@ -418,7 +417,7 @@ chunked is more efficient] sample code for such a layer#footnote[When
 using sequence-parallelism, it will be more natural to separate out the
 final layer and combine it with the subsequent , as they are sharded
 together; see @subsec_seq_parallelism. The same is true for the
-layer below.];:
+layer below.]:
 
 ```python
 class CausalAttention(nn.Module):
@@ -500,7 +499,7 @@ where $W^0$ and $W^1$ are - and -shaped matrices,
 respectively (see App.~@app_conventions for notation) and $phi$ is a
 non-linearity#footnote[The
 #link("https://pytorch.org/docs/stable/generated/torch.nn.GELU.html")[non-linearity]
-is common.];. In code, where we again separate out the last layer as we
+is common.]. In code, where we again separate out the last layer as we
 did in in @attn_layer.
 
 This bock requires $2 E D^2$ parameters per layer, only counting the
@@ -509,7 +508,7 @@ contribution from weights.
 === Language Model Head <subsubsec_language_model_head>
 The layer which converts the -shaped outputs, $z_(b s d)$, to -shaped
 predictions over the vocabulary, $y_(b s v)$, is the #strong[Language
-Model Head];. It is a linear layer, whose weights are often tied to be
+Model Head]. It is a linear layer, whose weights are often tied to be
 exactly those of the initial embedding layer of
 @subsubsec_embedding_and_pe.
 
@@ -564,7 +563,7 @@ Processing (NLP), the is often reported instead of the loss, which is
 just the exponential of the loss, a geometric-mean over the gold-answer
 probabilities:
 $"perplexity" = e^( cal(L) ) = (product_( b, s )p(x _( b
-        (s+1) )=| x _( b s ), x _( b (s-1) ), ..., x _( b 0 )) ) ^(  -1 /( B K ) )$.];.
+        (s+1) )=| x _( b s ), x _( b (s-1) ), ..., x _( b 0 )) ) ^(  -1 /( B K ) )$.].
 
 In code, the loss computation might look like the following (using fake
 data):
@@ -623,14 +622,14 @@ and value generation. Each of the $G$ different keys gets matched up
 with $A \/ G$ heads (nice divisibility assumed)#footnote[Llama-2
 @touvron2023llama2 uses GQA with $G = 8$, seemingly chosen so that each
 group can be sharded and put on its own GPU within a standard 8-GPU
-node.];.
+node.].
 
 === Parallel and Layers
 <parallel-and-layers>
 Rather than first pass inputs into the layer of each block, and then
 pass those outputs on to in series,
 #link("https://github.com/kingoflolz/mesh-transformer-jax/blob/f8315e3003033b23f21d78361b288953064e0e76/mesh_transformer/layers.py#L303")[GPT-J-6B]
-instead processes the outputs in #emph[parallel];. That is, instead of
+instead processes the outputs in #emph[parallel]. That is, instead of
 something like
 $
   z arrow.l z + MLP (LN (z + CA (z)))
@@ -697,7 +696,7 @@ $
 $
 where $ theta_d & = 10^(- 8 d \/ D) med . $ The RoPE memory costs are thus $cal(O) ( K D
 )$#footnote[A single RoPE buffer can be shared amongst all attention layers, amortizing the memory
-    costs.];. The sparsity present in this constrained form of the RoPE matrices means that
+    costs.]. The sparsity present in this constrained form of the RoPE matrices means that
 @eq_rope] can be computed in $cal(O) ( B S D )$ time, rather than $cal(O) ( B S D ^2 )$, as it would
 be for a general rotation matrix. See the paper for explicit expressions.
 
@@ -875,7 +874,7 @@ algorithm is#footnote[In the FA2 paper, they actually pre-compute the
 $g_(i r h) z_(i r h)$ sum prior to the main loop and store it in a
 tensor they call $D$. And in the official `triton` example, $dif q$
 is computed in a separate loop. So, take the below as more of a
-guideline than a strict recipe.];:
+guideline than a strict recipe.]:
 
 #block[
   Flash Attention Backward Pass Initialize off-chip tensors
@@ -1007,7 +1006,7 @@ GPU implementation, which is the primary focus of the paper.
 
 The mamba architecture is as follows, based on the implementation in
 #link("https://github.com/alxndrTL/mamba.py")[`mamba.py`] and
-#link("https://github.com/state-spaces/mamba")[`mamba_ssm`];. Notation
+#link("https://github.com/state-spaces/mamba")[`mamba_ssm`]. Notation
 for dimensions and tensors:
 
 - Mamba maps sequences to sequences, the same as for transformers.
@@ -1036,7 +1035,7 @@ for dimensions and tensors:
 
 - Learnable parameters#footnote[In practice, many of these are fused
   together for more efficient matmuls. We also omit potential bias
-  terms.];:
+  terms.]:
 
   - Two in-projectors from `d_model ` to the expanded dimension:
     $W_(e d)^(I_0)$, $W_(e d)^(I_1)$.
@@ -1062,7 +1061,7 @@ learnable weights as $W_dots.h^X$.
 Mamba blocks then perform the following logical operation:
 
 #block[
-  Mamba #strong[Inputs];: tensor $x_(s d) in bb(R)^(S times D)$
+  Mamba #strong[Inputs]: tensor $x_(s d) in bb(R)^(S times D)$
   $x_(s e)^0 = W_(e d)^(I_0) x_(s d)$, $x_(s e)^1 = W_(e d)^(I_1) x_(s d)$
   Create expanded tensors from inputs (can fuse)
   $x_(s e)^2 = K_(e s s') star.op x_(s e)^1$ 1D grouped convolution over
@@ -1083,7 +1082,7 @@ existence of good cumulative sum kernels, which is how the exponents can
 be computed.]
 
 #block[
-  Selective Scan: `selective_scan` #strong[Inputs];: tensor
+  Selective Scan: `selective_scan` #strong[Inputs]: tensor
   $x_(s e) in bb(R)^(S times E)$ $B_(s n) = W_(n e)^B x_(s e)$ Create
   intermediates $B \, C \, Delta$ (can fuse). $C_(s n) = W_e^C x_(s e)$
   $Delta_(s e) = W_(e r)^(Delta_1) W_(r e)^(Delta_0) x_(s e)$. Solve
@@ -1130,7 +1129,7 @@ Mamba2 introduces some changes:
 The updated model:
 
 #block[
-  Mamba2 #strong[Inputs];: tensor $x_(s d) in bb(R)^(S times D)$
+  Mamba2 #strong[Inputs]: tensor $x_(s d) in bb(R)^(S times D)$
   $x_(s e)^0 = W_(e d)^(I_0) x_(s d)$, $x_(s e)^1 = W_(e d)^(I_1) x_(s d)$
   Create expanded tensors from inputs (can fuse)
   $x_(s e)^2 = K_(e s s') star.op x_(s e)^1$ 1D grouped convolution over
@@ -1150,12 +1149,12 @@ before, but now the hidden $e$ is split into multiple attention heads,
 analogously to transformer models:
 
 #block[
-  Selective Scan 2: `selective_scan2` #strong[Inputs];: tensor
+  Selective Scan 2: `selective_scan2` #strong[Inputs]: tensor
   $x_(s e) in bb(R)^(S times E)$ $x_(s a h) = x_(s (a h)) = x_(s e)$ Break
   the inputs up into attention heads. $B_(s g n) = W_(g n e)^B x_(s e)$
   Create intermediates $B \, C \, Delta$ (can fuse)#footnote[The
 `mamba_ssm` and `mamba.py` implementations differ here in that the
-latter optionally applies a norm operator post-projection.];.
+latter optionally applies a norm operator post-projection.].
   $C_(s g n) = W_(g n e)^C x_(s e)$ $Delta_(s a) = W_(a e)^Delta x_(s e)$.
   $Delta_(s a) = mono("Softplus") (Delta_(s a))$. For some reason.
   $mono("Softplus") (x) equiv ln (1 + e^x)$.
@@ -1234,7 +1233,7 @@ $
 where we have chunked the $a$-index into the $c \, l$ pair (with $c$
 indexing the chunk). The chunked computation breaks down into two
 further cases, based on the values of the $c \, c\'$ indices#footnote[The
-$c\' > c$ cases are trivial as $cal(A)_(c c\' l l' a)$ vanishes.];:
+$c\' > c$ cases are trivial as $cal(A)_(c c\' l l' a)$ vanishes.]:
 
 - $c = c\'$: these cases are effectively smaller versions of the entire,
   unchunked computation, and hence shares in its sparsity in that
@@ -1269,7 +1268,7 @@ $
 The argument $sans(A)_(c c\' l l' a)$ can be
 constructed in various
 ways#footnote[$CUMSUM_s X_s equiv sum_(s' = 0)^s X_(s')$ and
-$SEGSUM$ stands for “segment sum\".];: $
+$SEGSUM$ stands for “segment sum\".]: $
 bold(A)_( c c\' l l\'a )&= SEGSUM_( l ) ( A_( c l a )  ) + M _( l l\' )\
 &= CUMSUM_( l )A_( c l a ) - CUMSUM_( l\' )A_( c l\'a ) + M_( l l\' ) \
 &= CUMSUM_( l ) ( A_( c l a )Z_( l l\' )  ) + M _( l l\' )\
@@ -1310,7 +1309,7 @@ $ We will break the above into three
 factors#footnote[In the nomenclature of
 @dao2024transformersssmsgeneralizedmodels, whose authors also refer to
 these as the B, A, and C blocks, respectively (though we actually differ
-slightly in detail from what the paper and `mamba-ssm` do).];:
+slightly in detail from what the paper and `mamba-ssm` do).]:
 
 + A right-factor which propagates the $cal(B)_(c\' l' g a n h)$ from
   their disparate times $(c ' \, l ')$ all up to a common point in time.
@@ -1340,7 +1339,7 @@ where we use masks instead of relying in numerically unstable
 cancellations. $T_(c\' l' a) = exp (mono("sum")_l Z_(l l') A_(c\' l a))$,
 $U_(c l a) = exp (mono("sum")_(l') (1 - Z_(l' l)) A_(c\' l' a))$ with
 $Z_(l l')$ the mask in
-@app_eq_mamba2_diag_propagator;.];:
+@app_eq_mamba2_diag_propagator;.]:
 $
   T_( c\'l\'a ) &=exp ( SUM_( l\' ) ( A_( c\'l\'a ) ) - CUMSUM_( l\' )A_( c l\'a ) )\
   bold(A)_( c c\'a )&=exp ( SEGSUM_( c )A_( c a ) - A_( c\' a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )\
@@ -1376,7 +1375,7 @@ $
 $<eq_rnn_comparison>
 for some non-linearity $phi$. The recursion relations would solve to an expression with nested $phi$
 factors which would make the computation of $h_(b s)$ non-associative. But in the linear $phi (x) =
-x$ limit, the operations are #emph[associative] which makes them #emph[parallelizable];, via known
+x$ limit, the operations are #emph[associative] which makes them #emph[parallelizable], via known
 scan algorithms @prefixSumsBlelloch.
 
 = Training
@@ -1384,8 +1383,8 @@ scan algorithms @prefixSumsBlelloch.
 == Memory <sec_memory_training>
 In this section we summarize the train-time memory costs of Transformers
 under various training strategies#footnote[A nice related blog post is
-#link("https://blog.eleuther.ai/transformer-math/")[here];.
-<foot_eleuther_math_101>];.
+#link("https://blog.eleuther.ai/transformer-math/")[here].
+<foot_eleuther_math_101>].
 
 The memory cost is much more than simply the cost of the model
 parameters. Significant factors include:
@@ -1453,7 +1452,7 @@ $
   N_"params" & approx (4 + 2E) L D^2 times ( 1 + cal(O) ( V / ( D L ) ) + cal(O) ( 1 / D ) ) .
 $<eq_approx_params_no_sharding> where the first term comes from the weight
 matrices#footnote[So, in the usual $E = 4$ case, the layers are twice as
-costly as the layers.];, the first omitted subleading correction term is
+costly as the layers.], the first omitted subleading correction term is
 the embedding matrix, and the last comes from biases, instances, and
 other negligible factors. The optimizer states cost double the model
 itself.
@@ -1473,7 +1472,7 @@ be verified by inspecting the saved tensors: if is the output of a
 matrix-multiply in such an autocast context, will be a copy of the
 weights used to perform the matrix-multiply. In effect, the cost of the
 model weights which are used for the actual forward pass are only
-materialized within the lifetime of the context manager.];:
+materialized within the lifetime of the context manager.]:
 
 - A half-precision ($p = 2$ bytes) copy of the model is used to perform
   the forwards and backwards passes
@@ -1527,7 +1526,7 @@ attention scores and the final output whose masks must be cached in
 order to backpropagate. In torch, the mask is a tensor, but
 #link("https://github.com/pytorch/pytorch/issues/41571")[surprisingly]
 these use one #emph[byte] of memory per element, rather than one bit
-#footnote[As you can verify via];. Given this, the total memory cost
+#footnote[As you can verify via]. Given this, the total memory cost
 from activations is $
 M _"act" ^"Attention" & = B L S  ( (5p+1)D + (2p+1)A S  )  .
 $<eq_att_actmem_vanilla>
@@ -1550,7 +1549,7 @@ $M _"act" ^LN = 2 p B D L S$, and there is an
 additional instance at the end of the architecture#footnote[Following
 @korthikanti2022reducing we will neglect this in the below sum, an
 $cal(O) ( 1/L
-)$ error];. There are two residual connections per block, but
+)$ error]. There are two residual connections per block, but
 their inputs do not require caching (since their derivatives are
 independent of inputs). Then, there are additional contributions from
 pushing the last layer's outputs through the language-model head and
@@ -1582,7 +1581,7 @@ Specializing to the case $E = 4$, vanilla mixed-precision case with no
 parallelism#footnote[With both tensor- and sequence-parallelism, the
 parallelism degree $T$ actually drops out in the comparison (since both
 form of memory are decrease by $1 \/ T$, so this restriction can be
-lifted.];, the minimum batch size which leads to memory savings is
+lifted.], the minimum batch size which leads to memory savings is
 $
   B_"min" & = ( 6 D^2 ) / ( 8 D S + A S^2 ) .
 $<eq_min_mp_batch_size> Plugging in numbers for the typical
@@ -1616,10 +1615,10 @@ mixed-precision is indeed an overall savings at such typical scales.
     derivative
     $phi' (z) = Phi (z) + frac(z e^(- z^2 \/ 2), sqrt(2 pi))$, both
     the inputs and outputs
-    #link("https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/tools/autograd/derivatives.yaml#L2041-L2044")[must be used in the backwards pass.];.
+    #link("https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/tools/autograd/derivatives.yaml#L2041-L2044")[must be used in the backwards pass.].
 
     The explicit CUDA kernel
-    #link("https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/aten/src/ATen/native/cuda/ActivationGeluKernel.cu#L70-L84")[is here];.
+    #link("https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/aten/src/ATen/native/cuda/ActivationGeluKernel.cu#L70-L84")[is here].
 
   If the inputs in each of these cases are not needed for any other part
   of the backwards pass, they are garbage collected in soon after
@@ -1643,7 +1642,7 @@ mixed-precision is indeed an overall savings at such typical scales.
 The total number of floating point operations (FLOPs)#footnote[The
 notation surrounding floating-point operations is very confusing because
 another quantity of interest is the number of floating-point operations
-a given implementation can use #emph[per-second];. Some times, people use
+a given implementation can use #emph[per-second]. Some times, people use
 FLOPS or FLOP/s to indicate the rate, rather than the gross-count which
 has the lower case “s\", FLOPs, but there's little consistency in
 general. We will use FLOPs and FLOP/s.] needed to process a given batch
@@ -1658,7 +1657,7 @@ expensive element-wise operations like acting on the same vector $v$
 pale in comparison by FLOPs count #footnote[Since their FLOPs counts
 only scales as $ cal(O) ( n )$ where the omitted
 constant may be relatively large, but still negligible when all
-dimensions are big.];. It is then a straightforward exercise in counting
+dimensions are big.]. It is then a straightforward exercise in counting
 to estimate the FLOPs for a given architecture. The input tensor is of
 shape throughout.
 
@@ -1681,7 +1680,7 @@ $approx 2B S N _(
                 "params"  )$. This is the correct as long as the
 self-attention FLOPs with
 $cal(O) ( S ^2 )$-dependence which we didn't account
-for here are actually negligible (true for $S lt.tilde 10 D$).];. The
+for here are actually negligible (true for $S lt.tilde 10 D$).]. The
   backwards-pass costs about twice as much as the forwards-pass. This is
   true as long as $S lt.tilde D$).
 
@@ -1762,7 +1761,7 @@ requires $2 D I J$ FLOPs for either operation, bringing the total FLOPs to $4 D 
 double the FLOPs for this same sub-computation in the forward-direction, hence the rough rule of
 thumb#footnote[Note also that the very first layer does not need to perform the second term in
   @eq_backprop_derivatives;, since we do not need to backpropagate to the inputs, so the total
-  backwards flops is more precisely $4 D I J (L - 1) + 2 D I J$.];.
+  backwards flops is more precisely $4 D I J (L - 1) + 2 D I J$.].
 
 ==== Backwards Pass: More Precise
 <backwards-pass-more-precise>
@@ -1772,7 +1771,7 @@ thumb#footnote[Note also that the very first layer does not need to perform the 
 <total-model-flops>
 The grand sum is then#footnote[With a large vocabulary, the cost of the
 final language model head matrix multiply can also be significant, but
-we have omitted its $L$-independent, $2 B D S V$ contribution here.];:
+we have omitted its $L$-independent, $2 B D S V$ contribution here.]:
 $
   C^"model" & approx 12 B D L S ( S + ( 2+E )D ) .
 $<eq_model_flops>
@@ -1812,7 +1811,7 @@ $C ^"model"$ compute per iteration. This is not correct if
 we use gradient checkpointing and recomputation, in which case we
 alternatively spend true compute
 $C ^"hardware" \> C ^"model"$, a distinction
-between #strong[hardware FLOPs] and #strong[model FLOPs];. Two
+between #strong[hardware FLOPs] and #strong[model FLOPs]. Two
 corresponding efficiency measures are #strong[model FLOPs utilization]
 (MFU) and #strong[hardware FLOPs utilization] (HFU). If our iterations
 take actual time $t _"iter"$, then these are given by
@@ -1867,7 +1866,7 @@ simplest form relates the value of the cross-entropy loss #emph[at
 convergence] (and in nats), $cal(L)$, to the number of non-embedding
 parameter, dataset size in token, and the amount of compute, #emph[in
 the limit] where only one of this factors is bottlenecking the
-model#footnote[Unclear to me how you know when this is the case?];. The
+model#footnote[Unclear to me how you know when this is the case?]. The
 laws (in our notation):
 
 - $cal(L) (N _"params") approx  ( N _"params"^( star ) / N _( "params"
@@ -1927,7 +1926,7 @@ not study the opposite regime), which is effectively what was done in
 @kaplan2020scaling. Probably the more important general point is again
 that the precise form of these scaling laws depend on details of fairly
 arbitrary training procedure choices, such as the choice of
-learning-rate scheduler.];.
+learning-rate scheduler.].
 
 Several different analyses are performed which all give very similar
 results. The outputs are the optimal values of
@@ -1946,7 +1945,7 @@ $C$.
 
 - They perform a parametric fit to the loss#footnote[In
   @hoffmann2022training they model the scaling of the test loss, while
-  in @kaplan2020scaling they use the training loss.];:
+  in @kaplan2020scaling they use the training loss.]:
   $
     cal(L) (N_"params", N_"tokens") & =E + A / ( N_"params"^( alpha ) ) + B / ( N_"tokens"^( beta ) ) ,
   $<eq_chinchilla> fit over a large range of parameter and token
@@ -1970,12 +1969,12 @@ pre-training#footnote[A terminology note: pre-training is standard
 next-token training on an enormous, general dataset, supervised
 fine-tuning typically indicates additional, subsequent training on a
 higher-quality, maybe domain-specific dataset, and instruction
-fine-tuning follows.];. The pre-training, pure next-token prediction
+fine-tuning follows.]. The pre-training, pure next-token prediction
 task is altered to optimize an objective which now incorporates other
 data, typically information regarding human preferences#footnote[One
 failure mode this corrects for: next-token training would do best by
 replicating common mistakes in grammar or statements of fact which can
-be corrected for using these methods.];.
+be corrected for using these methods.].
 
 === Direct Preference Optimization <subsec_dpo>
 Direct Preference Optimization (DPO)
@@ -2015,7 +2014,7 @@ can be done by optimizing $pi_theta$ to generate completions of inputs
 that lead to large rewards, reflecting human-preferred generations. In
 order to also keep the model from straying too far from its reference
 base, a tunable KL-divergence penalty is also added#footnote[We've
-written the above as a loss so that we're minimizing everywhere.];:
+written the above as a loss so that we're minimizing everywhere.]:
 $
   cal(L)_"RLHF" &= E_(x cal(D), y pi_( theta )(y|x) ) ( -r_( star )
   (x, y) + beta D_"KL" ( pi_( theta )(y|x)|| pi_("ref))(y|x" ) ) .
@@ -2038,7 +2037,7 @@ the reward function#footnote[This is analogous to minimizing the regular functio
 subject to also minimizing $g (x)$. This can either be done by solving the second for
 $x_star.op$ and minimizing $f (x_star.op \, y)$ (the RLHF strategy), or first solving
 $frac(partial f, partial y) = 0$ to find $x_star.op (y)$ and then minimizing $g (x_star.op (y))$
-(the DPO strategy).];.
+(the DPO strategy).].
 
 The $pi_theta$ which minimizes the RLHF loss
 @eq_rlhf_loss for an arbitrary reward
@@ -2064,7 +2063,7 @@ $r (x \, y_l)$ through their difference#footnote[In
 @rafailov2024directpreferenceoptimizationlanguage, the DPO symmetry
 $r (x \, y) arrow.r r (x \, y) + f (x)$, for arbitrary $f (x)$, is said
 to induce an equivalence class relation between different reward
-functions.];, these factors cancel out. Letting
+functions.], these factors cancel out. Letting
 $p (y_w succ y_l \| x) = sigma (r (x \, y_w) - r (x \, y_l))$, for
 some#footnote[In the specific case where $sigma$ is the sigmoid
 function, this is known as the Bradley-Terry model.] $sigma$, and
@@ -2094,7 +2093,7 @@ positive and negative outcomes, the value function#footnote[Which can be
 taken to satisfy $v (0) = 0$.] is taken to be a function of $z - z_0$,
 and human value functions are known to be convex for $z > z_0$
 (diminishing returns) and exhibit loss aversion#footnote[Which I suppose
-means that $v (z - z_0) + v (z_0 - z) lt.eq 0$ for $z > 0$.];.
+means that $v (z - z_0) + v (z_0 - z) lt.eq 0$ for $z > 0$.].
 
 KTO applies this framework to the usual text-prediction problem as in
 the following. The space of outcomes $cal(Z)$ is the reward function
@@ -2149,8 +2148,8 @@ variety of parallelism strategies. We review some of them below.
   #link("https://www.determined.ai/blog/tp")[here.]
 
 ]
-In #strong[Tensor Parallelism];, some times also called #strong[Model
-Parallelism];, individual weight matrices are split across devices
+In #strong[Tensor Parallelism], some times also called #strong[Model
+Parallelism], individual weight matrices are split across devices
 @shoeybi2020megatronlm. We consider the and layers in turn. Assume
 $T$-way parallelism such that we split some hidden dimension into
 $T$-equal parts across $T$ workers#footnote[All $T$ workers work on
@@ -2200,18 +2199,16 @@ $macron(t)$ implied. Each device has only $macron(t)$ component in the
 sum (a -shaped tensor) and an is used to give all workers the final
 result. This is the only forward-pass collective
 communication#footnote[The amount of communicated data is
-$cal(O) ( B S D )$.];.
+$cal(O) ( B S D )$.].
 
 One-line summary of the parallel decomposition:
 $
   z_(s d') arrow.l phi (z_d W_(d e)^0) W_(e d')^1 & = phi (z_d macron(W)_(d f macron(t))^0) macron(W)_(f macron(t) d')^1 med .
 $
 The progression of tensor shapes held by any single worker is
-
-*TODO: goon - Fix*
-+
-+
-+
++ `(B, S, D)`
++ `(B, S, E*D/T)`
++ `(B, S, D)`
 
 In the backwards pass, another (see App.~@app_collective_communications)
 is needed for proper gradient computations with respect to the first
@@ -2270,17 +2267,14 @@ $MHA$ computations all process in embarassingly-parallel
 fashion, and an all-reduce is needed to complete the sum over the
 $a$-index across devices.
 
-The collective communications story is essentially equivalent to that of
-the layers#footnote[The amount of communicated data is again
-$cal(O) ( B S D
-)$.];: one is needed in the forwards pass and one in the
-backwards-pass.
+The collective communications story is essentially equivalent to that of the layers#footnote[The
+amount of communicated data is again $cal(O) ( B S D)$.]: one is needed in the forwards pass and
+one in the backwards-pass.
 
 The progression of tensor shapes held by any single worker is
-*TODO: Fix*
-+
-+
-+
++ `(B, S, D)`
++ `(B, S, D/A, A/T)`
++ `(B, S, D)`
 
 It is worth comparing the communications and FLOPs costs of these
 sharded layers. Each layer costs
@@ -2324,7 +2318,7 @@ scalar losses around#footnote[In more detail, given the gold-answers
 $y_(b s)$ for the next-token-targets, a given worker can compute their
 contribution to the loss whenever their -shaped output $z_(b s v')$
 contains the vocabulary dimension $v_(\*)$ specified by $y_(b s)$,
-otherwise those tensor components are ignored.];.
+otherwise those tensor components are ignored.].
 
 For a weight-tied embedding layer, the former construction requires in
 order for every worker to get the full continuous representation of the
@@ -2379,7 +2373,7 @@ In @eq_act_mem_total_tensor_parallel;, not every factor is reduced by $T$. #stro
   Parallelism] fixes that by noting that the remaining contributions, which essentially come from
 and #footnote[Recall, though, from @layer_norm that the parameters in are completely redundant and
   can simply be removed without having any effect on the expressive capabilities of the
-  architecture.];, can be parallelized in the sequence dimension (as can the residual connections).
+  architecture.], can be parallelized in the sequence dimension (as can the residual connections).
 
 The collective communications change a bit. If we shard the tensors
 across the sequence dimension before the first , then we want the
@@ -2480,7 +2474,7 @@ entire $cal(O) ( S ^2 )$ attention scores at once.
 It works by sharding over the sequence dimension. Let $z_(s d)$ is the
 (batch-dim suppressed) residual stream of a non-sharded
 Transformer#footnote[Like in Sec. @subsec_flash_attention, we omit any
-normalization factor inside the $SM$.];: $
+normalization factor inside the $SM$.]: $
 z _( s d ) &= SM _( s\' )  ( q _( s d\' ) k _( s\'d\' )  ) v _( s\'d )  ,
 $ suppressing the causal mask for simplicity of
 presentation.
@@ -2502,7 +2496,7 @@ The algorithm performs the $macron(w)$ sum as a loop. We present the
 simplified case without a causal mask or maximum attention score
 tracking. These are important omissions#footnote[See
 @brandon2023stripedattentionfasterring for causal mask efficiency
-considerations.];.
+considerations.].
 
 #block[
   Ring Attention (Naive - Missing causal mask/max tracking.) Initialize
@@ -2529,7 +2523,7 @@ and for this reason it's possible to use flash attention kernels for
 every individual step. implementations of Ring Attention which leverage
 flash attention kernels can be found
 #link("https://github.com/lucidrains/ring-attention-pytorch")[here] and
-#link("https://github.com/zhuzilin/ring-flash-attention")[here];.
+#link("https://github.com/zhuzilin/ring-flash-attention")[here].
 
 The full forms of the forwards and backwards passes are again similar to
 those of flash attention; see Sec. @subsubsec_fa_details.
@@ -2541,7 +2535,7 @@ suboptimal for causal attention because it leads to idling GPUs.
 Sharding the queries and keys as in $q_s = q_((macron(r) t))$ and
 $k_(s') = k_((t ' macron(r) '))$ in row-major order#footnote[That is,
 $s = macron(r) T + t$ for $macron(r) in (0 \, dots.h \, R - 1)$ and
-$t in (0 \, dots.h T - 1)$ with $S = R T$.];, causality means that the
+$t in (0 \, dots.h T - 1)$ with $S = R T$.], causality means that the
 entire chunked attention computation will be trivial for any iteration
 in which $r' > r$. This is the case for $R - 1$ iterations for the
 $r = 0$ GPU, for instance.
@@ -2553,7 +2547,7 @@ $q_s = q_((t macron(r)))$ and $k_(s') = k_((t ' macron(r) '))$ which
 guarantees non-trivial work for every GPU on every iteration, which they
 call striped ring attention. In the `ring-flash-attention` repo, they
 come up with yet another sharding strategy (\"zig-zag\" attention;
-#link("https://github.com/zhuzilin/ring-flash-attention/issues/2")[see this github issue];)
+#link("https://github.com/zhuzilin/ring-flash-attention/issues/2")[see this github issue])
 which increases efficiency even more. Their strategy can't be naturally
 writtein in `einops` notation, but it is easy enough to explain: they
 split the sequence length into $2 R$ sequential chunks and give
@@ -2616,9 +2610,9 @@ shape $f_(s d)$ where $d in (0 \, dots.h \, P^2 C - 1)$ and the
 effective sequence length runs over $s in (0 \, L^2 C \/ P^2 - 1)$, for
 an $L times L$ sized image#footnote[Example: for a $256 times 256$,
 three-channel image with a $16 times 16$ patch size, the effective
-sequence length is 768.];. A linear projection converts the effective
+sequence length is 768.]. A linear projection converts the effective
 hidden dimension here to match match the model's hidden dimension. These
-are known as #strong[Patch Embeddings];.
+are known as #strong[Patch Embeddings].
 
 Since there is no notion of causality, no causal mask is needed. A
 special token is prepended and used to generate the final
@@ -2645,7 +2639,7 @@ A typical implementation will use separate models for encoding the text
 and image inputs. The two outputs are $t_(b d)$ and $i_(b d)$
 shaped#footnote[There may also be another linear projection from the
 actual model outputs to a common space, too. Obviously, this is also
-necessary if the hidden dimensions of the two models differ.];,
+necessary if the hidden dimensions of the two models differ.],
 respectively, with batch and hidden dimensions, and are canonically
 trained so that the similarity score between any two elements is a
 function of their dot-product.
@@ -2654,7 +2648,7 @@ The original CLIP recipe:
 
 + Process the text bracketed with and insertions, use a normal
   Transformer architecture#footnote[The original CLIP paper keeps the
-  causal mask.];, and extract the last output from the token as the text
+  causal mask.], and extract the last output from the token as the text
   embedding:
   $i_(b d) = z_(b s d) #scale(x: 120%, y: 120%)[\|]_(s = - 1)$.
 
@@ -2666,7 +2660,7 @@ The original CLIP recipe:
   $ell_(b b') = i_(b d) t_(b' d) \/ lr(|i_b|) lr(|t_b|)$. These are used
   to define both possible conditional probabilities#footnote[They differ
   by what is summed over the in the denominator, i.e., which dimension
-  the is over.];:
+  the is over.]:
   $
     P (i_b \| t_(b')) = frac(e^(ell_(b b')), sum_b e^(ell_(b b'))) med \, quad P (t_(b') \| i_b) = frac(e^(ell_(b b')), sum_(b') e^(ell_(b b')))
   $
@@ -2731,11 +2725,11 @@ Choosing which experts process which tokens is crucial, affecting both
 the downstream model and engineering (i.e. throughput) performance.
 There are two dominant schemes:
 
-+ #strong[Token Choice];: each token selects a fixed number of experts.
++ #strong[Token Choice]: each token selects a fixed number of experts.
   $G_(s e)$ is sparse over the expert index; see
   @eq_general_moe;.
 
-+ #strong[Expert Choice];: each expert selects a fixed number of tokens.
++ #strong[Expert Choice]: each expert selects a fixed number of tokens.
   $G_(s e)$ is sparse over the token index; see
   @eq_general_moe;.
 
@@ -2820,7 +2814,7 @@ There are various important, practical considerations which are ignored
 in the above implementation, including:
 
 - Since we are taking the prediction from the last (-indexed) element in
-  each sequence, it is crucial that all padding is #emph[left];-padding,
+  each sequence, it is crucial that all padding is #emph[left]-padding,
   so that these final elements are meaningful.
 
 - Models will signal the end of generation by outputting
@@ -2853,13 +2847,13 @@ an extremely improbable token, which is undesirable if you do not trust
 the tails of the distribution. Two common truncation strategies which
 guard against this:
 
-- #strong[Top-];$k$: Only choose from the top-$k$ most-probable examples
+- #strong[Top-]$k$: Only choose from the top-$k$ most-probable examples
   (re-normalizing the probabilities across those $k$ samples)
 
-- #strong[Top-];$p$: Only choose from the top-however-many most-probable
+- #strong[Top-]$p$: Only choose from the top-however-many most-probable
   examples whose probabilities sum to $p$ (again re-normalizing
   probabilities). This is also some times called #strong[nucleus
-  sampling];.
+  sampling].
 
 ==== Beam Search <subsec_beam_search>
 Choosing, say, the most-probable next-token at each step is not
@@ -2903,7 +2897,7 @@ Informally, the algorithm is:
   such that the entire algorithm generates the correct distribution.
   $n + 1$ tokens are created in this case#footnote[We cannot generate
   more tokens because drawing from $p'$ effectively changes the prefix
-  that the full model should use.];.
+  that the full model should use.].
 
 + If all of the $gamma$ tokens are accepted, generate token $gamma + 1$
   from the full model's outputs.
@@ -3073,7 +3067,7 @@ parameters:
 
 - $K$: the block size (maximum sequence length#footnote[In the absence
   of methods such as ALiBi @ALiBi can be used to extend the sequence
-  length at inference time.];)
+  length at inference time.])
 
 - $L$: number of transformer layers
 
@@ -3153,7 +3147,7 @@ $A_i$ is $I$-dimensional, $i in ( 0 \, dots.h \, I - 1 )$, then if we
 split this index as $A_i = A_((j k)) equiv macron(A)_(j k)$, then the
 indices $j \, k$ will range over $j in ( 0 \, dots.h \, J )$,
 $k in ( 0 \, dots.h \, K )$ with $I = J times K$ and where numerically
-$i = j times K + k$. More complex cases follow by induction.];. We will
+$i = j times K + k$. More complex cases follow by induction.]. We will
 some times use a bar to indicate tensors which are derived from other
 tensors through such splitting operations, usually in the context of
 tensor-sharding where devices only locally hold some shard of the
@@ -3178,12 +3172,12 @@ $v$-index is gives unity.
 
 == Collective Communications <app_collective_communications>
 A quick refresher on common distributed
-#link("https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html")[communication primitives];.
+#link("https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html")[communication primitives].
 Consider $R$ ranks with tensor data $x^((r))$ of some arbitrary shape ,
 which takes up $M$ bytes of memory, where $r$ labels the worker and any
 indices on the data are suppressed. For collectives which perform an
 operation over a specific dimension, the convention is that it operates
-over . The $r = 0$ worker is arbitrarily denoted the #emph[chief];. Some
+over . The $r = 0$ worker is arbitrarily denoted the #emph[chief]. Some
 operations are easiest to describe by forming the logical super-tensor
 of shape such that the tensor on rank is . Then, the primitive
 operations are:
@@ -3206,7 +3200,7 @@ operations are:
   started with, while in they end up with $1 \/ R$ of their initial
   data. One is nearly a time-reversed version of the other, which is a
   way of remembering that they have the came communication cost. They
-  also compose to produce an output of the same initial size, as in .];.
+  also compose to produce an output of the same initial size, as in .].
   A ring implementation sends $M times frac(R - 1, R)$ bytes over each
   link in the ring. E.g., for rank gets output .
 
@@ -3225,7 +3219,7 @@ operations are:
   a total of $frac(2 (R - 1) D, R)$ elements need to be passed around.
   #link("https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/")[See this blog post for a nice visualization]
   or @bandwidthOptimalAllReduce2009 for a relevant
-  paper.<foot_all_reduce>];). In the latter case, the total cost is
+  paper.<foot_all_reduce>]). In the latter case, the total cost is
   $2 M times frac(R - 1, R)$, due to -ing the initial $M$-sized data,
   and then -ing the $M \/ R$-sized reductions. E.g., for all ranks get .
 
@@ -3245,13 +3239,13 @@ operations are:
 <hardware>
 Basic information about relevant hardware considerations. Much of the
 following is from the
-#link("https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html")[NVIDIA docs];.
+#link("https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html")[NVIDIA docs].
 
 === NVIDIA GPU Architecture
 <nvidia-gpu-architecture>
 NVIDIA GPUs consist of some amount of relatively-slow off-chip DRAM
 memory#footnote[This is the number usually reported when discussing a
-given GPU, e.g. 32GiB for the top-of-the-line A100];, relatively-fast
+given GPU, e.g. 32GiB for the top-of-the-line A100], relatively-fast
 on-chip SRAM, and a number of #strong[streaming multiprocessors] (SMs)
 which perform the parallel computations. Inside more-recent GPUs, the
 SMs carry both “CUDA cores\" and \"Tensor cores\", where the latter are
@@ -3302,17 +3296,17 @@ The CUDA programming model uses a hierarchy of concepts:
 - #strong[Threads] are the fundamental unit of
   execution#footnote[Threads are always physically launched in
   #strong[Warps] which consist of 32 threads.] which each run the same
-  CUDA #strong[Kernel];, or function, on different data inputs in
+  CUDA #strong[Kernel], or function, on different data inputs in
   parallel. Threads within the same block (below) may share resources,
   like memory, and may communicate with each other. Individual threads
   are indexed through the #strong[threadIdx] variable, which has
   attributes with in and similar.
 
-- Threads (and hence warps) are organized into 3D #strong[blocks];. The
+- Threads (and hence warps) are organized into 3D #strong[blocks]. The
   size and indices of the blocks can be accessed through the and
   variables, respectively, with in . total threads run in a block.
 
-- Blocks are organized into 3D #strong[groups];. The size of the gird
+- Blocks are organized into 3D #strong[groups]. The size of the gird
   dimensions can be accessed through the variable, with similar
   attributes to the above. \
   total blocks run in a grid.
@@ -3343,11 +3337,11 @@ Summary of some relevant NVIDIA GPU statistics:
           [$lambda_"comms"$],
         ),
         table.hline(),
-        [#link("https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf")[A100];], [80GiB], [312
+        [#link("https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf")[A100]], [80GiB], [312
           TFLOP/s], [2.0 TiB/s], [156 FLOPS/B], [300 GiB/s],
-        [#link("https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf")[A100];], [40GiB], [312
+        [#link("https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf")[A100]], [40GiB], [312
           TFLOP/s], [1.6 TiB/s], [195 FLOPS/B], [300 GiB/s],
-        [#link("https://images.nvidia.com/content/technologies/volta/pdf/volta-v100-datasheet-update-us-1165301-r5.pdf")[V100];], [32GiB], [130
+        [#link("https://images.nvidia.com/content/technologies/volta/pdf/volta-v100-datasheet-update-us-1165301-r5.pdf")[V100]], [32GiB], [130
           TFLOP/s], [1.1 TiB/s], [118 FLOPS/B], [16 GiB/s],
       )],
     kind: table,
@@ -3388,7 +3382,7 @@ $lambda _"math"$, then you are compute-bound (which is
 good, as you're maximizing compute), and otherwise you are
 memory(-bandwidth)-bound (which is bad, since your compute capabilities
 are idling). The FLOPs/B ratio of your computation is some times called
-the #strong[compute intensity] or #strong[arithmetic intensity];. When
+the #strong[compute intensity] or #strong[arithmetic intensity]. When
 compute bound, a process takes time
 $ F/lambda _"FLOP/s"$, while memory-bound processes
 take time#footnote[Note that the time is not additive, e.g.
@@ -3463,7 +3457,7 @@ considered here#footnote[One such trick: the multi-query attention of
 large batch regime is $B gt.tilde frac(D, A S)$ and the intensity ratio
 becomes $cal(O) ( 1 + D/( A S ) )$. An analysis
 equivalent to the one performed here can be found in the original paper
-@shazeer2019fast.];.
+@shazeer2019fast.].
 
 === Intra- and Inter-Node Communication
 <intra--and-inter-node-communication>
@@ -3499,7 +3493,7 @@ Consider vanilla SGD and study how the training loss changes with each
 step. We randomly sample $B$ datapoints $x in cal(D)$ from the
 dataset through some i.i.d. process#footnote[The below uses sampling
 with replacement, while in practice we sample without replacement, but
-the different is negligible for all practical cases.];. Each
+the different is negligible for all practical cases.]. Each
 corresponding gradient $bold(g) (x) = partial _( w) cal(L)
  ( w, x  )$ is itself a random variable whose average
 is the true gradient across the entire dataset $bar(bold(g))$ and we
@@ -3579,7 +3573,7 @@ compute. Modeling the total training time by
 $T approx S (kappa B + sigma)$ for some $kappa \, sigma$ to model
 compute costs#footnote[Computation and communication costs each scale
 with $B$, the optimizer step does not (and maybe some overhead?), for
-instance.];, then the above is equivalent to $
+instance.], then the above is equivalent to $
 T & = ( ( E _"min" + S _"min" B )  ( kappa B+ sigma  ) / B  .
 $ which has a minimum at $
 B & = sqrt(( sigma E _"min" )/( kappa S _"min" )) .
@@ -3624,7 +3618,7 @@ where the inputs $z_i^0$ are i.i.d.~Gaussian-normally
 distributed#footnote[It may be that these inputs come from some
 transformation of other data elements. For example, for an LLM the
 $z_i^0$ come from looking up the normally-distributed embedding vectors
-corresponding to the relevant tokens in the sequence.];:
+corresponding to the relevant tokens in the sequence.]:
 $E( z^0_( i )) = 0$, $E( z ^0_( i )z ^0_( j ))
 = delta _( i j )$. Here, $i in (0 \, dots.h \, D - 1)$ and the batch
 and any other indices are suppressed.
@@ -3736,7 +3730,7 @@ require#footnote[In general, we define the size of a random variable $Z$ through
 first non-vanishing moment: if it's the $n$-th moment, then we write $Z ~  cal(O) ( angle.l Z^( n)
 angle.r^(1/n) )$. The common cases are when the $Z$ has a non-trivial mean, $Z~ cal(O) ( angle.l Z
 angle.r )$, and the case where the mean is zero, but the second moment is non-trivial: $Z ~ cal(O)
-( sqrt(angle.l Z Z angle.r) )$.];:
+( sqrt(angle.l Z Z angle.r) )$.]:
 
 - All intermediate tensors
   $z ^( ell ) _(d )~  cal(O) ( 1 )$.
@@ -3750,7 +3744,7 @@ respect to $lambda$, with a single degree of freedom remaining.
 
 Assume that the $x _(i )  cal(O) ( 1 )$, either by
 whitening or because they're one-hot ($x_i = delta_(i v)$, for some
-$v$), as in the LLM case. Then for the #strong[base model];, defined to
+$v$), as in the LLM case. Then for the #strong[base model], defined to
 be the one with $lambda = 1$, we already know how to achieve the first
 criteria above. Let the input weight components be chosen so that they
 generate independent, normally distributed outputs. We consider two
@@ -3765,7 +3759,7 @@ scenarios:
 
 Both scenarios produce outputs, defined to be $z_d^(- 1)$, which
 obey#footnote[We consider the inputs $x_i$ fixed, for simplicity. A
-better treatment would also consider the data distribution.];:
+better treatment would also consider the data distribution.]:
 $
   angle.l z_d^(- 1) angle.r = 0 thin quad angle.l z_d^(- 1) z_(d')^(- 1) angle.r = delta_(d d') med \,
 $
@@ -3813,7 +3807,7 @@ implicit. The above uses SGD with per-weight learning rates, with the
 final line obtained after specializing weight updates
 $W arrow.r W + Delta W$ to SGD#footnote[The term in parentheses is the
 neural tangent kernel, a fundamental quantity which characterizes how
-the network gets updated.];.
+the network gets updated.].
 
 We are interested in the typical size of the updates in @app_eq_general_output_update, for which we
 compute the following expectation values:
@@ -3861,7 +3855,7 @@ Some conclusions from
   $
   for some common global learning rate hyperparameter $eta$,
   say#footnote[More generally, these should be taken as individually
-  tunable, $D$-independent hyperparameters.];. This ensures that the
+  tunable, $D$-independent hyperparameters.]. This ensures that the
   updates from each parameter contributes the same
   $cal(O) ( eta
   )$ (and $D$-independent) shift to the model's outputs.
@@ -3902,7 +3896,7 @@ make the model outputs approximately independent of model width.
 An essentially-equivalent, but differently presented, line of inquiry
 comes from @yaida2022metaprincipledfamilyhyperparameterscaling in which
 they consider the so-called $ell$-th layer neural tangent
-kernel#footnote[They use $H$ where we use $N$ to denote the kernel];:
+kernel#footnote[They use $H$ where we use $N$ to denote the kernel]:
 $
   N_(d d')^ell (y \, x) & = eta_I frac(partial z_(d')^ell (x), partial I_(e i)) frac(partial z_d^ell (y), partial I_(e i)) + eta_ell frac(partial z_(d')^ell (x), partial H_(e f)^ell) frac(partial z_d^ell (y), partial H_(e f)^ell) + eta_O frac(partial z_(d')^ell (x), partial O_(o f)) frac(partial z_d^ell (y), partial O_(o f)) med \,
 $
@@ -3919,7 +3913,7 @@ parametrically-equal contributions lands us on the same equations and
 solutions as above#footnote[The equivalence follows from the fact that
 $angle.l Delta z^( L )_( o )
 angle.r = -  angle.l ( partial cal(L)  )/( partial o\' ) N^( L )_( o o' )
-angle.r$];. Extending this analysis to higher orders in $eta$,
+angle.r$]. Extending this analysis to higher orders in $eta$,
 @yaida2022metaprincipledfamilyhyperparameterscaling derives another
 bound: $s lt.eq 1$, placing muTransfer's prescription at the edge of the
 bounded region.
@@ -3948,7 +3942,7 @@ same direction and are approximately related by an overall
 factor#footnote[This is exactly true in the $beta_1 arrow.r 0$ limit,
 using the
 #link("https://pytorch.org/docs/stable/generated/torch.optim.Adam.html")[`torch` parameterization]
-of Adam (which is the opposite of the usual regime).];, such that this
+of Adam (which is the opposite of the usual regime).], such that this
 replacement can be made in any expectation value while only inducing
 small errors (whose size we will not attempt to quantify).
 
@@ -4011,7 +4005,7 @@ qualitatively change the picture. The two relatively minor changes are:
   are slightly altered, by $cal(O) ( 1 )$
   factors#footnote[E.g. for $mono("relu")$ we could double the variance
   to keep unit covariance of the intermediates:
-  $⟨W_(d e)^ell W_(d' e')^ell⟩ = 2 / D_(ell - 1) delta_(d d') delta_(e e') arrow.r.double.long ⟨z_d^ell z_(d')^ell⟩ = delta_(d d')$.];.
+  $⟨W_(d e)^ell W_(d' e')^ell⟩ = 2 / D_(ell - 1) delta_(d d') delta_(e e') arrow.r.double.long ⟨z_d^ell z_(d')^ell⟩ = delta_(d d')$.].
 
 - The chain rule factors which were previously
   $frac(partial z_d^ell, partial z_(d')^(ell - 1)) = W_(d d')^ell$ now
