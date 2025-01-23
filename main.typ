@@ -22,18 +22,6 @@
 #let TOPK = `top_k`
 #let TR = `Trace`
 
-
-
-#show terms: it => {
-  it
-    .children
-    .map(child => [
-      #strong[#child.term]
-      #block(inset: (left: 1.5em, top: -0.4em))[#child.description]
-    ])
-    .join()
-}
-
 #set table(
   inset: 6pt,
   stroke: none,
