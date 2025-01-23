@@ -1206,8 +1206,8 @@ analogously to transformer models:
 
 As before, many of the matmuls can be performed as one big operation,
 and the three short convolutions can be similarly fused into a single
-convolution. The two algorithms Algo.~@algo_mamba1_scan and
-Algo.~@algo_mamba2_scan are nearly identical; they just differ in some
+convolution. The two algorithms ~@algo_mamba1_scan and
+~@algo_mamba2_scan are nearly identical; they just differ in some
 tensor shapes.
 
 === Mamba2 Duality with Attention
@@ -1246,7 +1246,7 @@ choices just make the analogy more readily recognizable in Mamba2.
 === Details: Cumsums, Chunking, and the Mamba2 Scan
 <details-cumsums-chunking-and-the-mamba2-scan>
 Some more details about how to compute the recursion solution in
-Algo.~@algo_mamba2_scan. Similarly to the previous section, let
+@algo_mamba2_scan. Similarly to the previous section, let
 $
   z_( s a h ) &= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) ) times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) )\
   &eq.triple C_( s g n )cal(A)_( s s\'a )Delta_( s\'a )B_( s\'g n ) x_( s\'a h )\
@@ -1299,21 +1299,20 @@ $
   &eq.triple e^( bold(A)_( c c\' l l\'a ) ) .
 $
 
-The argument $sans(A)_(c c\' l l' a)$ can be
-constructed in various
-ways#footnote[$CUMSUM_s X_s equiv sum_(s' = 0)^s X_(s')$ and
-$SEGSUM$ stands for “segment sum\".]: $
-bold(A)_( c c\' l l\'a )&= SEGSUM_( l ) ( A_( c l a )  ) + M _( l l\' )\
-&= CUMSUM_( l )A_( c l a ) - CUMSUM_( l\' )A_( c l\'a ) + M_( l l\' ) \
-&= CUMSUM_( l ) ( A_( c l a )Z_( l l\' )  ) + M _( l l\' )\
-Z_( l l\' ) &eq.triple cases(
+The argument $sans(A)_(c c\' l l' a)$ can be constructed in various ways#footnote[$CUMSUM_s X_s
+  equiv sum_(s' = 0)^s X_(s')$ and $SEGSUM$ stands for “segment sum\".]:
+$
+  bold(A)_( c c\' l l\'a )&= SEGSUM_( l l' ) ( A_( c l a ) ) + M_( l l\' )\
+  &eq.triple CUMSUM_( l )A_( c l a ) - CUMSUM_( l\' )A_( c l\'a ) + M_( l l\' ) \
+  &= CUMSUM_( l ) ( A_( c l a )Z_( l l\' ) ) + M_( l l\' )\
+  Z_( l l\' ) &eq.triple cases(
 0 wide & l <= l\',
 1 & l \> l\'
 ) , \
-M_( l l\' )& eq.triple cases(
+  M_( l l\' )& eq.triple cases(
 -infinity wide & l < l\',
 0 & l >= l\'
-)  ,
+) ,
 $<app_eq_mamba2_diag_propagator>
 where the final form with the additional mask
 $Z_(l l')$ is better behaved numerically, as it does not rely on
@@ -1376,7 +1375,7 @@ $Z_(l l')$ the mask in
 @app_eq_mamba2_diag_propagator;.]:
 $
   T_( c\'l\'a ) &=exp ( SUM_( l\' ) ( A_( c\'l\'a ) ) - CUMSUM_( l\' )A_( c l\'a ) )\
-  bold(A)_( c c\'a )&=exp ( SEGSUM_( c )A_( c a ) - A_( c\' a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )\
+  bold(A)_( c c\'a )&=exp ( SEGSUM_( c c\' )A_( c a ) - A_( c\' a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )\
   U_( c l a ) &=exp ( CUMSUM_( l ) ( A_( c l a ) ) ) .
 $
 
@@ -1391,10 +1390,11 @@ $
 
 A crucial computational point is that the matrix $bold(A)_(c c\'a)$ is low-rank:
 $
-  bold(A)_(c c\'a) &= exp ( SEGSUM_( c )A_( c a ) )times exp( A_( c\' a ) ) .
+  bold(A)_(c c\'a) &= exp ( SEGSUM_( c c\' )A_( c a ) - A_( c\' a ) )\
+  & = exp (CUMSUM_( c ) A_( c a )) times exp (CUMSUM_( c\' ) A_( c\' a ) - A_(c\' a )) .
 $
 This means that the sum $bold(A)_( c c\'a )T_( c\'l\'a )$ can be performed in $cal(O)(S)$ time by
-performing the $exp( A_( c\' a ) ) T_( c\'l\'a )$ sum over $c\'$ first, and then multiplying by the
+performing the $exp(CUMSUM_( c\' ) A_( c\' a ) - A_(c\' a )) T_( c\'l\'a )$ sum over $c\'$ first, and then multiplying by the
 remaining factor. Otherwise, this decomposition wouldn't realize the optimal $cal(O)(S)$ scan
 scaling.
 
