@@ -144,6 +144,7 @@
 /* Eq ref styling https://typst.app/docs/reference/model/ref/ */
 #set math.equation(numbering: "(1)", number-align: end + bottom)
 #show ref: it => {
+  let foot = footnote
   let eq = math.equation
   let el = it.element
   if el != none and el.func() == eq {
@@ -154,6 +155,16 @@
         el.numbering,
         ..counter(eq).at(el.location()),
       ),
+    )
+  } else if el != none and el.func() == foot {
+    // Other references as usual.
+    link(
+      el.location(),
+      "Footnote "
+        + numbering(
+          el.numbering,
+          ..counter(eq).at(el.location()),
+        ),
     )
   } else {
     // Other references as usual.
@@ -1876,28 +1887,27 @@ laws (in our notation):
 
 
 
-/*
-#figure(image("figures/SimplePowerLaws.pdf"),
+#figure(
+  image("figures/SimplePowerLaws.png"),
   caption: [
     Original scaling laws from @kaplan2020scaling.
-  ]
+  ],
 )
 <fig_scaling_laws_original_1>
 
-#figure(image("figures/EfficiencyIllustration.pdf"),
+#figure(
+  image("figures/EfficiencyIllustration.png"),
   caption: [
     From @kaplan2020scaling. Larger models are much more
     sample-efficient (faster).
-  ]
+  ],
 )
 <fig_scaling_laws_original_2>
-
-*/
 
 ==== Chinchilla Scaling Laws
 <chinchilla-scaling-laws>
 As of Summer 2023, the Chinchilla scaling laws in @hoffmann2022training
-are the d e facto best scaling laws for guiding training. The central
+are the de facto best scaling laws for guiding training. The central
 difference between @hoffmann2022training and @kaplan2020scaling is that
 in the former they adjust their cosine learning-rate schedule to reflect
 the amount of planned training, while in the latter they do
@@ -2744,7 +2754,7 @@ case, we effectively have $k = c times  (S )/( N _"ex" )$, with $c$ the capacity
 <megablocks>
 The MoE computation maps awkwardly to the typical GPU primitives.
 Ideally the expert computations in
-/* @eq_general_moe are parallelized as much */
+@eq_general_moe are parallelized as much
 as possible, but
 #link("https://pytorch.org/docs/stable/generated/torch.bmm.html")[batched matrix multiplies]
 (the closet common primitive) enforces equal token counts per expert,
@@ -2992,13 +3002,13 @@ the $2B S N _"params"$ FLOPs we found for the forwards-pass
 in @sec_flops_training (assuming $S lt.tilde D$). Memory costs just
 come from the parameters themselves:
 $M _"infer"^"naive"=p N _"params"$. Per
-/* the analysis of App.~@app_compute_mem_bound, naive inference is */
+the analysis of App.~@app_compute_mem_bound, naive inference is
 generally compute-bound and so the per-token-latency is
 approximately#footnote[Assuming we do the naive thing here and generate
 the next token in a similarly naive way, shifting over the context
 window.] $2B S N _( "params"
 )/ lambda _"FLOP/s"$ where the FLOPs bandwidth in the
-/* denominator is again defined in App.~@app_compute_mem_bound. */
+denominator is again defined in App.~@app_compute_mem_bound.
 
 ==== kv-Cache Inference
 <kv-cache-inference>
@@ -3013,22 +3023,17 @@ $ Inference now has a computational-intensity of
 $
   ( C_"infer"^"kv-cache" ) / ( M_"infer"^"kv-cache" ) & ( B D ) / S ,
 $ dropping $cal(O) ( 1 )$ factors, is
-/* now memory-bound (again, see App.~@app_compute_mem_bound), and has */
+now memory-bound (again, see App.~@app_compute_mem_bound), and has
 per-token-latency of approximately $M _"infer"/
 lambda _"mem"$, unless the batch-size is very large.
 
 ==== Intra-Node Communication
 <intra-node-communication>
-For $T$-way tensor parallelism, two s are needed, one for each and each
-layer, where each accelerator is sending $p B D S$ bytes of data (see
-@subsec_tensor_parallelism). This requires a total of
-$4 (T - 1) p B D S \/ T approx 4 p B D S$ bytes to be transferred
-between workers in the tensor-parallel group (see
-/* Foot.~@foot_all_reduce), */
-taking a total of $ 4p B D L S/
-lambda _"comms"$ time for the model as a whole. For an
-A100 80GiB, setup, this is $
-B D S times 10 ^( -11 )  "sec"$
+For $T$-way tensor parallelism, two s are needed, one for each and each layer, where each
+accelerator is sending $p B D S$ bytes of data (see @subsec_tensor_parallelism). This requires a
+total of $4 (T - 1) p B D S \/ T approx 4 p B D S$ bytes to be transferred between workers in the
+tensor-parallel group (see @foot_all_reduce), taking a total of $ 4p B D L S/ lambda _"comms"$
+time for the model as a whole. For an A100 80GiB, setup, this is $ B D S times 10 ^( -11 )  "sec"$
 
 ==== Latency
 <latency>
@@ -3206,7 +3211,7 @@ operations are:
   a total of $frac(2 (R - 1) D, R)$ elements need to be passed around.
   #link("https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/")[See this blog post for a nice visualization]
   or @bandwidthOptimalAllReduce2009 for a relevant
-  paper.<foot_all_reduce>]). In the latter case, the total cost is
+  paper.]<foot_all_reduce>). In the latter case, the total cost is
   $2 M times frac(R - 1, R)$, due to -ing the initial $M$-sized data,
   and then -ing the $M \/ R$-sized reductions. E.g., for all ranks get .
 
