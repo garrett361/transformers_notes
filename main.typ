@@ -11,6 +11,7 @@
 #let DR = `Dropout`
 #let SM = `Softmax`
 #let CAT = `Concat`
+#let LIN = `Linear`
 #let LN = `LayerNorm`
 #let MLP = `MLP`
 #let CA = `CausalAttention`
@@ -210,13 +211,13 @@ available variants.]:
 + Raw text is #strong[tokenized] and turned into a series of
   integers#footnote[There are about
   #link("https://github.com/ray-project/llm-numbers")[1.3 tokens per word],
-  on average.] whose values lie in , with $V$ the vocabulary size.
+  on average.] whose values lie in `range(V)`, with $V$ the vocabulary size.
 
-+ The tokenized text is chunked and turned into -shaped (batch size and
++ The tokenized text is chunked and turned into `(B, S)`-shaped (batch size and
   sequence length, respectively) integer tensors, $x_(b s)$.
 
 + The #strong[embedding layer] converts the integer tensors into
-  continuous representations of shape , $z_(b s d)$, with $D$ the size
+  continuous representations of shape `(B, S, D)`, $z_(b s d)$, with $D$ the size
   of the hidden dimension. #strong[Positional encodings] have also been
   added to the tensor at this stage to help the architecture understand
   the relative ordering of the text.
@@ -226,7 +227,7 @@ available variants.]:
 
   + In the #strong[attention] sub-block, components of $z_(b s d)$ at
     different positions ($s$-values) interact with each other, resulting
-    in another -shaped tensor, $z'_(b s d)$.
+    in another `(B, S, D)`-shaped tensor, $z'_(b s d)$.
 
   + In the #strong[MLP] block, each position in $z'_(b s d)$ is
     processed independently and in parallel by a two-layer feed-forward
@@ -239,14 +240,14 @@ available variants.]:
   meaning that the output of each block is added back to its original
   input.
 
-+ Finally, we convert the -shaped tensors to -shaped ones, $y_(b s v)$.
++ Finally, we convert the `(B, S, D)`-shaped tensors to `(B, S, V)`-shaped ones, $y_(b s v)$.
   This is the role of the #strong[language model head] (which is often
   just the embedding layer used in an inverse manner.)
 
 + The $y_(b s v)$ predict what the next token will be, i.e.
   $x_(b s + 1)$, having seen the #strong[context] of the first $s$
   tokens in the sequence. Specifically, removing the batch index for
-  simplicity, a of $y_(s v)$ gives the conditional probability
+  simplicity, a $SM$ of $y_(s v)$ gives the conditional probability
   $p_(s v) = P (t_(s + 1) \| t_s dots.h t_0)$ for the indicated series
   of tokens. Because of the chain rule of probability, these individual
   probabilities can be combined to form the probability that any
@@ -254,74 +255,67 @@ available variants.]:
   detail, these probabilities are created by products:
   $P (t_(s + n) dots.h t_(s + 1) \| t_s dots.h t_0) = P (t_(s + n) \| t_(s + n - 1) dots.h t_s dots.h t_0) times dots.h times P (t_(s + 1) \| t_s dots.h t_0)$.].
 
-Each batch (the $b$-index) is processed independently. We omitted and
+Each batch (the $b$-index) is processed independently. We omitted $LN$ and $DR$
 layers above, as well as the causal mask; these will be covered below as
 we step through the architecture in more detail.
 
 === Embedding Layer and Positional Encodings <subsubsec_embedding_and_pe>
-The #strong[embedding] layer is just a simple look up table: each of the
-indices in the vocabulary is mapped to a $D$-dimensional vector via a
-large -shaped table/matrix. This layer maps $x_(b s) arrow.r z_(b s d)$.
-In , this is an instance.
+The #strong[embedding] layer is just a simple lookup table: each of the `range(V)` indices in the
+vocabulary is mapped to a $D$-dimensional vector via a large `(V, D)`-shaped table/matrix. This layer maps
+$x_(b s) arrow.r z_(b s d)$. In , this is an `nn.Embedding(V, D)` instance.
 
-To each item in a batch, we add identical #strong[positional encodings]
-to the vectors above with the goal of adding fixed, position-dependent
-correlations in the sequence dimension which will hopefully make it
-easier for the architecture to pick up on the relative positions of the
-inputs #footnote[Positional encodings and the causal mask are the only
-components in the vanilla transformers architecture which carry weights
-with a dimension of size $S$; i.e. they are the only parts that have
-explicit sequence-length dependence. A related though experiment: you
-can convince yourself that if the inputs $z_(b s d)$ were just random
-noise, the transformers architecture would not be able to predict the
-$s$-index of each such input in the absence of positional encodings.]
-This layer maps $z_(b s d) arrow.l z_(b s d) + p_(s d)$, with $p_(s d)$
-the positional encoding tensor.
+To each item in a batch, we add identical #strong[positional encodings] to the vectors above with
+the goal of adding fixed, position-dependent correlations in the sequence dimension which will
+hopefully make it easier for the architecture to pick up on the relative positions of the inputs
+#footnote[Positional encodings and the causal mask are the only components in the vanilla
+  transformers architecture which carry weights with a dimension of size $S$; i.e. they are the only
+  parts that have explicit sequence-length dependence. A related though experiment: you can convince
+  yourself that if the inputs $z_(b s d)$ were just random noise, the transformers architecture
+  would not be able to predict the $s$-index of each such input in the absence of positional
+  encodings.] This layer maps $z_(b s d) arrow.l z_(b s d) + p_(s d)$, with $p_(s d)$ the positional
+encoding tensor.
 
 The above components require $(V + S) D approx V D$ parameters per
 model.
 
 === Layer Norm <layer_norm>
-The original transformers paper @vaswani2017attention put instances
+The original transformers paper @vaswani2017attention put $LN$ instances
 after the #strong[attention] and #strong[MLP] blocks, but now it is
 common @xiong2020layer to put them before these blocks#footnote[Which
 makes intuitive sense for the purposes of stabilizing the matrix
 multiplications in the blocks].
 
-The operations acts over the hidden dimension (since this is the
-dimension the subsequent instances act on). Spelling it out, given the
+The $LN$ operations acts over the hidden dimension (since this is the
+dimension the subsequent $LIN$ instances act on). Spelling it out, given the
 input tensor $z_(b s d)$ whose mean and variance over the $d$-index are
-$mu_(b s)$ and $sigma_(b s)$, respectively, the output is
+$mu_(b s)$ and $sigma_(b s)$, respectively, the $LN$ output is
 $
   z_( b s d ) & <- ( (z_( b s d ) - mu_( b s ) ) / sigma_( b s ) ) gamma_d
   + beta_( d ) equiv LN_d z_( b s d )
 $
 where $gamma_d \, beta_d$ are the trainable scale and
-bias parameters. In , this is a instance. Since there are two instances
+bias parameters. In `torch`, this is a `nn.LayerNorm(D)` instance. Since there are two $LN$ instances
 in each transformer block, these components require $2 D$ parameters per
 layer.
 
 
-We will continue discussing instances in what follows in order to adhere
-to the usual construction and to discuss methods like
-sequence-parallelism in their original form (see
-@subsec_seq_parallelism), but note: the data-independent
-transformations due to $gamma_d \, beta_d$ are completely redundant when
-immediately followed by a layer, since both act linearly on their inputs
-and is already the most general data-independent linear transformation.
-Explicitly, the $gamma_d \, beta_d$ parameters can be absorbed into the
-parameters:
+We will continue discussing $LN$ instances in what follows in order to adhere to the usual
+construction and to discuss methods like sequence-parallelism in their original form (see
+@subsec_seq_parallelism), but note: the data-independent $LN$ transformations due to $gamma_d \, beta_d$
+are completely redundant when immediately followed by a $LIN$ layer, since both act linearly on their
+inputs and $LIN$ is already the most general data-independent linear transformation. Explicitly, the
+$gamma_d \, beta_d$ parameters can be absorbed into the $LIN$ parameters:
 $
   (x_(b s d) gamma_d + beta_d) W_(d d') + b_(d') & = x_(b s d) W'_(d d') + b'_(d') med \, quad W'_(d d') equiv gamma_d W_(d d') med \, quad b'_(d') equiv b_(d') + beta_d W_(d d') med \,
 $
 for arbitrary $x_(b s d)$. That is, these transformations can be
-equivalently performed by the weight matrix and bias (if included) in
+equivalently performed by the weight matrix and bias (if included) in the $LIN$
 layer#footnote[Note the importance of data-independence here: the
 data-dependent mean and standard deviation terms cannot be similarly
 absorbed. Also, because the usual training algorithms are not invariant
 under parameter redefinitions, the above unfortunately does not imply
-that removing the learnable parameters ( in ) will have no effect on
-training dynamics. $gamma_d \, beta_d$ can shoved into the layer's
+that removing the $LIN$ learnable parameters (`elementwise_affine=False` in `torch`) will have no effect on
+training dynamics. $gamma_d \, beta_d$ can shoved into the $LIN$ layer's
 parameters as a small inference-time optimization, though.].
 
 === Causal Attention <attn_layer>
@@ -356,7 +350,7 @@ condition: the outputs
 $z_(b s d) = mono("CausalTransformer") (x_(b s' d'))$ only depend on
 those inputs $x_(b s' d')$ with $s' lt.eq s$.
 
-These weights come from -ed attention scores, which are just a
+These weights come from $SM$-ed attention scores, which are just a
 normalized dot-product over the hidden dimension:
 $
   w_( b s s' d a ) & =SM_( s' ) (m_( s s' )+(q_( b s e )k_( b s' e a ) )( sqrt(D / A)) ), "s.t." sum_(s')w_( b d s s' a ) =1
@@ -375,7 +369,7 @@ tensor, say $z_(b s d)$, only has dependence on other tensors whose sequence ind
 $s' lt.eq s$. This is crucial for inference-time optimizations, in particular the use of the
 #strong[kv-cache] in which key-value pairs do not need to be re-computed.
 
-The $sqrt(D \/ A)$ normalization is motivated by demanding that the variance of the argument be 1 at
+The $sqrt(D \/ A)$ normalization is motivated by demanding that the variance of the $SM$ argument be 1 at
 initialization, assuming that other components have been configured so that that the query and key
 components are i.i.d. from a Gaussian normal distribution .
 
@@ -384,10 +378,10 @@ re-weigh the #strong[value] vectors and form the tensors
 $
   y_( b s e a) & = DR (w_( b d s s' a) ) v_( b s'e a )
 $<eq_reweighted_values>
-and these -shaped tensors are then concatenated along
-the $e$-direction to re-form a -shaped tensor $u_(b s d)$
+and these `(B, S, D/A, A)`-shaped tensors are then concatenated along
+the $e$-direction to re-form a `(B, S, D)`-shaped tensor $u_(b s d)$
 $ u_(b s d) & = y_(b s (e a)) $ in
-#link("https://einops.rocks/1-einops-basics/")[einops]-like notation for
+#link("https://einops.rocks/1-einops-basics/")[`einops`]-like notation for
 concatenation. Finally, another weight matrix $O_(d' d)$ and dropout
 layer transform the output once again to get the final output
 $
@@ -405,11 +399,11 @@ dimensions (those of size $D$ or $D \/ A$).
 
 Below is pedagogical#footnote[The code is written for clarity, not
 speed. An example optimization missing here: there is no need to form
-separate $Q_a \, K_a \, V_a$ layers, one large layer which is later
-chunked is more efficient] sample code for such a layer#footnote[When
+separate $Q_a \, K_a \, V_a$ $LIN$ layers, one large layer which is later
+chunked is more efficient] sample code for such a $CA$ layer#footnote[When
 using sequence-parallelism, it will be more natural to separate out the
-final layer and combine it with the subsequent , as they are sharded
-together; see @subsec_seq_parallelism. The same is true for the
+final $DR$ layer and combine it with the subsequent $LN$, as they are sharded
+together; see @subsec_seq_parallelism. The same is true for the $MLP$
 layer below.]:
 
 ```python
@@ -488,18 +482,18 @@ The feed-forward network is straightforward and corresponds to
 $
   z_( b s d ) & -> DR (phi ( z_( b s d' )W^0_( d'e ) ) W^1_( e d ) )
 $<eq_mlp>
-where $W^0$ and $W^1$ are - and -shaped matrices,
+where $W^0$ and $W^1$ are `(B, S, D)`- and `(E*D, D)`-shaped matrices,
 respectively (see App.~@app_conventions for notation) and $phi$ is a
-non-linearity#footnote[The
+non-linearity#footnote[The `GeLU`
 #link("https://pytorch.org/docs/stable/generated/torch.nn.GELU.html")[non-linearity]
-is common.]. In code, where we again separate out the last layer as we
+is common.]. In code, where we again separate out the last $DR$ layer as we
 did in in @attn_layer.
 
 This bock requires $2 E D^2$ parameters per layer, only counting the
 contribution from weights.
 
 === Language Model Head <subsubsec_language_model_head>
-The layer which converts the -shaped outputs, $z_(b s d)$, to -shaped
+The layer which converts the `(B, S, D)`-shaped outputs, $z_(b s d)$, to `(B, S, V)`-shaped
 predictions over the vocabulary, $y_(b s v)$, is the #strong[Language
 Model Head]. It is a linear layer, whose weights are often tied to be
 exactly those of the initial embedding layer of
@@ -519,10 +513,10 @@ And then the entire architecture:
 
 === The Loss Function
 <the-loss-function>
-The last necessary component is the loss function. The training loop data is the -shaped#footnote[is
+The last necessary component is the loss function. The training loop data is the `(B, K)`-shaped#footnote[`K` is
 the block size, the maximum sequence-length for the model. See App.~@app_conventions.] token
-inputs ($x_(b s)$) along with their shifted-by-one relatives $y_(b s)$ where . The -shaped outputs
-($z_(b s v)$) of the network are treated as the logits which predict the value of the next token,
+inputs ($x_(b s)$) along with their shifted-by-one relatives $y_(b s)$ where `x[:, s + 1] == y[:, x]` . The `(B, K, V)`-shaped outputs
+($z_(b s v)$) of the `DecoderOnly` network are treated as the logits which predict the value of the next token,
 given the present context:
 $
   p(x_( b (s+1) )=v| x_( b s ), x_( b (s-1) ), ..., x_( b 0 )) & = SM_( v ) z_( b s v )
@@ -552,16 +546,15 @@ $
 $
 Note that the losses for all possible context lengths
 are included in the sum, equally weighted#footnote[In Natural Language
-Processing (NLP), the is often reported instead of the loss, which is
+Processing (NLP), the perplexity is often reported instead of the loss, which is
 just the exponential of the loss, a geometric-mean over the gold-answer
 probabilities:
 $"perplexity" = e^( cal(L) ) = (product_( b, s )p(x _( b
         (s+1) )=| x _( b s ), x _( b (s-1) ), ..., x _( b 0 )) ) ^(  -1 /( B K ) )$.].
 
-In code, the loss computation might look like the following (using fake
+In `torch` code, the loss computation might look like the following (using fake
 data):
-```py
-
+```python
 model = DecoderOnly(
     num_attn_heads=A,
     block_size=K,
@@ -617,23 +610,23 @@ with $A \/ G$ heads (nice divisibility assumed)#footnote[Llama-2
 group can be sharded and put on its own GPU within a standard 8-GPU
 node.].
 
-=== Parallel and Layers
+=== Parallel $MLP$ and $CA$ Layers
 <parallel-and-layers>
-Rather than first pass inputs into the layer of each block, and then
-pass those outputs on to in series,
+Rather than first pass inputs into the $CA$ layer of each block, and then
+pass those outputs on to $MLP$ in series,
 #link("https://github.com/kingoflolz/mesh-transformer-jax/blob/f8315e3003033b23f21d78361b288953064e0e76/mesh_transformer/layers.py#L303")[GPT-J-6B]
-instead processes the outputs in #emph[parallel]. That is, instead of
+instead processes the $LN$ outputs in #emph[parallel]. That is, instead of
 something like
 $
   z arrow.l z + MLP (LN (z + CA (z)))
 $
 we instead have#footnote[This alternative layer was also used in PaLM
 @chowdhery2022palm where it was claimed that this formulation is
-$tilde.op 15 %$ faster due to the ability to fuse the and matrix
+$tilde.op 15 %$ faster due to the ability to fuse the $MLP$ and $CA$ matrix
 multiplies together (though this is not done in the GPT-J-6B repo
 above).]
 $ z arrow.l z + MLP (z) + CA (z) med . $
-Note that a instance is also removed.
+Note that a $LN$ instance is also removed.
 
 === RoPE Embeddings
 <rope-embeddings>
@@ -2802,15 +2795,14 @@ comparing strategies can be
 #link("https://huggingface.co/blog/how-to-generate")[found here.]
 
 ==== Greedy <subsec_greedy_gen>
-The most obvious generation strategy is to take the final, -shaped
-outputs $z_(b s v)$ and just take the next token to be the most-probable
-one (for the final position in the sequence): . A very minimal method is
-as below:
+The most obvious generation strategy is to take the final, `(B, S, V)`-shaped outputs $z_(b s v)$
+and just take the next token to be the most-probable one (for the final position in the sequence):
+`next_token = z[:, -1].argmax(dim=-1)`.
 
 There are various important, practical considerations which are ignored
 in the above implementation, including:
 
-- Since we are taking the prediction from the last (-indexed) element in
+- Since we are taking the prediction from the last (`-1`-indexed) element in
   each sequence, it is crucial that all padding is #emph[left]-padding,
   so that these final elements are meaningful.
 
@@ -2836,7 +2828,7 @@ the logits:
   num_samples=1)
 
 ]
-assuming are the final logits. Larger temperature yields a larger
+assuming `z` are the final logits. Larger temperature yields a larger
 variance in the chosen tokens.
 
 With temperature sampling, there is still a non-zero chance of choosing
@@ -2925,30 +2917,23 @@ found in the paper.
 === The Bare Minimum and the kv-Cache
 <sec_kv_cache>
 
-There are two separate stages during generation. First, an original,
-to-be-continued series of prompts $x_(b s)$ can be processed in parallel
-to both generate the first prediction and populate any intermediate
-values we may want to cache for later. We follow @pope2022efficiently
-and call this the #strong[prefill] stage. For this procedure, we require
-the entire $x_(b s)$ tensor.
+There are two separate stages during generation. First, an original, to-be-continued series of
+prompts $x_(b s)$ can be processed in parallel to both generate the first prediction and populate
+any intermediate values we may want to cache for later. We follow @pope2022efficiently and call this
+the #strong[prefill] stage. For this procedure, we require the entire $x_(b s)$ tensor.
 
-In the second, iterative part of generation (the #strong[decode] stage)
-we have now appended one-or-more tokens to the sequence and we again
-want the next prediction, i.e. for the last-layer outputs $z_(b s d)$.
-In this stage, we can avoid re-processing the entire $x_(b s)$ tensor
-and get away with only processing the final, newly added token,
-#emph[if] we are clever and cache old results (and accept a very
-reasonable approximation).
+In the second, iterative part of generation (the #strong[decode] stage) we have now appended
+one-or-more tokens to the sequence and we again want the next prediction, i.e. `z[:, -1, :]` for the
+last-layer outputs $z_(b s d)$. In this stage, we can avoid re-processing the entire $x_(b s)$
+tensor and get away with only processing the final, newly added token, #emph[if] we are clever and
+cache old results (and accept a very reasonable approximation).
 
-The important pieces occur in the layer, as that's the only location in
-which the sequence index is not completely parallelized across
-operations. Referring back to @attn_layer, given the
-input $z_(b s d)$ of the layer, the re-weighted value
-vectors#footnote[Summed over $s'$, but concatenating the different $a$
-values over the $f$ dimension.] $w_(b s s' d)^a v_(b s' f)^a$ are the
-key objects which determine the next-token-prediction, which only
-depends on the $s = - 1$ index values. Therefore, we can cut out many
-steps and the minimum requirements are:
+The important pieces occur in the $CA$ layer, as that's the only location in which the sequence index is
+not completely parallelized across operations. Referring back to @attn_layer, given the input $z_(b
+s d)$ of the $CA$ layer, the re-weighted value vectors#footnote[Summed over $s'$, but concatenating the
+  different $a$ values over the $f$ dimension.] $w_(b s s' d)^a v_(b s' f)^a$ are the key objects
+which determine the next-token-prediction, which only depends on the $s = - 1$ index values.
+Therefore, we can cut out many steps and the minimum requirements are:
 
 - Only the attention weights $w_(b s s' d)^a$ with $s = - 1$ are needed
 
@@ -2997,7 +2982,7 @@ The essentials of inference-time math, much of it based on
 
 ==== Naive Inference
 <naive-inference>
-Processing a single -shaped tensor to generate a single next input costs
+Processing a single `(B, S, D)`-shaped tensor to generate a single next input costs
 the $2B S N _"params"$ FLOPs we found for the forwards-pass
 in @sec_flops_training (assuming $S lt.tilde D$). Memory costs just
 come from the parameters themselves:
@@ -3029,11 +3014,12 @@ lambda _"mem"$, unless the batch-size is very large.
 
 ==== Intra-Node Communication
 <intra-node-communication>
-For $T$-way tensor parallelism, two s are needed, one for each and each layer, where each
-accelerator is sending $p B D S$ bytes of data (see @subsec_tensor_parallelism). This requires a
-total of $4 (T - 1) p B D S \/ T approx 4 p B D S$ bytes to be transferred between workers in the
-tensor-parallel group (see @foot_all_reduce), taking a total of $ 4p B D L S/ lambda _"comms"$
-time for the model as a whole. For an A100 80GiB, setup, this is $ B D S times 10 ^( -11 )  "sec"$
+For $T$-way tensor parallelism, two `AllReduce`s are needed, one for each $MLP$ and each $CA$ layer,
+where each accelerator is sending $p B D S$ bytes of data (see @subsec_tensor_parallelism). This
+requires a total of $4 (T - 1) p B D S \/ T approx 4 p B D S$ bytes to be transferred between
+workers in the tensor-parallel group (see @foot_all_reduce), taking a total of $ 4p B D L S/ lambda
+_"comms"$ time for the model as a whole. For an A100 80GiB, `torch.bfloat16` setup, this is $ B D S
+times 10 ^( -11 )  "sec"$
 
 ==== Latency
 <latency>
@@ -3108,10 +3094,10 @@ $cal(O) ( D ^2 )$ weights is more than the cost of
 reading in the $cal(O) ( B S D )$ entries of the
 intermediate representations.] $B S lt.tilde D$.
 
-As indicated above, we use zero-indexing. We also use code
+As indicated above, we use zero-indexing. We also use `python` code
 throughout#footnote[Written in a style conducive to latex, e.g. no
 type-hints and clarity prioritized over optimization.] and write all ML
-code using standard syntax. To avoid needing to come up with new symbols
+code using standard `torch` syntax. To avoid needing to come up with new symbols
 in math expressions we will often use expressions like $x arrow.l f (x)$
 to refer to performing a computation on some argument ($x$) and
 assigning the result right back to the variable $x$ again.
@@ -3128,28 +3114,24 @@ appears on one side of an equation, but not the other, then a sum is
 implied, but if the same index appears on both sides, then it's an
 element-wise operation. The Hadamard-product between two matrices $A$
 and $B$ is just $ C_(i j) & = A_(i j) B_(i j) med . $ Einstein notation
-also has implementations available for :
-#link("https://rockt.github.io/2018/04/30/einsum")[see this blog post on ]
-or the #link("https://einops.rocks/1-einops-basics/")[] package. We
+also has implementations available for `torch`:
+#link("https://rockt.github.io/2018/04/30/einsum")[see this blog post on `einsum`]
+or the #link("https://einops.rocks/1-einops-basics/")[`einops`] package. We
 strive to write all learnable weights in upper case.
 
-In particular, we use notation for concatenation and splitting:
-$A_c = A_((d e)) = B_(d e)$#footnote[The indexing is all row-major: if
-$A_i$ is $I$-dimensional, $i in ( 0 \, dots.h \, I - 1 )$, then if we
-split this index as $A_i = A_((j k)) equiv macron(A)_(j k)$, then the
-indices $j \, k$ will range over $j in ( 0 \, dots.h \, J )$,
-$k in ( 0 \, dots.h \, K )$ with $I = J times K$ and where numerically
-$i = j times K + k$. More complex cases follow by induction.]. We will
-some times use a bar to indicate tensors which are derived from other
-tensors through such splitting operations, usually in the context of
-tensor-sharding where devices only locally hold some shard of the
-tensor. In this context, only some of the dimensions will be sharded
-across devices, and we may also put a bar over the corresponding sharded
-index. For instance, consider a two-dimensional tensor $M_(a b)$ of
-shape : sharding this tensor across two devices across the final index
-results in a tensor $macron(M)_(a macron(b))$ which is of shape on each
-device. As here, we will some times use bars to denote indices which are
-sharded over different devices.
+In particular, we use `einops` notation for concatenation and splitting: $A_c = A_((d e)) = B_(d
+e)$#footnote[The indexing is all row-major: if $A_i$ is $I$-dimensional, $i in ( 0 \, dots.h \, I -
+  1 )$, then if we split this index as $A_i = A_((j k)) equiv macron(A)_(j k)$, then the indices $j
+  \, k$ will range over $j in ( 0 \, dots.h \, J )$, $k in ( 0 \, dots.h \, K )$ with $I = J times
+  K$ and where numerically $i = j times K + k$. More complex cases follow by induction.]. We will
+some times use a bar to indicate tensors which are derived from other tensors through such splitting
+operations, usually in the context of tensor-sharding where devices only locally hold some shard of
+the tensor. In this context, only some of the dimensions will be sharded across devices, and we may
+also put a bar over the corresponding sharded index. For instance, consider a two-dimensional tensor
+$M_(a b)$ of shape `M.shape = (A, B)`: sharding this tensor across two devices across the final
+index results in a tensor $macron(M)_(a macron(b))$ which is of shape `M_bar.shape=(A, B/2)` on each
+device. As here, we will some times use bars to denote indices which are sharded over different
+devices.
 
 We also put explicit indices on operators such as $SM$ to help
 clarify the relevant dimension, e.g. we would write the softmax
@@ -3164,68 +3146,64 @@ $v$-index is gives unity.
 
 == Collective Communications <app_collective_communications>
 A quick refresher on common distributed
-#link("https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html")[communication primitives].
-Consider $R$ ranks with tensor data $x^((r))$ of some arbitrary shape ,
-which takes up $M$ bytes of memory, where $r$ labels the worker and any
-indices on the data are suppressed. For collectives which perform an
-operation over a specific dimension, the convention is that it operates
-over . The $r = 0$ worker is arbitrarily denoted the #emph[chief]. Some
-operations are easiest to describe by forming the logical super-tensor
-of shape such that the tensor on rank is . Then, the primitive
-operations are:
+#link("https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html")[communication
+  primitives]. Consider $R$ ranks with tensor data $x^((r))$ of some arbitrary shape `x.shape`,
+which takes up $M$ bytes of memory, where $r$ labels the worker and any indices on the data are
+suppressed. For collectives which perform an operation over a specific dimension, the `torch`
+convention is that it operates over . The $r = 0$ worker is arbitrarily denoted the #emph[chief].
+Some operations are easiest to describe by forming the logical super-tensor `X=torch.stach([x0, x1, ...], dim=0)`
+of shape `X.shape=Size(R, ...)` such that the tensor on rank `r` is `x=X[r]`. Then, the primitive operations are:
 
 - `Broadcast`: all workers receive the chief's data, $x^((0))$.
 
-- `Gather`: all workers communicate their data $x_n$ to the chief, e.g. in a
-  concatenated array $[x^0 \, x^1 \, dots.h \, x^(R - 1)]$. E.g., the
-  chief gets .
+- `Gather`: all workers communicate their data $x_n$ to the chief in a concatenated array
+  $[x^0 \, x^1 \, dots.h \, x^(R - 1)]$. E.g., the chief gets `x_out = X.reshape(R*X.shape[1], X.shape[2:])`.
 
-- `Reduce`: data is -ed to the chief, which then performs some operation (, , ,
-  etc.) producing a new tensor $x'$ on the chief worker. E.g., for the
-  chief gets .
+- `Reduce`: data is `Gather`-ed to the chief, which then performs some operation (`sum`, `max`,
+  `concatenate`, etc.) producing a new tensor $x'$ on the chief worker. E.g., for `sum` the chief
+  gets `x_out = X.sum(dim=0)`.
 
-- `ReduceScatter`: a reducing operation (e.g. ) is applied to the $x^((r))$ to produce
-  a $x'$ of the same shape (e.g. $x' = sum x^((r))$) and each worker
-  only receives a $1 \/ R$ slice (and hence $M \/ R$ byte) of the
-  result#footnote[Note that and are morally conjugate to each other. In
-  the former, each worker ends up with $R$ times as much data as they
-  started with, while in they end up with $1 \/ R$ of their initial
-  data. One is nearly a time-reversed version of the other, which is a
-  way of remembering that they have the came communication cost. They
-  also compose to produce an output of the same initial size, as in .].
-  A ring implementation sends $M times frac(R - 1, R)$ bytes over each
-  link in the ring. E.g., for rank gets output .
+- `ReduceScatter`: a reducing operation (e.g. `sum`) is applied to the $x^((r))$ to produce a $x'$
+  of the same shape (e.g. $x' = sum x^((r))$) and each worker only receives a $1 \/ R$ slice (and
+  hence $M \/ R$ byte) of the result#footnote[Note that `AllGather` and `ReduceScatter` are morally conjugate to each other. In
+  the former, each worker ends up with $R$ times as much data as they started with, while in `ReduceScatter` they
+  end up with $1 \/ R$ of their initial data. One is nearly a time-reversed version of the other,
+  which is a way of remembering that they have the came communication cost. They also compose to
+  produce an output of the same initial size, as in `AllReduce`.]. A ring implementation sends $M times frac(R
+  - 1, R)$ bytes over each link in the ring. E.g., for `sum` rank `r` gets output `x_out = X.sum(dim=0).tensor_split(R, dim=0)[r]`.
 
 - `AllGather`: all data $x^((r))$ is communicated to all workers; each worker ends
   up with the array $[x^0 \, x^1 \, dots.h \, x^(R - 1)]$. Functionally
-  equivalent to a followed by . A ring implementation sends
+  equivalent to a `Gather` followed by `Broadcast`. A ring implementation sends
   $M times (R - 1)$ bytes over each link in the ring. E.g., all ranks
-  get .
+  get `x_out = X.reshape(R*X.shape[1], X.shape[2:])`.
 
 - `AllReduce`: all workers receive the same tensor $x'$ produced by operating on
-  the $x^((r))$ with , , etc. Functionally equivalent to a followed by ,
-  or a followed by a (the more efficient choice#footnote[The former
+  the $x^((r))$ with `sum`, `mean`, etc. Functionally equivalent to a `Reduce` followed by `Broadcast`,
+  or a `ReduceScatter` followed by an `AllGather` (the more efficient choice#footnote[The former
   strategy scales linearly with the number of worker, while the latter
-  strategy underlies “ring\" which is (nearly) independent of the number
-  of workers: if each worker carries data of size $D$ which is to be -d,
+  strategy underlies "ring" `AllReduce` which is (nearly) independent of the number
+  of workers: if each worker carries data of size $D$ which is to be `AllReduce`-d,
   a total of $frac(2 (R - 1) D, R)$ elements need to be passed around.
   #link("https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/")[See this blog post for a nice visualization]
   or @bandwidthOptimalAllReduce2009 for a relevant
   paper.]<foot_all_reduce>). In the latter case, the total cost is
-  $2 M times frac(R - 1, R)$, due to -ing the initial $M$-sized data,
-  and then -ing the $M \/ R$-sized reductions. E.g., for all ranks get .
+  $2 M times frac(R - 1, R)$, due to `AllReduce`-ing the initial $M$-sized data,
+  and then `AllGather`-ing the $M \/ R$-sized reductions. E.g., for `sum` all ranks get `x_out =
+  X.sum(dim=0)`.
 
 - `Scatter`: One worker gives shards of a tensor to all workers. If the worker is
-  scattering tensor $T_x$ over the given index, a effectively shards
-  this as $T_x arrow.r T_((macron(r) y))$, each worker getting a
-  $macron(r)$-shard. If is the chief's data, rank receives .
+  scattering tensor $T_x$ over the given index, a `Scatter` effectively shards this as $T_x arrow.r
+  T_((macron(r) y))$, each worker getting a $macron(r)$-shard. If `x` is the chief's data, rank `r`
+  receives `x_out = x.tensor_split(R, dim=0)[r]`.
 
 - `AllToAll`: All workers receive shards of all others worker's tensors. If every
   worker has a tensor $T_(macron(r) y)$, for one value of $macron(r)$,
   which we imagine came from a sharding a tensor
   $T_x = T_((macron(r) y))$, then an over the $y$ index produces
   produces the tensor $T_(z macron(r))$ defined by
-  $T_(z macron(r)) = T_x$ on all workers. E.g. rank receives .
+  $T_(z macron(r)) = T_x$ on all workers. E.g. rank `r` receives `x_out = X.reshape(X.shape[1], R,
+  X.shape[:2])[:,r]`.
 
 == Hardware
 <hardware>
@@ -3342,8 +3320,7 @@ Summary of some relevant NVIDIA GPU statistics:
 ]
 where
 
-- $lambda _"FLOP/s"$ is flops bandwidth (for
-  multiply-accumulate ops)
+- $lambda _"FLOP/s"$ is flops bandwidth (for `(b)float16` multiply-accumulate ops)
 
 - $lambda _"mem"$ is memory bandwidth
 
@@ -3357,7 +3334,7 @@ A useful approximate conversion rate is that
 $1  "TFLOP/s" approx 100 "PFLOP/day"$.
 
 Important practical note: the $lambda _"FLOP/s"$ numbers
-should be taken as aspirational. Out-of-the box, matrix-multiplies in
+should be taken as aspirational. Out-of-the box, `bfloat16` matrix-multiplies in `torch`
 with well-chosen dimensions tops out around $tilde.op 250$ FLOPS/s
 
 === Compute-bound vs Memory-bound <app_compute_mem_bound>
@@ -3386,10 +3363,10 @@ $ M/lambda _"mem"$.
 
 ==== Matrix-Multiplications vs. Element-wise Operations
 <matrix-multiplications-vs.-element-wise-operations>
-For instance, to multiply a -shaped tensor $z_(b s d)$ by a -shaped
+For instance, to multiply a `(B, S, D)`-shaped tensor $z_(b s d)$ by a `(D, D)`-shaped
 weight-matrix $W_(d d')$, $p (B D S + D^2)$ bytes must be transferred
 from DRAM to SRAM at a rate $lambda _"mem"$, after which
-we perform $2 B S D^2$ FLOPs, and write the -shaped result back to DRAM
+we perform $2 B S D^2$ FLOPs, and write the `(B, S, D)`-shaped result back to DRAM
 again, for a ratio of $
 1/p ( B D S )/( 2B S + D )   ( "FLOPs/B"  )  .
 $ We want to compare this against
@@ -3426,7 +3403,7 @@ process a #emph[single] token at a time and so $S arrow.r 1$ in the
 numerator in the preceding, while the denominator is also weighed down
 by the kv-cache in the attention layers.
 
-In more detail, the layers just process $S = 1$ length tensors during
+In more detail, the $MLP$ layers just process $S = 1$ length tensors during
 generation, but are insensitive to the kv-cache, so their intensity
 comes from just setting $S = 1$ in the above,
 $ tilde.op frac(B D, B + D) med \, $ dropping
