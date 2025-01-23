@@ -378,20 +378,14 @@ $
   - infinity & = s > s'
 )
 $
-forcing $w_(b s s' d a) = 0$ for $s > s'$. In other
-words, the causal mask ensures that a given tensor, say $z_(b s d)$,
-only has dependence on other tensors whose sequence index, say $s'$,
-obeys $s' lt.eq s$. This is crucial for inference-time optimizations, in
-particular the use of the #strong[kv-cache] in which key-value pairs do
-not need to be re-computed.
+forcing $w_(b s s' d a) = 0$ for $s > s'$. In other words, the causal mask ensures that a given
+tensor, say $z_(b s d)$, only has dependence on other tensors whose sequence index, say $s'$, obeys
+$s' lt.eq s$. This is crucial for inference-time optimizations, in particular the use of the
+#strong[kv-cache] in which key-value pairs do not need to be re-computed.
 
-The $sqrt(D \/ A)$ normalization is motivated by demanding that the
-variance of the argument be 1 at initialization, assuming that other
-components have been configured so that that the query and key
-components are i.i.d. from a Gaussian normal distribution
-#footnote[However, in @yang2022tensor it is instead argued that no
-square root should be taken in order to maximize the speed of learning
-via SGD.];.
+The $sqrt(D \/ A)$ normalization is motivated by demanding that the variance of the argument be 1 at
+initialization, assuming that other components have been configured so that that the query and key
+components are i.i.d. from a Gaussian normal distribution .
 
 The weights above are then passed through a dropout layer and used to
 re-weigh the #strong[value] vectors and form the tensors
@@ -426,7 +420,7 @@ final layer and combine it with the subsequent , as they are sharded
 together; see @subsec_seq_parallelism. The same is true for the
 layer below.];:
 
-```py
+```python
 class CausalAttention(nn.Module):
     def __init__(
         self,
@@ -859,10 +853,10 @@ we have the building blocks#footnote[The fact that we can replace the
 $j'$ sum with the cached attention outputs in the final derivative below
 is crucial.]
 $
-  ( partial P_( i r j c ) ) / ( partial S_( i r j'c' ) ) &= P_( i r j c)delta_( j j' )delta_( c c') - P_( i j r c ) P_( i r j'c' )\
+  ( partial P_( i r j c ) ) / ( partial S_( i r j'c\' ) ) &= P_( i r j c)delta_( j j' )delta_( c c\') - P_( i j r c ) P_( i r j'c\' )\
   ( partial cal(L) ) / ( partial P_( i r j c ) ) &= g_( i r h ) v_( j c h )\
-  ( partial cal(L) ) / ( partial S_( i r j c ) ) &= g_( i r h ) ( partial P_( i r j c ) ) / ( partial S_( i r j'c' ) )\
-  &= g_( i r h ) ( P_( i r j c ) v_( j c h ) - P_( i r j c ) P_( i r j'c' ) v_( j'c'h ) )\
+  ( partial cal(L) ) / ( partial S_( i r j c ) ) &= g_( i r h ) ( partial P_( i r j c ) ) / ( partial S_( i r j'c\' ) )\
+  &= g_( i r h ) ( P_( i r j c ) v_( j c h ) - P_( i r j c ) P_( i r j'c\' ) v_( j'c\'h ) )\
   &= g_( i r h ) ( P_( i r j c ) v_( j c h ) - P_( i r j c ) z_(i r h ) )\
   &= P_( i r j c )(( partial cal(L) ) / ( partial P_( i r j c ) ) -g_( i r h ) z_(i r h ) )
 $<eq_fa2_derivative_building_blocks>
@@ -986,7 +980,7 @@ a
 Writing the above operation as $y_(c s) = Sigma_(c a s s') x_(a s')$,
 one can build an non-linear S4 layer by acting on the output with a
 non-linearity and then mixing feature dimensions with a weight matrix:
-$ z_(c s) & = W_(c c') phi (Sigma^(c' a s s') x_(a s')) $ Assuming
+$ z_(c s) & = W_(c c\') phi (Sigma^(c\' a s s') x_(a s')) $ Assuming
 the $c$ and $a$ hidden dimensions have the same size, the operations can
 then be naturally composed.
 
@@ -1107,7 +1101,7 @@ As noted above, the creation of the intermediates
 $x_(s e)^0 \, x_(s e)^1 \, B_(s n) \, C_(s n)$ and part of $Delta_(s e)$
 can all be formed in a single large matmul.
 
-=== Mamba 2
+== Mamba 2
 <mamba-2>
 Mamba2 introduces some changes:
 
@@ -1235,21 +1229,21 @@ its computation. Two primary points:
 
 The chunked version is then
 $
-  z_(c l a h) & = C_(c l g n) cal(A)_(c c' l l' a) cal(B)_(c' l' g a n h) med \,
+  z_(c l a h) & = C_(c l g n) cal(A)_(c c\' l l' a) cal(B)_(c\' l' g a n h) med \,
 $
 where we have chunked the $a$-index into the $c \, l$ pair (with $c$
 indexing the chunk). The chunked computation breaks down into two
-further cases, based on the values of the $c \, c'$ indices#footnote[The
-$c' > c$ cases are trivial as $cal(A)_(c c' l l' a)$ vanishes.];:
+further cases, based on the values of the $c \, c\'$ indices#footnote[The
+$c\' > c$ cases are trivial as $cal(A)_(c c\' l l' a)$ vanishes.];:
 
-- $c = c'$: these cases are effectively smaller versions of the entire,
+- $c = c\'$: these cases are effectively smaller versions of the entire,
   unchunked computation, and hence shares in its sparsity in that
-  $cal(A)_(c c' l l' a)$ vanishes for $l' > l$.
+  $cal(A)_(c c\' l l' a)$ vanishes for $l' > l$.
 
-- $c > c'$: there is no sparsity here, as $cal(A)_(c c' l l' a)$ will be
+- $c > c\'$: there is no sparsity here, as $cal(A)_(c c\' l l' a)$ will be
   generically non-zero for all $l \, l'$.
 
-==== The $c = c'$ Cases
+==== The $c = c\'$ Cases
 <the-cc-cases>
 Logically, we compute the scan using cumulative sums and
 matrix-multiplies. Let
@@ -1264,19 +1258,19 @@ $
 $ Sharding and taking only the diagonal terms, the
 above turns into (no sum over the repeated $c$-index):
 $
-  cal(A)_( c c' l l\'a ) &=
+  cal(A)_( c c\' l l\'a ) &=
   cases(
   e^( A_( c l a )) times ... times e^( A_( c(l\'+1)a )) =exp ( sum_( l\'\'=l\'+1 )^( l )A_( c l\'\'a ) ) wide & l >= l\' ,
   0 & l \< l\'
   )\
-  &eq.triple e^( bold(A)_( c c' l l\'a ) ) .
+  &eq.triple e^( bold(A)_( c c\' l l\'a ) ) .
 $
 
-The argument $sans(A)_(c c' l l' a)$ can be
+The argument $sans(A)_(c c\' l l' a)$ can be
 constructed in various
 ways#footnote[$CUMSUM_s X_s equiv sum_(s' = 0)^s X_(s')$ and
 $SEGSUM$ stands for “segment sum\".];: $
-bold(A)_( c c' l l\'a )&= SEGSUM_( l ) ( A_( c l a )  ) + M _( l l\' )\
+bold(A)_( c c\' l l\'a )&= SEGSUM_( l ) ( A_( c l a )  ) + M _( l l\' )\
 &= CUMSUM_( l )A_( c l a ) - CUMSUM_( l\' )A_( c l\'a ) + M_( l l\' ) \
 &= CUMSUM_( l ) ( A_( c l a )Z_( l l\' )  ) + M _( l l\' )\
 Z_( l l\' ) &eq.triple cases(
@@ -1297,16 +1291,18 @@ computations is straightforward.
 
 
 
-==== The $c > c'$ Cases
+==== The $c > c\'$ Cases
 <the-cc-cases-1>
 Now we compute the remaining off-diagonal terms. Compute one
 $(c \, c ')$ chunk at a time, i.e. we compute
-$ z_(c l a h) = C_(c l g n) cal(A)_(c c' l l' a) cal(B)_(c' l' g a n h) med \, $
-by iterating over the $c'$ sum, similarly to flash attention.
+$
+  z_(c l a h) = C_(c l g n) cal(A)_(c c\' l l' a) cal(B)_(c\' l' g a n h) med \,
+$
+by iterating over the $c\'$ sum, similarly to flash attention.
 
-$cal(A)_(c c' l l' a)$ is made up of $tilde.op e^(A_(s a))$ factors
+$cal(A)_(c c\' l l' a)$ is made up of $tilde.op e^(A_(s a))$ factors
 which each serve to propagate $cal(B)_((s - 1) g a n h)$ forward one
-step in time. Specifically, $cal(A)_(c c' l l' a)$ contains all the
+step in time. Specifically, $cal(A)_(c c\' l l' a)$ contains all the
 factors needed to get from the times specified by the $(c ' \, l ')$
 indices up to the $(c \, l)$ indices: $
 cal(A)_( c c\'l l\'a ) &=exp  ( sum_( s= c\'L + l\' + 1 )^( c L + l )A _( s a )  )  , quad "for" c\>c\'  .
@@ -1316,7 +1312,7 @@ factors#footnote[In the nomenclature of
 these as the B, A, and C blocks, respectively (though we actually differ
 slightly in detail from what the paper and `mamba-ssm` do).];:
 
-+ A right-factor which propagates the $cal(B)_(c' l' g a n h)$ from
++ A right-factor which propagates the $cal(B)_(c\' l' g a n h)$ from
   their disparate times $(c ' \, l ')$ all up to a common point in time.
 
 + A center-factor which propagates the previous element together for a
@@ -1341,23 +1337,33 @@ These factors can be conveniently, and succinctly, vectorized as
 in#footnote[These can also be written in a form similar to
 @app_eq_mamba2_diag_propagator
 where we use masks instead of relying in numerically unstable
-cancellations. $T_(c' l' a) = exp (mono("sum")_l Z_(l l') A_(c' l a))$,
-$U_(c l a) = exp (mono("sum")_(l') (1 - Z_(l' l)) A_(c' l' a))$ with
+cancellations. $T_(c\' l' a) = exp (mono("sum")_l Z_(l l') A_(c\' l a))$,
+$U_(c l a) = exp (mono("sum")_(l') (1 - Z_(l' l)) A_(c\' l' a))$ with
 $Z_(l l')$ the mask in
 @app_eq_mamba2_diag_propagator;.];:
 $
   T_( c\'l\'a ) &=exp ( SUM_( l\' ) ( A_( c\'l\'a ) ) - CUMSUM_( l\' )A_( c l\'a ) )\
-  bold(A)_( c c\'a )&=exp ( SEGSUM_( c )A_( c a ) - A_( c a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )\
+  bold(A)_( c c\'a )&=exp ( SEGSUM_( c )A_( c a ) - A_( c\' a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )\
   U_( c l a ) &=exp ( CUMSUM_( l ) ( A_( c l a ) ) ) .
 $
 
 The full solution decomposed in this way is then: $
-z _( c l a h ) &= C _( c l g n )e^( bold(A)_( c c' l l\'a ) )cal(B)_( c l\'g a n h ) + M_( c c\' )C _( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c l\'g a n h )\
+z _( c l a h ) &= C _( c l g n )e^( bold(A)_( c c\' l l\'a ) )cal(B)_( c l\'g a n h ) + M_( c c\' )C _( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c l\'g a n h )\
 M_( c c\' ) & = cases(
-1 & c \> c\'
+1 wide & c \> c\',
 0 & c <= c\'
 )  .
 $
+
+
+A crucial computational point is that the matrix $bold(A)_(c c\'a)$ is low-rank:
+$
+  bold(A)_(c c\'a) &= exp ( SEGSUM_( c )A_( c a ) )times exp( A_( c\' a ) ) .
+$
+This means that the sum $bold(A)_( c c\'a )T_( c\'l\'a )$ can be performed in $cal(O)(S)$ time by
+performing the $exp( A_( c\' a ) ) T_( c\'l\'a )$ sum over $c\'$ first, and then multiplying by the
+remaining factor. Otherwise, this decomposition wouldn't realize the optimal $cal(O)(S)$ scan
+scaling.
 
 === Aren't These Just RNNs?<subsec_rnns_and_ssm>
 Yes, but very special ones with the important computational difference that the recursion relations
@@ -1595,18 +1601,18 @@ mixed-precision is indeed an overall savings at such typical scales.
   reconstructed from its outputs alone: $phi' (z) = F (phi (z))$
   for some $F$. Examples:
 
-  - : since $phi (z) = z theta (z)$, then (defining the derivative at
+  - `ReLU`: since $phi (z) = z theta (z)$, then (defining the derivative at
     zero to be zero) $phi' (z) = theta (z) = theta (phi (z))$.
     Correspondingly, torch only uses the outputs
     #link("https://github.com/pytorch/pytorch/blob/73d288fdf9d0beb76229cabc8566ee116f8a21a2/tools/autograd/derivatives.yaml#L2009-L2011")[to compute the derivative]
     (there is no self arg in the line).
 
-  - : since $tanh' (z) = 1 - tanh (z)^2$.
+  - $tanh$: since $tanh' (z) = 1 - tanh (z)^2$.
 
   Other cases do not have this nice property, in which case both the
   inputs and outputs need to be stored:
 
-  - @hendrycks2023gaussian: $phi (z) = z Phi (z)$ here and the
+  - `GeLU` @hendrycks2023gaussian: $phi (z) = z Phi (z)$ here and the
     derivative
     $phi' (z) = Phi (z) + frac(z e^(- z^2 \/ 2), sqrt(2 pi))$, both
     the inputs and outputs
