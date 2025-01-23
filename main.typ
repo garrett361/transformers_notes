@@ -7,6 +7,9 @@
  * - Multi-citation fmt
  * */
 
+
+#import "@preview/lovelace:0.3.0": *
+
 /* Custom objects */
 #let DR = `Dropout`
 #let SM = `Softmax`
@@ -644,7 +647,7 @@ $
 $
 we instead have#footnote[This alternative layer was also used in PaLM
 @chowdhery2022palm where it was claimed that this formulation is
-$tilde.op 15 %$ faster due to the ability to fuse the $MLP$ and $CA$ matrix
+$tilde.op 15 %$ faster due to the ability to fuse the $MLP$ and $CA$matrix
 multiplies together (though this is not done in the GPT-J-6B repo
 above).]
 $ z arrow.l z + MLP (z) + CA (z) med . $
@@ -777,19 +780,21 @@ Ignoring the important causal mask and not tracking the maximum logits
 captures the essentials of the algorithm is below. Additional
 recomputation is needed for the backwards pass.
 
-#block[
-  Flash Attention (Naive - Missing causal mask/max tracking.) Computing
-  outputs $z_(i r h)$ $forall r \, h$ Initialize off-chip tensor
-  $z_(i r h)$ to zeros Move $q_(i r h)$ on-chip, instantiate temp
-  $Z_(i r h)$ to zeros on-chip. All on-chip computations. $r \, c$ indices
-  processed in parallel. Move $k_(j c h) \, v_(j c h)$ on-chip
-  $Z_(i r h) arrow.l Z_(i r h) + exp (q_(i r h') k_(j c h')) v_(j c h)$
-  Update numerator
-  $L_(i r) arrow.l L_(i r) + sum_c exp (q_(i r h') k_(j c h'))$ Update
-  denominator $z_(i r h) arrow.l Z_(i r h) / L_(i r)$ Write result
-  off-chip <algo_fa_fwd_basic>
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [Flash Attention (Naive - Missing causal mask/max tracking.)],
+  pseudocode-list(booktabs: true)[
+    + *For* $i in ...$ #h(1fr) `# Computing outputs z[i, r, h] for all r, h`
+      + Initialize off-chip tensor $z_(i r h)$ to zeros
+      + Move $q_(i r h)$ on-chip, instantiate temp $Z_(i r h)$ to zeros on-chip.
+      + *For* $j in ...$ #h(1fr) `# On-chip compute. r, c indices processed in parallel.`
+        + Move $k_(j c h) \, v_(j c h)$ on-chip $Z_(i r h) arrow.l Z_(i r h) + exp (q_(i r h') k_(j c h')) v_(j c h)$
+        + Update numerator $L_(i r) arrow.l L_(i r) + sum_c exp (q_(i r h') k_(j c h'))$
+      + Update denominator $z_(i r h) arrow.l Z_(i r h) / L_(i r)$ #h(1fr) `# Write result off-chip`
+  ],
+) <algo_fa_fwd_basic>
 
-]
 
 We now analyze the memory transfer costs. As a baseline, vanilla
 attention requires $cal(O) ( S
@@ -830,26 +835,28 @@ numerically stable exponential computation and the causal mask. The
 causal mask $C_(s s') = C_((i r) (j c))$ is zero if $s gt.eq s'$ and
 $- infinity$ otherwise. The algorithm is as below.
 
-#block[
-  Flash Attention Forward Pass Initialize off-chip tensors
-  $z_(i r h) , ell_(i r)$ to zeros Computing outputs $z_(i r h)$
-  $forall r , h$ Move $q_(i r h)$ on-chip, instantiate temp $Z_(i r h)$
-  to zeros and $M ^( ( "new") ) _( i r ), M ^( ( "old") ) _( i r )$
-  to $- oo$ on-chip All on-chip computations. $r , c$ indices processed
-  in parallel. Move $k_(j c h) , v_(j c h)$ on-chip
-  $S_(i r j c) arrow.l q_(i r h') k_(j c h') + C_(i j r c)$ $SM$
-  logits + causal mask
-  $M^( ( "new") )_( i r ) <- max ( M^( ( "old") )_( i r ), max_( c ) S_( i r j c ) )$
-  $Z_( i r h ) <- Z_( i r h ) +exp ( S_( i j r c ) - M^( ( "new") )_( i r ) ) v_( j c h )$
-  Update numerator
-  $L_( i r ) <- e^( M^( ( "old") )_( i r ) - M^( ( "new") )_( i r ) ) L_( i r ) +sum_( c )exp ( S_( i j r c ) - M^( ( "new") )_( i r ) )$
-  Update denominator
-  $M^( ( "old") )_( i r ) <- M^( ( "new") )_( i r )$
-  $z_(i r h) arrow.l Z_(i r h) / L_(i r)$,
-  $ell_( i r ) <- M^( ( "old") )_( i r ) + ln L_( i r )$
-  Write results off-chip. $ell_(i r)$ for backwards <algo_fa_fwd_advanced>
 
-]
+
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [Flash Attention Forward Pass],
+  pseudocode-list(booktabs: true)[
+    + *For* $i in ...$ `#Computing outputs  z[i, r, h] for all r, h`
+      + Initialize off-chip tensors $z _( i r h ),  ell _( i r )$ to zeros #h(1fr)
+      + Move $q _( i r h )$ on-chip, instantiate temp $Z _( i r h )$ to zeros and $M ^"new" _( i r ), M ^"old" _( i r )$ to $-infinity $ on-chip
+      + *For* $j in ..$ #h(1fr) `# On-chip compute. r, c indices processed in parallel`
+        + Move $k_( j c h ),v _( j c h )$ on-chip
+        + $S_( i r j c ) <- q_( i r h' ) k_( j c h' ) + C_( i j r c )$ #h(1fr) `# logits + causal mask`
+        + $M^"new"_( i r ) <- max ( M^"old"_( i r ), max_( c ) S_( i r j c ) )$
+        + $Z _( i r h ) <-   Z _( i r h ) +exp  (  S _( i j r c ) - M ^"new" _( i r )   ) v _( j c h )$ #h(1fr) `# Update numerator`
+        + $L_( i r ) <- e^( M^"old"_( i r ) - M^"new"_( i r ) ) L_( i r ) +sum_( c )exp ( S_( i j r c ) - M^"new"_( i r ) )$#h(1fr) `# Update denominator`
+        + $M^"old"_( i r ) <- M^"new"_( i r )$
+      + $z _( i r h ) <- (Z _( i r h ))/(L _( i r ))$, $ ell _( i r ) <- M ^"old" _( i r ) + ln L _( i r )$#h(1fr) Write results off-chip. $ell _( i r ) $for backwards
+  ],
+) <algo_fa_fwd_advanced>
+
+
 For the backwards pass, the main complication comes from computing
 derivatives with respect to the attention scores. Recalling the $SM$
 derivative @eq_softmax_derivative.
@@ -884,27 +891,30 @@ tensor they call $D$. And in the official `triton` example, $dif q$
 is computed in a separate loop. So, take the below as more of a
 guideline than a strict recipe.]:
 
-#block[
-  Flash Attention Backward Pass Initialize off-chip tensors
-  $dif q _( i r h ), dif k _( j c h ), dif v _( j c h )$ to zeros Move
-  $z_(i r h) \, q_(i r h) \, g_(i r h)$ and the cached $ell_(i r)$
-  on-chip. All on-chip computations. $r \, c$ indices processed in
-  parallel. Instantiate
-  $P _( i r j c ),dif P _( i r j c ) ,dif S _( i r j c )$ to zeros. Move
-  $k_(j c h) \, v_(j c h)$ on-chip
-  $P_(i r j c) arrow.l exp (q_(i r h') k_(j c h') + C_(i j r c) + ell_(i r))$
-  Get probabilities. $dif P _( i r j c ) <- g _( i r h) v _( j c h )$
-  Get derivatives w.r.t. $P$
-  $dif S _( i r j c ) <- P _( i j r c ) ( dif P _( i j r c ) - g _( i r h ) z _( i r h )  )$Get
-  derivatives w.r.t. $S$
-  $dif k _( j c h ) <- dif S _( i r j c ) q _( i r h )$ Derivatives
-  w.r.t. $(q \, k \, v)$
-  $dif v _( j c h ) <- g _( i r h )P _( i r j c )$ Write
-  $dif k, dif v$ derivatives to off-chip
-  $dif q_( i r h ) <- dif q_( i r h )+ dif S_( i r j c ) k_( j c h )$
-  Write $dif q$ derivative to off-chip <algo_fa_bwd_advanced>
 
-]
+
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [Flash Attention Backwards Pass],
+  pseudocode-list(booktabs: true)[
+    + *For* $i in ...$
+      + Initialize off-chip tensors $dif q _( i r h ), dif k _( j c h ), dif v _( j c h )$ to zeros
+      + Move $z_(i r h) \, q_(i r h) \, g_(i r h)$ and the cached $ell_(i r)$ + on-chip.
+      + *For* $j in ...$ #h(1fr) `# On-chip compute. r, c processed in parallel`
+        + Instantiate $P _( i r j c ),dif P _( i r j c ) ,dif S _( i r j c )$ to zeros.
+        + Move $k_(j c h) \, v_(j c h)$ on-chip
+        + $P_(i r j c) arrow.l exp (q_(i r h') k_(j c h') + C_(i j r c) + ell_(i r))$ #h(1fr) `# Get probabilities`
+        + $dif P_( i r j c ) <- g_( i r h) v_( j c h )$ #h(1fr) `# Get derivatives w.r.t. P`
+        + $dif S _( i r j c ) <- P _( i j r c ) ( dif P _( i j r c ) - g _( i r h ) z _( i r h )  )$ #h(1fr) `# Get derivatives w.r.t. S`
+        + $dif k _( j c h ) <- dif S _( i r j c ) q _( i r h )$ #h(1fr) `# Get derivatives w.r.t. q, k, v`
+        + $dif v_( j c h ) <- g_( i r h )P_( i r j c )$
+        + Write $dif k, dif v$ derivatives to off-chip
+        + $dif q_( i r h ) <- dif q_( i r h )+ dif S_( i r j c ) k_( j c h )$
+    + Write $dif q$ derivative to off-chip
+  ],
+) <algo_fa_bwd_advanced>
+
 
 === Linear Attention <subsec_linear_attn>
 Linear attention @katharopoulos2020transformersrnnsfastautoregressive
