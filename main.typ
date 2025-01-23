@@ -43,20 +43,20 @@
   }
 }
 #let conf(
-  title: none,
+  title: "Decoder-Only Transformers",
   subtitle: none,
-  authors: (),
+  authors: "Garrett Goon",
   keywords: (),
   date: none,
   abstract: none,
   cols: 1,
-  margin: (x: 1.25in, y: 1.25in),
+  margin: (x: 1.0in, y: 1.0in),
   paper: "us-letter",
-  lang: "e n",
+  lang: "en",
   region: "US",
   font: (),
-  fontsize: 11pt,
-  sectionnumbering: none,
+  fontsize: 12pt,
+  sectionnumbering: "1.",
   pagenumbering: "1",
   doc,
 ) = {
@@ -127,26 +127,22 @@
   authors: (
     (name: [Garrett Goon], affiliation: "", email: ""),
   ),
-  abstract: [Notes on various aspects of Decoder-Only Transformers.
-    Conventions are in the appendix.
-
+  abstract: [Notes on various aspects of Decoder-Only Transformers. Conventions are in the appendix.
   ],
   pagenumbering: "1",
   cols: 1,
   doc,
 )
 
-
-
-
-#set heading(numbering: "1.")
-#set math.equation(numbering: "(1)", number-align: end + bottom)
+/* Outline styling */
 #show outline.entry.where(level: 1): it => {
   v(12pt, weak: true)
   strong(it)
 }
+#outline(indent: auto)
 
 /* Eq ref styling https://typst.app/docs/reference/model/ref/ */
+#set math.equation(numbering: "(1)", number-align: end + bottom)
 #show ref: it => {
   let eq = math.equation
   let el = it.element
@@ -165,8 +161,6 @@
   }
 }
 
-
-#outline(indent: auto)
 
 = Architecture
 <architecture>
@@ -924,12 +918,16 @@ of the $cal(O) ( S D ^2 )$ elements at once.
 = State Space Models
 <state-space-models>
 == Intro<sec_ssm_intro>
-Needing to re-reference the entire previously-generated prefix at
-generation time is a major pain point for transformers models. Token
-generation is $cal(O) ( S )$ State space models return,
-more or less, to the old LSTM type strategy of encoding the conditional
-history which informs generation into a finite-sized state. The dream is
-faster generation and better memory efficiency.
+
+
+The all-to-all attention mechanism of transformers is a pain: $cal(O)( S^( 2 ) )$ compute at
+training time and $cal(O)( S )$ next-token generation. State space models return, more or less, to
+the old LSTM type strategy of encoding the conditional history into finite-sized state. The dream is
+faster generation and better memory efficiency:
+- Parallelizable#footnote[Better parallelization support is what differentiated S4 models from their
+  RNN/LSTM predecessors; see @rnns_and_ssm.] $cal(O)( S )$ training.
+- Constant $cal(O)( 1 )$ generation.
+
 
 == S4 <sec_s4>
 The S4 model of @s4 is a good starting point. These are based off a
@@ -1352,7 +1350,7 @@ performing the $exp( A_( c\' a ) ) T_( c\'l\'a )$ sum over $c\'$ first, and then
 remaining factor. Otherwise, this decomposition wouldn't realize the optimal $cal(O)(S)$ scan
 scaling.
 
-=== Aren't These Just RNNs?<subsec_rnns_and_ssm>
+=== Aren't These Just RNNs?<rnns_and_ssm>
 Yes, but very special ones with the important computational difference that the recursion relations
 are #emph[linear] in the hidden state $h$. This crucial difference makes it possible to parallelize
 the operations during training. Compare @eq_s4_discrete to what typical RNN recursion relations
