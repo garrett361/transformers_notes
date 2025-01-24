@@ -26,6 +26,8 @@
 #let TOPK = `top_k`
 #let TR = `Trace`
 
+#let nice_box(body) = { box(stroke: black, inset: 1em, radius: .5em)[#body] }
+
 #set table(
   inset: 6pt,
   stroke: none,
@@ -131,12 +133,20 @@
   authors: (
     (name: [Garrett Goon], affiliation: "", email: ""),
   ),
-  abstract: [Notes on various aspects of Decoder-Only Transformers. Conventions are in the appendix.
+  abstract: [Notes on various aspects of Decoder-Only Transformers (and related topics). Conventions
+    are in the appendix, @app_conventions.
   ],
   pagenumbering: "1",
   cols: 1,
   doc,
 )
+
+/* https://github.com/typst/typst/discussions/4031#discussioncomment-9258528 */
+#let appendix(body) = {
+  set heading(numbering: "A.1", supplement: [Appendix])
+  counter(heading).update(0)
+  body
+}
 
 /* Outline styling */
 #show outline.entry.where(level: 1): it => {
@@ -145,12 +155,14 @@
 }
 #outline(indent: auto)
 
+#show link: it => text(blue)[#it]
 /* Eq ref styling https://typst.app/docs/reference/model/ref/ */
 #set math.equation(numbering: "(1)", number-align: end + bottom)
 #show ref: it => {
   let foot = footnote
   let eq = math.equation
   let el = it.element
+  set text(blue)
   if el != none and el.func() == eq {
     // Override equation references.
     link(
@@ -161,7 +173,7 @@
       ),
     )
   } else if el != none and el.func() == foot {
-    // Other references as usual.
+    // Footnote styling
     link(
       el.location(),
       "Footnote "
@@ -177,6 +189,7 @@
 }
 
 
+
 = Architecture
 <architecture>
 
@@ -190,9 +203,8 @@ Tranformers, but focus here on the decoder-only versions which underlie
 the GPT models
 @gpt2radford2019language@gpt3brown2020language@gpt4openai2023.
 
-The full decoder-only architecture can be seen in
-Fig.~@fig_transformers_architecture. The parameters which define the
-network can be found in #link(<app_conventions>)[Conventions].
+The full decoder-only architecture can be seen in @fig_transformers_architecture. See
+@app_conventions for more on conventions.
 
 #figure(
   image("figures/transformer-general.jpg"),
@@ -239,7 +251,7 @@ available variants.]:
   Importantly, there are #strong[residual connections] around each of
   these#footnote[This gives rise to the concept of the #strong[residual
   stream] which each transformer block reads from and writes back to
-  repeatedly.] (the arrows in Fig.~@fig_transformers_architecture),
+  repeatedly.] (the arrows in @fig_transformers_architecture),
   meaning that the output of each block is added back to its original
   input.
 
@@ -486,7 +498,7 @@ $
   z_( b s d ) & -> DR (phi ( z_( b s d' )W^0_( d'e ) ) W^1_( e d ) )
 $<eq_mlp>
 where $W^0$ and $W^1$ are `(B, S, D)`- and `(E*D, D)`-shaped matrices,
-respectively (see App.~@app_conventions for notation) and $phi$ is a
+respectively (see @app_conventions for notation) and $phi$ is a
 non-linearity#footnote[The `GeLU`
 #link("https://pytorch.org/docs/stable/generated/torch.nn.GELU.html")[non-linearity]
 is common.]. In code, where we again separate out the last $DR$ layer as we
@@ -540,7 +552,7 @@ indices suppressed.
 === The Loss Function
 <the-loss-function>
 The last necessary component is the loss function. The training loop data is the `(B, K)`-shaped#footnote[`K` is
-the block size, the maximum sequence-length for the model. See App.~@app_conventions.] token
+the block size, the maximum sequence-length for the model. See @app_conventions.] token
 inputs ($x_(b s)$) along with their shifted-by-one relatives $y_(b s)$ where `x[:, s + 1] == y[:, x]` . The `(B, K, V)`-shaped outputs
 ($z_(b s v)$) of the `DecoderOnly` network are treated as the logits which predict the value of the next token,
 given the present context:
@@ -852,7 +864,7 @@ $- infinity$ otherwise. The algorithm is as below.
         + $Z _( i r h ) <-   Z _( i r h ) +exp  (  S _( i j r c ) - M ^"new" _( i r )   ) v _( j c h )$ #h(1fr) `# Update numerator`
         + $L_( i r ) <- e^( M^"old"_( i r ) - M^"new"_( i r ) ) L_( i r ) +sum_( c )exp ( S_( i j r c ) - M^"new"_( i r ) )$#h(1fr) `# Update denominator`
         + $M^"old"_( i r ) <- M^"new"_( i r )$
-      + $z _( i r h ) <- (Z _( i r h ))/(L _( i r ))$, $ ell _( i r ) <- M ^"old" _( i r ) + ln L _( i r )$#h(1fr) Write results off-chip. $ell _( i r ) $for backwards
+      + $z _( i r h ) <- (Z _( i r h ))/(L _( i r ))$, $ ell _( i r ) <- M ^"old" _( i r ) + ln L _( i r )$#h(1fr) `# Write off-chip. l[i, r] saved for bwd`
   ],
 ) <algo_fa_fwd_advanced>
 
@@ -908,10 +920,9 @@ guideline than a strict recipe.]:
         + $dif P_( i r j c ) <- g_( i r h) v_( j c h )$ #h(1fr) `# Get derivatives w.r.t. P`
         + $dif S _( i r j c ) <- P _( i j r c ) ( dif P _( i j r c ) - g _( i r h ) z _( i r h )  )$ #h(1fr) `# Get derivatives w.r.t. S`
         + $dif k _( j c h ) <- dif S _( i r j c ) q _( i r h )$ #h(1fr) `# Get derivatives w.r.t. q, k, v`
-        + $dif v_( j c h ) <- g_( i r h )P_( i r j c )$
-        + Write $dif k, dif v$ derivatives to off-chip
-        + $dif q_( i r h ) <- dif q_( i r h )+ dif S_( i r j c ) k_( j c h )$
-    + Write $dif q$ derivative to off-chip
+        + $dif v_( j c h ) <- g_( i r h )P_( i r j c )$ #h(1fr) `# Write k, v derivatives to off-chip`
+        + $dif q_( i r h ) <- dif q_( i r h )+ dif S_( i r j c ) k_( j c h )$ #h(1fr)
+      + Write $dif q_( i r h )$ derivative off-chip
   ],
 ) <algo_fa_bwd_advanced>
 
@@ -930,8 +941,7 @@ $cal(O) ( D S )$ bytes and performing
 $cal(O) ( D S )$ operations to generate the new token.
 However, if we remove the $SM$, then we can write the above as
 $
-  z_( s d ) &= q_( s d\' ) k_( s\'d\' ) v_( s\'d )\
-  &= q_( s d\' )B_(d\' d ) .
+  z_( s d ) &= q_( s d\' ) k_( s\'d\' ) v_( s\'d )= q_( s d\' )B_(d\' d ) .
 $ This would let us cache the
 $cal(O) ( D ^2 )$ $B_(d' d)$ matrix and generating
 the next token only takes $cal(O) ( D ^2 )$
@@ -1015,17 +1025,14 @@ is no sequence-length dependence for next-output generation, unlike for transfor
 main draw here: constant-time generation.
 
 == Mamba<sec_mamba>
-A large limitation of the S4 model
-@eq_s4_discrete is that the various
-weights are fixed quantities which do not adjust to the
-input#footnote[For instance, we could ask our architecture to process
-two independent sequences concatenated together with a special separator
-token in the middle. The hidden state should be reset at the separator
-token and the mamba architecture would be (in-principle) capable of
-this, while the S4 would not.] $x_(s d)$. Mamba @mamba extends S4 by
-replacing the fixed weights by functions of the inputs. This destroys
-the recursive structure and requires various techniques for an efficient
-GPU implementation, which is the primary focus of the paper.
+A large limitation of the S4 model @eq_s4_discrete is that the various weights are fixed quantities
+which do not adjust to the input#footnote[For instance, we could ask our architecture to process two
+  independent sequences concatenated together with a special separator token in the middle. The
+  hidden state should be reset at the separator token and the mamba architecture would be
+  (in-principle) capable of this, while the S4 would not.] $x_(s d)$. Mamba @mamba extends S4 by
+replacing the fixed weights by functions of the inputs. This alters the recursive structure and
+requires various techniques for an efficient GPU implementation, which is the primary focus of the
+paper.
 
 The mamba architecture is as follows, based on the implementation in
 #link("https://github.com/alxndrTL/mamba.py")[`mamba.py`] and
@@ -1094,17 +1101,15 @@ Mamba blocks then perform the following logical operation:
     + $x_(s e)^3 = phi (x_(s e)^2)$ #h(1fr) `# Elementwise non-linearity (silu)`
     + $x_(s e)^4 = mono("selective_scan") (x_(s e)^3)$ #h(1fr) `# Selective scan`
     + $x_(s e)^5 = x_(s e)^4 times.circle phi (x_(s e)^0)$ #h(1fr) `# Elementwise product and non-linearity (silu)`
-    + *Return* $z_(s d) = W_(d e)^O x_(s e)^5$ #h(1fr) `#Project back down.`
+    + *Return* $z_(s d) = W_(d e)^O x_(s e)^5$ #h(1fr) `# Project back down.`
   ],
 )<algo_mamba_1>
-where `selective_scan` operation is the above is#footnote[The
+where the `selective_scan` operation above is#footnote[The
 `mamba_ssm` and `mamba.py` implementations differ in the first step in
 that the latter optionally applies a norm operator post-projection. The
 exponentials here might seem odd, but are probably motivated by the
 existence of good cumulative sum kernels, which is how the exponents can
 be computed.]
-
-
 
 #figure(
   kind: "algorithm",
@@ -1385,7 +1390,7 @@ M_( c c\' ) & = cases(
 1 wide & c \> c\',
 0 & c <= c\'
 )  .
-$
+$<app_eq_mamba2_recursion_soln>
 
 
 A crucial computational point is that the matrix $bold(A)_(c c\'a)$ is low-rank:
@@ -1393,10 +1398,25 @@ $
   bold(A)_(c c\'a) &= exp ( SEGSUM_( c c\' )A_( c a ) - A_( c\' a ) )\
   & = exp (CUMSUM_( c ) A_( c a )) times exp (CUMSUM_( c\' ) A_( c\' a ) - A_(c\' a )) .
 $
-This means that the sum $bold(A)_( c c\'a )T_( c\'l\'a )$ can be performed in $cal(O)(S)$ time by
-performing the $exp(CUMSUM_( c\' ) A_( c\' a ) - A_(c\' a )) T_( c\'l\'a )$ sum over $c\'$ first, and then multiplying by the
-remaining factor. Otherwise, this decomposition wouldn't realize the optimal $cal(O)(S)$ scan
-scaling.
+This fact ultimately means that the sums over $c, c\'$ in @app_eq_mamba2_recursion_soln can be
+performed in $cal(O)(S)$ time, rather than the naive $cal(O)( S^( 2 ) )$ time. The mask is a mildly
+complicating factor here, since the entire sum over $c\'$ involves the factors
+$
+  M_( c c\' )bold(A)_( c c\'a )T_( c\'l\'a ) ,
+$
+and the product $M_( c c\' )bold(A)_( c c\'a )$ itself is not low-rank#footnote[Were it not for the
+  mask, we could simply compute the sum by breaking the low-rank matrix into its natural factors as
+  $bold(A)_( c c\'a )T_( c\'l\'a ) = L_( c a )R_( c\' a )T_( c\'l\'a )$, compute the $c\'$ sum in
+  $cal(O)( S )$ and multiply the scalar sum by $L_( c )$ in $cal(O)( S )$ again.]. Writing
+$bold(A)_( c c\'a )= L_( c a )R_( c\' a )$, we have the manipulations:
+$
+  M_( c c\' )bold(A)_( c c\'a )T_( c\'l\'a ) &= M_( c c\' )L_( c a )R_( c\' a )T_( c\'l\'a )\
+  &= L_( c a ) sum_( c'=0 )^( c-1 )R_( c\' a )T_( c\'l\'a )\
+  &= L_( c a ) times (CUMSUM_c (R_( c a )T_( c l\'a )) - R_( c a )T_( c l\'a ))\
+  &= L_( c a ) times Z_( c l\' a )
+$
+The parenthesized terms can all be computed in $cal(O)( S )$ and the final elementwise product
+also takes $cal(O)( S )$ time, as claimed.
 
 === Aren't These Just RNNs?<rnns_and_ssm>
 Yes, but very special ones with the important computational difference that the recursion relations
@@ -1440,8 +1460,8 @@ parameters. Significant factors include:
 Because the activation counting is a little more involved, it is in its
 own section.
 
-#block[
-  Essentials Memory costs count the elements of all tensors in some
+#nice_box[
+  *Essentials* Memory costs count the elements of all tensors in some
   fashion, both from model parameters and intermediate representations.
   The gradient and optimizer state costs scale with the former quantity:
   $cal(O)  ( N _"params"  )  cal(O)  ( L D ^2  )$,
@@ -1695,8 +1715,8 @@ dimensions are big.]. It is then a straightforward exercise in counting
 to estimate the FLOPs for a given architecture. The input tensor is of
 shape throughout.
 
-#block[
-  Essentials The number of FLOPs to push a batch of $B$ of sequence-length
+#nice_box[
+  *Essentials* The number of FLOPs to push a batch of $B$ of sequence-length
   $S$ examples through the forwards-pass of a decoder-only transformer is
   approximately $2 B S N _"params"$ where the number of
   parameters accounts for any reductions due to tensor- and
@@ -1819,7 +1839,7 @@ simplicity and we note that $B S$ is the number of total tokens in the
 processed batches.
 
 === Training Time <sec_train_time>
-Training is generally compute bound (see App.~@app_compute_mem_bound)
+Training is generally compute bound (see @app_compute_mem_bound)
 and based on the results of @sec_flops_training the quickest one
 could possibly push a batch of data through the model is
 $
@@ -1860,8 +1880,8 @@ $C ^"hardware"$.
 Empirically-discovered scaling laws have driven the race towards larger
 and larger models.
 
-#block[
-  Essentials Decoder-only model performance improves predictably as a
+#nice_box[
+  *Essentials* Decoder-only model performance improves predictably as a
   function of the model size, dataset size, and the total amount of
   compute. As of Summer 2023, there is little sign of hitting any kind of
   wall with respect to such scaling improvements.
@@ -2192,12 +2212,14 @@ groups. Critical-path TP communications occur within each data parallel
 group and gradients are synced across groups. Ideally, all the workers
 in a group reside on the same node, hence the usual $T = 8$.]
 
-#block[
-  Essentials The cost of large weights can be amortized by first sharding
+
+
+#nice_box[
+  *Essentials:* The cost of large weights can be amortized by first sharding
   its output dimension, resulting in differing activations across group
   members. Later, the activations are brought back in sync via a . Weights
   which act on the sharded-activations can also be sharded in their input
-  dimension. In the backwards pass, another is required.
+  dimension. In the backwards pass, another `AllReduce` is required.
 
 ]
 
@@ -2213,7 +2235,7 @@ $e in (0 \, dots.h \, E D - 1)$. This functions by splitting the weight
 matrix across its output indices across $T$ devices:
 $W_(d e)^0 = W_(d (f t))^0 equiv macron(W)_(d f macron(t))^0$ (again in
 \-like notation, with bars denoting that the tensor and particular
-indices are sharded; see App.~@app_conventions), where in the split
+indices are sharded; see @app_conventions), where in the split
 weights $macron(t) in (0 \, dots.h \, T - 1)$, and
 $f in (0 \, dots.h \, frac(E D, T) - 1)$. Each of the $T$ workers
 compute one shard of $z_d macron(W)_(d f macron(t))^0$, i.e. each has a
@@ -2243,7 +2265,7 @@ The progression of tensor shapes held by any single worker is
 + `(B, S, E*D/T)`
 + `(B, S, D)`
 
-In the backwards pass, another (see App.~@app_collective_communications)
+In the backwards pass, another (see @app_collective_communications)
 is needed for proper gradient computations with respect to the first
 layer's outputs. This is true whenever an operation producing a sharded
 output involved non-sharded tensors: if an operation
@@ -2331,7 +2353,7 @@ non-tensor-parallel implementations.
   caption: [
     Tensor parallelism for the layers. Graphic from
     @shoeybi2020megatronlm. The $f \/ g$ operators play the same role as
-    in Fig.~@fig_mlp_tensor_parallel.
+    in @fig_mlp_tensor_parallel.
   ],
 )
 <fig_attn_tensor_parallel>
@@ -2430,7 +2452,7 @@ The easiest way to achieve the above is the following.
   the layer
 
 + The tensor-parallel layer functions much like in
-  Fig.~@fig_attn_tensor_parallel #emph[except] that we do not re-form
+  @fig_attn_tensor_parallel #emph[except] that we do not re-form
   the outputs to full-dimensionality. Instead, before the layer, we them
   from being hidden-sharded to sequence-sharded and pass them through
   the subsequent / combination, similar to the first step
@@ -2445,7 +2467,7 @@ and layers for the backwards pass, their contributions to the activation memory 
 $p$-dependent terms in @eq_act_mem_attn_mlp;). In @korthikanti2022reducing, they solve this by only
 saving a $1 \/ T$ shard of these inputs on each device during the forward pass and then performing
 an extra when needed during the backwards pass. Schematics can be s e n in
-Fig.~@fig_tensor_seq_parallel and Fig.~@fig_tensor_seq_parallel_detail below. The activation memory
+@fig_tensor_seq_parallel and @fig_tensor_seq_parallel_detail below. The activation memory
 is then reduced to:
 $
   M_"act"^"total" & =( 2B D L S ( p(E+4) + 1 ) / T
@@ -2531,22 +2553,30 @@ tracking. These are important omissions#footnote[See
 @brandon2023stripedattentionfasterring for causal mask efficiency
 considerations.].
 
+
+
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [Ring Attention (Naive - Missing causal mask/max tracking.) Attention Backwards Pass],
+  pseudocode-list(booktabs: true)[
+    + Initialize $Z_(macron(r) t d)$, $L_(macron(r) t)$ to zeros
+    + Populate the shards $q_(macron(r) t d) \, k_(macron(w) x d') \, v_(macron(w) x d')$ with $macron(r) = macron(w) = r$ on rank $r$
+    + *For* $macron(w) in {r, ... , R-1, 0, ... , r-1 }$ #h(1fr) `# Compute z[r, t, d] for all t, d`
+      + *If* $macron(w) != (r-1) mod R$: prefetch shards $k_((macron(w) + 1) x d) \, v_((macron(w) + 1) x d)$ while computing below
+      + $Z_(macron(r) t d) arrow.l Z_(macron(r) t d) + exp (q_(macron(r) t d') k_(macron(w) x d')) v_(macron(w) x d)$ #h(1fr) `# Can use flash attention kernels here`
+      + $L_(macron(r) t) arrow.l L_(macron(r) t) + sum_x exp (q_(macron(r) t d') k_(macron(w) x d'))$ #h(1fr) `# Can use flash attention kernels here`
+    + *Return* $z_(macron(r) t d) arrow.l Z_(macron(r) t d) / L_(macron(r) t)$
+  ],
+) <algo_ring_attn_fwd_naive>
+
+
+
 #block[
-  Ring Attention (Naive - Missing causal mask/max tracking.) Initialize
-  $Z_(macron(r) t d)$, $L_(macron(r) t)$ to zeros Populate the key, query,
-  and value shards
-  $q_(macron(r) t d) \, k_(macron(w) x d') \, v_(macron(w) x d')$ with
-  $macron(r) = macron(w) = r$ on rank $r$ Computing components
-  $z_(macron(r) t d)$ $forall t \, d$ prefetch shards
-  $k_((macron(w) + 1) x d) \, v_((macron(w) + 1) x d)$ $forall x \, d$
-  $Z_(macron(r) t d) arrow.l Z_(macron(r) t d) + exp (q_(macron(r) t d') k_(macron(w) x d')) v_(macron(w) x d)$
-  Can use flash attention kernels here
-  $L_(macron(r) t) arrow.l L_(macron(r) t) + sum_x exp (q_(macron(r) t d') k_(macron(w) x d'))$
-  Can use flash attention kernels here
-  $z_(macron(r) t d) arrow.l Z_(macron(r) t d) / L_(macron(r) t)$
-  <algo_ring_attn_fwd_naive>
 
 ]
+
+
 At every step in the loop in the algorithm we are computing the sums
 $exp (q_(macron(r) t d') k_(macron(w) x d')) v_(macron(w) x d)$ and
 $sum_x exp (q_(macron(r) t d') k_(macron(w) x d'))$ for fixed values of
@@ -3027,13 +3057,13 @@ the $2B S N _"params"$ FLOPs we found for the forwards-pass
 in @sec_flops_training (assuming $S lt.tilde D$). Memory costs just
 come from the parameters themselves:
 $M _"infer"^"naive"=p N _"params"$. Per
-the analysis of App.~@app_compute_mem_bound, naive inference is
+the analysis of @app_compute_mem_bound, naive inference is
 generally compute-bound and so the per-token-latency is
 approximately#footnote[Assuming we do the naive thing here and generate
 the next token in a similarly naive way, shifting over the context
 window.] $2B S N _( "params"
 )/ lambda _"FLOP/s"$ where the FLOPs bandwidth in the
-denominator is again defined in App.~@app_compute_mem_bound.
+denominator is again defined in @app_compute_mem_bound.
 
 ==== kv-Cache Inference
 <kv-cache-inference>
@@ -3048,7 +3078,7 @@ $ Inference now has a computational-intensity of
 $
   ( C_"infer"^"kv-cache" ) / ( M_"infer"^"kv-cache" ) & ( B D ) / S ,
 $ dropping $cal(O) ( 1 )$ factors, is
-now memory-bound (again, see App.~@app_compute_mem_bound), and has
+now memory-bound (again, see @app_compute_mem_bound), and has
 per-token-latency of approximately $M _"infer"/
 lambda _"mem"$, unless the batch-size is very large.
 
@@ -3065,8 +3095,9 @@ times 10 ^( -11 )  "sec"$
 <latency>
 TODO
 
-= Appendix
-== Conventions and Notation
+#show: appendix
+
+= Conventions and Notation
 <app_conventions>
 We loosely follow the conventions of @korthikanti2022reducing. Common
 parameters:
@@ -3184,7 +3215,7 @@ SM _( v )  x _( b v d... )
 $<app_eq_einstein_softmax> indicating that the sum over the singled-out
 $v$-index is gives unity.
 
-== Collective Communications <app_collective_communications>
+= Collective Communications <app_collective_communications>
 A quick refresher on common distributed
 #link("https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html")[communication
   primitives]. Consider $R$ ranks with tensor data $x^((r))$ of some arbitrary shape `x.shape`,
@@ -3242,16 +3273,15 @@ of shape `X.shape=Size(R, ...)` such that the tensor on rank `r` is `x=X[r]`. Th
   which we imagine came from a sharding a tensor
   $T_x = T_((macron(r) y))$, then an over the $y$ index produces
   produces the tensor $T_(z macron(r))$ defined by
-  $T_(z macron(r)) = T_x$ on all workers. E.g. rank `r` receives `x_out = X.reshape(X.shape[1], R,
-  X.shape[:2])[:,r]`.
+  $T_(z macron(r)) = T_x$ on all workers. E.g. rank `r` receives `x_out = X.reshape(X.shape[1], R, X.shape[:2])[:,r]`.
 
-== Hardware
+= Hardware
 <hardware>
 Basic information about relevant hardware considerations. Much of the
 following is from the
 #link("https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html")[NVIDIA docs].
 
-=== NVIDIA GPU Architecture
+== NVIDIA GPU Architecture
 <nvidia-gpu-architecture>
 NVIDIA GPUs consist of some amount of relatively-slow off-chip DRAM
 memory#footnote[This is the number usually reported when discussing a
@@ -3299,7 +3329,7 @@ to understand. Types of memory, from slowest to fastest:
 
 #link("https://www.youtube.com/watch?v=QQceTDjA4f4&t=2124s")[An excellent video overview of CUDA and NVIDIA GPU architecture which covers some of the above is here.]
 
-=== CUDA Programming Model
+== CUDA Programming Model
 <cuda-programming-model>
 The CUDA programming model uses a hierarchy of concepts:
 
@@ -3330,7 +3360,7 @@ be launched can also read sequentially from memory and efficient usage
 implies that choosing the block size such that we are doing these reads
 as often as possible is ideal.
 
-=== NVIDIA GPU Stats <app_gpu_stats>
+== NVIDIA GPU Stats <app_gpu_stats>
 Summary of some relevant NVIDIA GPU statistics:
 
 #block[
@@ -3377,7 +3407,7 @@ Important practical note: the $lambda _"FLOP/s"$ numbers
 should be taken as aspirational. Out-of-the box, `bfloat16` matrix-multiplies in `torch`
 with well-chosen dimensions tops out around $tilde.op 250$ FLOPS/s
 
-=== Compute-bound vs Memory-bound <app_compute_mem_bound>
+== Compute-bound vs Memory-bound <app_compute_mem_bound>
 If your matrix-multiplies are not sufficiently large on, you are wasting
 resources @he2022brrrrfromfirstprinciples. The relevant parameters which
 determine sufficiency are $lambda _"FLOP/s"$ and
@@ -3385,7 +3415,7 @@ $lambda _"mem"$, the FLOPs and memory bandwidth,
 respectively. The ratio
 $lambda _"math" eq.triple ( lambda _"FLOP/s" )/(
 lambda _"mem" )$ determines how many FLOPS you
-must perform for each byte loaded from memory; see App.~@app_gpu_stats.
+must perform for each byte loaded from memory; see @app_gpu_stats.
 If your computations have a FLOPs/B ratio which is larger than
 $lambda _"math"$, then you are compute-bound (which is
 good, as you're maximizing compute), and otherwise you are
@@ -3401,7 +3431,7 @@ $ F/lambda _( "FLOP/s"
 sequential: compute and memory-communications can be concurrent.]
 $ M/lambda _"mem"$.
 
-==== Matrix-Multiplications vs. Element-wise Operations
+=== Matrix-Multiplications vs. Element-wise Operations
 <matrix-multiplications-vs.-element-wise-operations>
 For instance, to multiply a `(B, S, D)`-shaped tensor $z_(b s d)$ by a `(D, D)`-shaped
 weight-matrix $W_(d d')$, $p (B D S + D^2)$ bytes must be transferred
@@ -3410,7 +3440,7 @@ we perform $2 B S D^2$ FLOPs, and write the `(B, S, D)`-shaped result back to DR
 again, for a ratio of $
 1/p ( B D S )/( 2B S + D )   ( "FLOPs/B"  )  .
 $ We want to compare this against
-$lambda _"math"$, which from App.~@app_gpu_stats we take
+$lambda _"math"$, which from @app_gpu_stats we take
 to be $cal(O) ( 100 "FLOPs/B" )$, and plugging in
 any realistic numbers, shows that such matrix-multiplies are essentially
 always compute-bound. Compare this to the case of some element-wise
@@ -3422,7 +3452,7 @@ values of $C$. The moral is to try and maximize the number of
 matrix-multiplies and remove as many element-wise operations that you
 can get away with.
 
-==== Training vs. Inference
+=== Training vs. Inference
 <training-vs.-inference>
 Finally, we note that the above has implications for the Transformers
 architecture as a whole, and in particular it highlights the
@@ -3468,7 +3498,7 @@ becomes $cal(O) ( 1 + D/( A S ) )$. An analysis
 equivalent to the one performed here can be found in the original paper
 @shazeer2019fast.].
 
-=== Intra- and Inter-Node Communication
+== Intra- and Inter-Node Communication
 <intra--and-inter-node-communication>
 For intra-node communication, GPUs are connected by either PCIe or
 NVLink, generally.
@@ -3486,7 +3516,7 @@ For inter-node communication, nodes are often connected by:
   clear reference. But in any case, the bandwidth is divided amongst the
   GPUs in the node, leading to a reduction by $tilde.op 8$.
 
-== Batch Size, Compute, and Training Time <app_batch_size>
+= Batch Size, Compute, and Training Time <app_batch_size>
 The amount of compute directly determines the training time, but not all
 ways of spending compute are equivalent. We follow the discussion in
 @mccandlish2018empirical which gives a rule of thumb for determining the
@@ -3597,7 +3627,7 @@ sqrt(sigma kappa B _"noise" ) )/( kappa B _"noise" + sigma ) )$
 larger. So, this seems like a better choice of optimal batch size, if
 you value your time.
 
-== Initialization, Learning Rates, $mu$-Transfer etc <app_init_lr_mup>
+= Initialization, Learning Rates, $mu$-Transfer etc <app_init_lr_mup>
 A quick review of common initialization strategies and arguments for
 learning rate choices and $mu$-transfer. We follow some mix of
 @physicalDL@yang2022tensor@yaida2022metaprincipledfamilyhyperparameterscaling@doshi2023criticalinitializationwidedeep.
@@ -3617,7 +3647,7 @@ easiest limit to reason about.
 We mostly specialize to very simple cases in the following: MLP-only
 models which may have trivial non-linearities.
 
-=== Wide Models are Nearly Gaussian <app_nearly_gaussian_wide_models>
+== Wide Models are Nearly Gaussian <app_nearly_gaussian_wide_models>
 First we discuss the justification of an assumption we make throughout:
 the outputs of every block (suitably defined) at initialization are
 approximately normally distributed.
@@ -3688,7 +3718,7 @@ Gaussian-normally distributed, after appropriately tuning initialization
 scales. Demonstrating this rigorously is a central goal of the Tensor
 Programs work @yang2022tensor.
 
-=== muTransfer and Similar Ideas
+== muTransfer and Similar Ideas
 <mutransfer-and-similar-ideas>
 muTransfer @yang2022tensor and similar work in
 @physicalDL@yaida2022metaprincipledfamilyhyperparameterscaling@doshi2023criticalinitializationwidedeep
@@ -3703,7 +3733,7 @@ alternative schemes.
 We start by working through the general criteria for an extremely simple
 model, and then see how it extends to more general cases.
 
-==== A Toy Limit: Deep Linear Networks and SGD<app_mup_toy_limit>
+=== A Toy Limit: Deep Linear Networks and SGD<app_mup_toy_limit>
 Take the model to be very simple: a deep linear model without any
 biases. Though simple, the conclusions we reach for this model will
 essentially all carry over to more complex cases. Whatever general
@@ -3927,7 +3957,7 @@ angle.r$]. Extending this analysis to higher orders in $eta$,
 bound: $s lt.eq 1$, placing muTransfer's prescription at the edge of the
 bounded region.
 
-===== Adam
+==== Adam
 <adam>
 Since Adam(W), not SGD, is the d e facto optimizer of choice, we need to
 extend the above arguments. A quick and dirty assumption which leads to
@@ -3971,7 +4001,7 @@ which case all components#footnote[Ignoring the $epsilon.alt$ term in
 the Adam implementation. This result is also exactly true for the LION
 optimizer @chen2023symbolicdiscoveryoptimizationalgorithms for which
 $Delta^"LION"    W_( d e ) = plus.minus 1$ for all components.] are 1. The right side can be approximated
-using the same assumptions used in App.~@app_mup_toy_limit:
+using the same assumptions used in @app_mup_toy_limit:
 $
   angle.l Delta^"SGD" W_( d e )Delta^"SGD" W_( d e ) angle.r &= angle.l ( partial cal(L) ) / ( partial W_( d e ) )( partial cal(L) ) / ( partial W_( d e ) ) angle.r\
   &=angle.l ( partial cal(L) ) / ( partial z_( o ) )( partial z_( o ) ) / ( partial W_( d e ) )(partial cal(L) ) / ( partial z_( o\' ) )( partial z_( o\' ) ) / ( partial W_( d e ) ) angle.r\
@@ -3993,7 +4023,7 @@ $
   alpha_I prop alpha_ell prop lambda^(frac(1 + s, 2)) med \, quad alpha_O prop 1 med .
 $
 
-Repeating the analysis of App.~@app_mup_toy_limit with the Adam updates and the preceding
+Repeating the analysis of @app_mup_toy_limit with the Adam updates and the preceding
 assumptions amounts to replacing $eta_X arrow.r eta_X alpha_X$ everywhere, which changes
 @app_eq_mup_lr_lambda_scaling_sgd to#footnote[@app_eq_mup_lr_lambda_scaling_adam agrees with Table 3
   of @yang2022tensor when $s = 1$.]
@@ -4003,7 +4033,7 @@ $
   eta_( O ) --> eta_( O ) / ( lambda ) quad ("Adam)" .
 $<app_eq_mup_lr_lambda_scaling_adam>
 
-===== Activations
+==== Activations
 <activations-1>
 Adding in non-trivial activation functions, such that
 $z_d^ell = W_(d d')^ell phi (z_(d')^(ell - 1))$, does not
@@ -4024,7 +4054,7 @@ qualitatively change the picture. The two relatively minor changes are:
 Both of these affect scaling with depth, $L$, but not the scaling with width
 @app_eq_mup_width_scaling in any essential way.
 
-== Cheat Sheet <app_cheat_sheet>
+= Cheat Sheet <app_cheat_sheet>
 Collecting all of the most fundamental equations, given to various
 degrees of accuracy.
 
@@ -4032,7 +4062,7 @@ Number of model parameters: $
 N _"params" & = (4+2E)L D ^2 + V D+ cal(O) ( D L ) approx  ( 4+2E  )L D ^2 ,
 $ assuming no sharding of the embedding matrix.
 
-=== Training
+== Training
 <training-1>
 Memory costs for mixed-precision training: $
 M _"model" & =p _"model" N _"params" \
@@ -4044,5 +4074,7 @@ optimizer states, e.g. $s = 0$ for SGD and $s = 2$ for Adam. FLOPs
 total: $
 F _"total" ^"model" & approx 12 B D L S  ( S +  ( 2+E  )D  ) .
 $
+
+= Convolutions
 
 #bibliography("bibliography.bib")
