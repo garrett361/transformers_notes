@@ -1258,12 +1258,14 @@ $
   &eq.triple C_( s g n )cal(A)_( s s\'a )cal(B)_( s\'g a n h )
 $ The above is the most complex part of the Mamba2
 model and the official `mamba_ssm` repo takes a multi-step approach to
-its computation. Two primary points:
+its computation. A few important points:
 
 + The matrix $cal(A)_(s s' a)$ vanishes for $s' > s$ (causality).
-
 + As in flash attention, we wish to chunk over the sequence dimension to
   avoid every realizing the full $cal(A)_(s s' a)$ tensor.
++ Unlike flash attention, there must be a smarter way to perform the sums over $s, s\'$: the naive
+computation above would be $cal(O)( S^( 2 ) )$, while the express purpose of state space models is
+to reduce the attention-like operation to $cal(O)( S )$.
 
 The chunked version is then
 $
@@ -1292,7 +1294,7 @@ $
   e^( A_( s a )) times ... times e^( A_( (s\'+1)a )) =exp ( sum_( s\'\'=s\'+1 )^( s )A_( s\'\'a ) ) wide & s >= s\',
   0 & s \< s\'
   )\
-  &eq.triple e^( bold(A)_( s s\'a ) ) .
+  &eq.triple e^( sans(A)_( s s\'a ) ) .
 $ Sharding and taking only the diagonal terms, the
 above turns into (no sum over the repeated $c$-index):
 $
@@ -1301,20 +1303,20 @@ $
   e^( A_( c l a )) times ... times e^( A_( c(l\'+1)a )) =exp ( sum_( l\'\'=l\'+1 )^( l )A_( c l\'\'a ) ) wide & l >= l\' ,
   0 & l \< l\'
   )\
-  &eq.triple e^( bold(A)_( c c\' l l\'a ) ) .
+  &eq.triple e^( sans(A)_( c c\' l l\'a ) ) .
 $
 
 The argument $sans(A)_(c c\' l l' a)$ can be constructed in various ways#footnote[$CUMSUM_s X_s
   equiv sum_(s' = 0)^s X_(s')$ and $SEGSUM$ stands for “segment sum\".]:
 $
-  bold(A)_( c c\' l l\'a )&= SEGSUM_( l l' ) ( A_( c l a ) ) + M_( l l\' )\
+  sans(A)_( c c\' l l\'a )&= SEGSUM_( l l' ) ( A_( c l a ) ) + M_( l l\' )\
   &eq.triple CUMSUM_( l )A_( c l a ) - CUMSUM_( l\' )A_( c l\'a ) + M_( l l\' ) \
-  &= CUMSUM_( l ) ( A_( c l a )Z_( l l\' ) ) + M_( l l\' )\
+  &= CUMSUM_( l ) ( A_( c l a )Z_( l l\' ) ) + I( l l\' )\
   Z_( l l\' ) &eq.triple cases(
 0 wide & l <= l\',
 1 & l \> l\'
 ) , \
-  M_( l l\' )& eq.triple cases(
+  I_( l l\' )& eq.triple cases(
 -infinity wide & l < l\',
 0 & l >= l\'
 ) ,
@@ -1364,45 +1366,52 @@ cal(A)_( c c\'l l\'a )|_( c\>c\' ) &=exp  ( sum_( s= c\'L + l\' + 1 )^( c L + l 
 &= exp  (sum _( l\'\'=0 )^( l )A_( c l\'\'a) +sum_( c\'\'=c\'+1 )^( c-1 )sum_( l=0 )^( L-1 )A_( c\'\'l a ) + sum _( l\'\'=l\'+1 )^( L-1 )A_( c\'l\'\'a)  )\
 &= exp  (sum _( l\'\'=0 )^( l )A_( c l\'\'a) ) exp  (sum_( c\'\'=c\'+1 )^( c-1 )sum_( l=0 )^( L-1 )A_( c\'\'l a )  ) exp  ( sum _( l\'\'=l\'+1 )^( L-1 )A_( c\'l\'\'a)  ) \
 &eq.triple U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a ) ,
-$ such that we have $
-z_( c l c\'a h )&= C _( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c\'l\'g a n h )\
-&= bold(C)_( c l g n a )bold(A)_( c c\'a )bold(B)_( c\'g a n h ) ,
-$ which (I believe) are the C, A, and B blocks from
+$
+such that contribution from the $c\'<c$ terms reads
+$
+  M_( c c\' ) C_( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c\'l\'g a n h )
+  &= M_( c c\' )bold(C)_( c l g n a )bold(A)_( c c\'a )bold(B)_( c\'g a n h ) ,\
+  M_( c c\' ) & = cases(
+      1 wide & c \> c\',
+      0 & c <= c\'
+      ) .
+$
+which (I believe) are the C, A, and B blocks from
 @dao2024transformersssmsgeneralizedmodels.
 
 These factors can be conveniently, and succinctly, vectorized as
 in#footnote[These can also be written in a form similar to
 @app_eq_mamba2_diag_propagator
-where we use masks instead of relying in numerically unstable
-cancellations. $T_(c\' l' a) = exp (mono("sum")_l Z_(l l') A_(c\' l a))$,
+where we use masks instead of relying in numerically unstable cancellations. $T_(c\' l' a) = exp
+    (mono("sum")_l Z_(l l') A_(c\' l a))$,
 $U_(c l a) = exp (mono("sum")_(l') (1 - Z_(l' l)) A_(c\' l' a))$ with
 $Z_(l l')$ the mask in
 @app_eq_mamba2_diag_propagator;.]:
 $
-  T_( c\'l\'a ) &=exp ( SUM_( l\' ) ( A_( c\'l\'a ) ) - CUMSUM_( l\' )A_( c l\'a ) )\
-  bold(A)_( c c\'a )&=exp ( SEGSUM_( c c\' )A_( c a ) - A_( c\' a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )\
+  T_( c\'l\'a ) &=exp ( A_( c\'l\'a ) - CUMSUM_( l\' )A_( c l\'a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )\
+  bold(A)_( c c\'a )&=exp ( SEGSUM_( c c\' )A_( c a ) - A_( c a ) ) \
   U_( c l a ) &=exp ( CUMSUM_( l ) ( A_( c l a ) ) ) .
 $
 
+==== Complete Solution
+
 The full solution decomposed in this way is then: $
-z _( c l a h ) &= C _( c l g n )e^( bold(A)_( c c\' l l\'a ) )cal(B)_( c l\'g a n h ) + M_( c c\' )C _( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c l\'g a n h )\
-M_( c c\' ) & = cases(
-1 wide & c \> c\',
-0 & c <= c\'
-)  .
+z _( c l a h ) &= C _( c l g n )e^( sans(A)_( c c\' l l\'a ) )cal(B)_( c l\'g a n h ) + M_( c c\' )C _( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c l\'g a n h )\
 $<app_eq_mamba2_recursion_soln>
 
 
+==== Computational Details
+
 A crucial computational point is that the matrix $bold(A)_(c c\'a)$ is low-rank:
 $
-  bold(A)_(c c\'a) &= exp ( SEGSUM_( c c\' )A_( c a ) - A_( c\' a ) )\
-  & = exp (CUMSUM_( c ) A_( c a )) times exp (CUMSUM_( c\' ) A_( c\' a ) - A_(c\' a )) .
+  bold(A)_(c c\'a) &= exp ( SEGSUM_( c c\' )A_( c a ) - A_( c a ) )\
+  & = exp (CUMSUM_( c ) A_( c a ) - A_(c a )) times exp ( - CUMSUM_( c\' ) A_( c\' a ) ) .
 $
 This fact ultimately means that the sums over $c, c\'$ in @app_eq_mamba2_recursion_soln can be
 performed in $cal(O)(S)$ time, rather than the naive $cal(O)( S^( 2 ) )$ time. The mask is a mildly
 complicating factor here, since the entire sum over $c\'$ involves the factors
 $
-  M_( c c\' )bold(A)_( c c\'a )T_( c\'l\'a ) ,
+  M_( c c\' )bold(A)_( c c\'a )bold(B)_( c\' g a n h ) ,
 $
 and the product $M_( c c\' )bold(A)_( c c\'a )$ itself is not low-rank#footnote[Were it not for the
   mask, we could simply compute the sum by breaking the low-rank matrix into its natural factors as
@@ -1410,13 +1419,14 @@ and the product $M_( c c\' )bold(A)_( c c\'a )$ itself is not low-rank#footnote[
   $cal(O)( S )$ and multiply the scalar sum by $L_( c )$ in $cal(O)( S )$ again.]. Writing
 $bold(A)_( c c\'a )= L_( c a )R_( c\' a )$, we have the manipulations:
 $
-  M_( c c\' )bold(A)_( c c\'a )T_( c\'l\'a ) &= M_( c c\' )L_( c a )R_( c\' a )T_( c\'l\'a )\
-  &= L_( c a ) sum_( c'=0 )^( c-1 )R_( c\' a )T_( c\'l\'a )\
-  &= L_( c a ) times (CUMSUM_c (R_( c a )T_( c l\'a )) - R_( c a )T_( c l\'a ))\
+  M_( c c\' )bold(A)_( c c\'a )bold(B)_( c\' g a n h ) &= M_( c c\' )L_( c a )R_( c\' a )bold(B)_( c\' g a n h )\
+  &= L_( c a ) sum_( c'=0 )^( c-1 )R_( c\' a )bold(B)_( c\' g a n h )\
+  &= L_( c a ) times (CUMSUM_c (R_( c a )bold(B)_( c\' g a n h )) - R_( c a )bold(B)_( c\' g a n h ))\
   &= L_( c a ) times Z_( c l\' a )
 $
 The parenthesized terms can all be computed in $cal(O)( S )$ and the final elementwise product
-also takes $cal(O)( S )$ time, as claimed.
+also takes $cal(O)( S )$ time, as claimed#footnote[Unfortunately, this is also a very numerically
+  unstable way to perform the computation, relying on cancellations in products of exponentials.].
 
 === Aren't These Just RNNs?<rnns_and_ssm>
 Yes, but very special ones with the important computational difference that the recursion relations
@@ -1643,8 +1653,8 @@ $cal(O) ( 40  "GiB" )$ model in the Summer of 2023
 gives $B _"min"  cal(O) ( 1)$, so
 mixed-precision is indeed an overall savings at such typical scales.
 
-#block[
-  Side Note: Optimizations
+#nice_box[
+  *Side Note: Optimizations*
 
   The above analysis is conservative and accounts for more tensors than
   are actually saved in practice.
@@ -1678,8 +1688,6 @@ mixed-precision is indeed an overall savings at such typical scales.
   of the backwards pass, they are garbage collected in soon after
   creation.
 
-  ===== Example
-  <example>
   $SM$ is another instance where this occurs, since $
   partial _( i ) SM  ( x _( j )  ) &= delta _( i j )SM  ( x _( j )  ) - SM  ( x _( i )  ) SM  ( x _( j )  )
   $<eq_softmax_derivative> Because of this, the actual amount of activation
@@ -2196,11 +2204,10 @@ The simplicity of the Transformers architecture lends itself to a deep
 variety of parallelism strategies. We review some of them below.
 
 == Tensor Parallelism <subsec_tensor_parallelism>
-#block[
-  Side Note: I wrote a blog post on this
-  #link("https://www.determined.ai/blog/tp")[here.]
 
-]
+*Side Note*: I wrote a blog post on this #link("https://www.determined.ai/blog/tp")[here.]
+
+
 In #strong[Tensor Parallelism], some times also called #strong[Model
 Parallelism], individual weight matrices are split across devices
 @shoeybi2020megatronlm. We consider the and layers in turn. Assume
@@ -2572,9 +2579,6 @@ considerations.].
 
 
 
-#block[
-
-]
 
 
 At every step in the loop in the algorithm we are computing the sums
@@ -2896,11 +2900,10 @@ A one-parameter generalization of this strategy introduces a
 (physics-motivated) #strong[Temperature] which just adjusts the scale of
 the logits:
 
-#block[
-  next_token = torch.multinomial((z\[:, -1\] / temp).softmax(dim=-1),
-  num_samples=1)
+```python
+next_token = torch.multinomial((z[:, -1] / temp).softmax(dim=-1), num_samples=1)
+```
 
-]
 assuming `z` are the final logits. Larger temperature yields a larger
 variance in the chosen tokens.
 
