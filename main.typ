@@ -12,19 +12,19 @@
 
 /* Custom objects */
 #let DR = `Dropout`
-#let SM = `Softmax`
-#let CAT = `Concat`
-#let LIN = `Linear`
-#let LN = `LayerNorm`
-#let MLP = `MLP`
-#let CA = `CausalAttention`
-#let NORM = `Norm`
-#let CUMSUM = `cumsum`
-#let SEGSUM = `segsum`
-#let SUM = `sum`
-#let MHA = `MHA`
-#let TOPK = `top_k`
-#let TR = `Trace`
+#let SM = math.op(`Softmax`)
+#let CAT = math.op(`Concat`)
+#let LIN = math.op(`Linear`)
+#let LN = math.op(`LayerNorm`)
+#let MLP = math.op(`MLP`)
+#let CA = math.op(`CausalAttention`)
+#let NORM = math.op(`Norm`)
+#let CUMSUM = math.op(`cumsum`)
+#let SEGSUM = math.op(`segsum`)
+#let SUM = math.op(`sum`)
+#let MHA = math.op(`MHA`)
+#let TOPK = math.op(`top_k`)
+#let TR = math.op(`Trace`)
 
 #let nice_box(body) = { box(stroke: black, inset: 1em, radius: .5em)[#body] }
 
@@ -36,6 +36,7 @@
 #show figure.where(kind: table): set figure.caption(position: top)
 
 #show figure.where(kind: image): set figure.caption(position: bottom)
+
 
 #let content-to-string(content) = {
   if content.has("text") {
@@ -85,6 +86,7 @@
     size: fontsize,
   )
   set heading(numbering: sectionnumbering)
+  set enum(numbering: "1.a.i.")
 
   place(top, float: true, scope: "parent", clearance: 4mm)[
     #if title != none {
@@ -140,6 +142,8 @@
   cols: 1,
   doc,
 )
+
+
 
 /* https://github.com/typst/typst/discussions/4031#discussioncomment-9258528 */
 #let appendix(body) = {
@@ -562,21 +566,16 @@ $
 <eq_transformer_conditional_prob>
 
 
-and so the model is trained using the usual
-cross-entropy/maximum-likelihood loss#footnote[Here's an alternative
-derivation for why this loss is minimized when the learned distribution
-perfectly matches the actual one. Let $p (x)$ be the actual distribution
-and $q_theta (x)$ be the model. Taking the continuous case, the expected
-loss is $cal(L) = - integral dif x thin p(x)ln q _(
-    theta)(x)$. We want to minimize this, subject to the condition
-that $integral dif x q _( theta
-    )(x) =1$. So, we use the
-#link("https://e n.wikipedia.org/wiki/Calculus_of_variations")[calculus of variations]
-on the loss with a Lagrange multiplier:
-$cal(L)' = cal(L) + lambda integral dif x thin q_( theta )(x)$. Solving
-$( delta cal(L)' )/( delta q _( theta )(x) )=0$ yields
-$q_theta (x) = p (x)$. This seems more straightforward and general than
-the usual argument via the KL-divergence and Jensen's inequality.]
+and so the model is trained using the usual cross-entropy/maximum-likelihood loss#footnote[Here's an
+alternative derivation for why this loss is minimized when the learned distribution perfectly
+matches the actual one. Let $p (x)$ be the actual distribution and $q_theta (x)$ be the model.
+Taking the continuous case, the expected loss is $cal(L) = - integral dif x thin p(x)ln q _(
+theta)(x)$. We want to minimize this, subject to the condition that $integral dif x q _( theta)(x)
+=1$. So, we use the #link("https://e n.wikipedia.org/wiki/Calculus_of_variations")[calculus of
+  variations] on the loss with a Lagrange multiplier: $cal(L)' = cal(L) + lambda integral dif x
+thin q_( theta )(x)$. Solving $( delta cal(L)' )/( delta q _( theta )(x) )=0$ yields $q_theta (x)
+= p (x)$. This seems more straightforward and general than the usual argument via the
+KL-divergence and Jensen's inequality.]
 $
   cal(L) & = -1 / (B K) sum_( b,s )ln p(x_( b (s+1) )=y_( b(s+1) )| x_( b s ), x_( b (s-1) ),
     ..., x_( b 0 )) \
@@ -1200,7 +1199,8 @@ analogously to transformer models:
     + $Delta_(s a) = mono("Softplus") (Delta_(s a))$. #h(1fr) `# For some reason.` $mono("Softplus") (x) equiv ln (1 + e^x)$.
     + $B_(s g n) = K_(g n s s')^B star.op B_(s g n)$ #h(1fr) `# 1D grouped conv. over the seq. dim. (fused)`
     + $C_(s g n) = K_(g n s s')^C star.op C_(s g n)$
-    + Solve recursion, subject to $h_((- 1) g a h n) = 0$:
+    + Solve recursion#footnote[Note that each recursion step requires $cal(O)( A H G N ) =cal(O)( D G N )$ operations,
+      and so we should be able to optimally solve the entire recursion in $cal(O)(S D G N )$ time.]<foot_optimal_mamba2_recursion>, subject to $h_((- 1) g a h n) = 0$:
     - $h_( s g a h n ) &= exp ( Delta_( s a ) W^(A)_( a ) ) h_( (s-1)g a h n) + Delta_( s a )B_( s g n )x_( s a h )$
     - $y_( s a h ) &= C_( s g n )h_( s g a h n ) + W^( D )_( a )x_( s a h )$
     - $=> y_( s a h ) &= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) ) times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) ) + W^( D )_( a ) x_( s a h )$
@@ -1228,21 +1228,15 @@ interact in the Mamba2 model:
   $
   which is the most complicated step of the model.
 
-As noted above, the second case is ultimately just a matrix-multiply on
-the input tensors $x_(s a h)$ with the tensor $M_(a s s')$, where
-operations across attention head are all independent. The $M_(a s s')$
-tensor has $cal(O) ( A S ^2 )$ elements, which we
-clearly do not want to concurrently materalize. All of this should sound
-familiar: the above is exactly analogous to the structure and problems
-of flash attention, @subsec_flash_attention, the only difference
-begin how the linear operator $M_(a s s')$ is constructed:
-$M_( a s s\' ) = SM (q^( a )_( s h )k^( a )_( s\'h ) )$
-in standard attention, and as above for Mamba2, say. This is the
-“duality\" discussed in @dao2024transformersssmsgeneralizedmodels and
-the broad strokes of the efficient algorithm implementation for Mamba2
-echos that of flash attention: partition the computation over the
-sequence dimensions and compute $z_(s a h)$ in chunks over the
-$s$-dimension, so as to avoid realizing any
+As noted above, the second case is ultimately just a matrix-multiply on the input tensors $x_(s a
+  h)$ with the tensor $M_(a s s')$, where operations across attention head are all independent. The
+$M_(a s s')$ tensor has $cal(O) ( A S ^2 )$ elements, which we clearly do not want to concurrently
+materalize. All of this should sound familiar: the above is highly analogous to the structure and
+problems of flash attention, @subsec_flash_attention, albeit with important differences in the
+details of the operator $M_(a s s')$. This is the “duality\" discussed in
+@dao2024transformersssmsgeneralizedmodels and the broad strokes of the efficient algorithm
+implementation for Mamba2 echos that of flash attention: partition the computation over the sequence
+dimensions and compute $z_(s a h)$ in chunks over the $s$-dimension, so as to avoid realizing any
 $cal(O) ( S ^2 )$ tensors.
 
 Similar statements hold for the original Mamba; the index names and
@@ -1256,7 +1250,8 @@ $
   z_( s a h ) &= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) ) times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) )\
   &eq.triple C_( s g n )cal(A)_( s s\'a )Delta_( s\'a )B_( s\'g n ) x_( s\'a h )\
   &eq.triple C_( s g n )cal(A)_( s s\'a )cal(B)_( s\'g a n h )
-$ The above is the most complex part of the Mamba2
+$<eq_ssd>
+The above is the most complex part of the Mamba2
 model and the official `mamba_ssm` repo takes a multi-step approach to
 its computation. A few important points:
 
@@ -1264,17 +1259,17 @@ its computation. A few important points:
 + As in flash attention, we wish to chunk over the sequence dimension to
   avoid every realizing the full $cal(A)_(s s' a)$ tensor.
 + Unlike flash attention, there must be a smarter way to perform the sums over $s, s\'$: the naive
-computation above would be $cal(O)( S^( 2 ) )$, while the express purpose of state space models is
-to reduce the attention-like operation to $cal(O)( S )$.
+  computation above would be $cal(O)( S^( 2 ) )$, while the express purpose of state space models is
+  to reduce the attention-like operation to $cal(O)( S )$.
 
 The chunked version is then
 $
   z_(c l a h) & = C_(c l g n) cal(A)_(c c\' l l' a) cal(B)_(c\' l' g a n h) med \,
 $
-where we have chunked the $a$-index into the $c \, l$ pair (with $c$
-indexing the chunk). The chunked computation breaks down into two
-further cases, based on the values of the $c \, c\'$ indices#footnote[The
-$c\' > c$ cases are trivial as $cal(A)_(c c\' l l' a)$ vanishes.]:
+where we have chunked the $a$-index into the $c \, l$ pair with $L$ the size of each chunk ,$l in
+{0, ..., L - 1} $ $c in {0, ..., S/L - 1}$ indexing the chunk and ). The chunked computation breaks
+down into two further cases, based on the values of the $c \, c\'$ indices#footnote[The $c\' > c$
+  cases are trivial as $cal(A)_(c c\' l l' a)$ vanishes.]:
 
 - $c = c\'$: these cases are effectively smaller versions of the entire,
   unchunked computation, and hence shares in its sparsity in that
@@ -1321,13 +1316,13 @@ $
 0 & l >= l\'
 ) ,
 $<app_eq_mamba2_diag_propagator>
-where the final form with the additional mask
-$Z_(l l')$ is better behaved numerically, as it does not rely on
-cancellations between sums. Careful attention should be paid to the
-inequality symbols in the masks. The remainder of these diagonal
-computations is straightforward.
-
-
+where the final form with the additional mask $Z_(l l')$ is better behaved numerically, as it does
+not rely on cancellations between sums. Careful attention should be paid to the inequality symbols
+in the masks. The remainder of these diagonal computations is straightforward: just compute $z _( c
+l a h ) = C _( c l g n )e^( sans(A)_( c c\' l l\'a ) )cal(B)_( c l\'g a n h )$, which takes $cal(O)(
+L S D G N )$ time, a factor of the chunk size $L$ larger that the optimal compute time
+(@foot_optimal_mamba2_recursion), due to the matmul. Note the embarrassingly parallel nature across
+the chunk index.
 
 
 ==== The $c > c\'$ Cases
@@ -1337,19 +1332,18 @@ $(c \, c ')$ chunk at a time, i.e. we compute
 $
   z_(c l a h) = C_(c l g n) cal(A)_(c c\' l l' a) cal(B)_(c\' l' g a n h) med \,
 $
-by iterating over the $c\'$ sum, similarly to flash attention.
+by iterating over the $c\'$ sum, similarly to flash attention. As written, this would be $cal(O)(
+S^( 2 ) D G N )$ computation which is an entire factor of $S$ larger than optimal due to the sums
+over $c\', l\'$, but we'll see that it's possible to improve upon this naive counting.
 
-$cal(A)_(c c\' l l' a)$ is made up of $tilde.op e^(A_(s a))$ factors
-which each serve to propagate $cal(B)_((s - 1) g a n h)$ forward one
-step in time. Specifically, $cal(A)_(c c\' l l' a)$ contains all the
-factors needed to get from the times specified by the $(c ' \, l ')$
-indices up to the $(c \, l)$ indices: $
-cal(A)_( c c\'l l\'a ) &=exp  ( sum_( s= c\'L + l\' + 1 )^( c L + l )A _( s a )  )  , quad "for" c\>c\'  .
-$ We will break the above into three
-factors#footnote[In the nomenclature of
-@dao2024transformersssmsgeneralizedmodels, whose authors also refer to
-these as the B, A, and C blocks, respectively (though we actually differ
-slightly in detail from what the paper and `mamba-ssm` do).]:
+$cal(A)_(c c\' l l' a)$ is made up of $tilde.op e^(A_(s a))$ factors which each serve to propagate
+$cal(B)_((s - 1) g a n h)$ forward one step in time. Specifically, $cal(A)_(c c\' l l' a)$ contains
+all the factors needed to get from the times specified by the $(c ' \, l ')$ indices up to the $(c
+\, l)$ indices: $ cal(A)_( c c\'l l\'a ) &=exp  ( sum_( s= c\'L + l\' + 1 )^( c L + l )A _( s a )  )
+, quad "for" c\>c\'  . $ We will break the above into three factors#footnote[In the nomenclature of
+  @dao2024transformersssmsgeneralizedmodels, whose authors also refer to these as the B, A, and C
+  blocks, respectively (though we actually differ slightly in detail from what the paper and
+  `mamba-ssm` do).]:
 
 + A right-factor which propagates the $cal(B)_(c\' l' g a n h)$ from
   their disparate times $(c ' \, l ')$ all up to a common point in time.
@@ -1361,12 +1355,13 @@ slightly in detail from what the paper and `mamba-ssm` do).]:
   final time slices $(c \, l)$ specified by $C_(c l g n)$.
 
 The specific form of the factors comes from the following (non-unique)
-decomposition of the preceding expression: $
-cal(A)_( c c\'l l\'a )|_( c\>c\' ) &=exp  ( sum_( s= c\'L + l\' + 1 )^( c L + l )A _( s a )  ) \
-&= exp  (sum _( l\'\'=0 )^( l )A_( c l\'\'a) +sum_( c\'\'=c\'+1 )^( c-1 )sum_( l=0 )^( L-1 )A_( c\'\'l a ) + sum _( l\'\'=l\'+1 )^( L-1 )A_( c\'l\'\'a)  )\
-&= exp  (sum _( l\'\'=0 )^( l )A_( c l\'\'a) ) exp  (sum_( c\'\'=c\'+1 )^( c-1 )sum_( l=0 )^( L-1 )A_( c\'\'l a )  ) exp  ( sum _( l\'\'=l\'+1 )^( L-1 )A_( c\'l\'\'a)  ) \
-&eq.triple U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a ) ,
+decomposition of the preceding expression:
 $
+  cal(A)_( c c\'l l\'a )|_( c\>c\' ) &=exp ( sum_( s= c\'L + l\' + 1 )^( c L + l )A_( s a ) ) \
+  &= exp (sum_( l\'\'=0 )^( l )A_( c l\'\'a) +sum_( c\'\'=c\'+1 )^( c-1 )sum_( l=0 )^( L-1 )A_( c\'\'l a ) + sum_( l\'\'=l\'+1 )^( L-1 )A_( c\'l\'\'a) )\
+  &= exp (sum_( l\'\'=0 )^( l )A_( c l\'\'a) ) exp (sum_( c\'\'=c\'+1 )^( c-1 )sum_( l=0 )^( L-1 )A_( c\'\'l a ) ) exp ( sum_( l\'\'=l\'+1 )^( L-1 )A_( c\'l\'\'a) ) \
+  &eq.triple U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a ) ,
+$<eq_mamba2_A_factoring>
 such that contribution from the $c\'<c$ terms reads
 $
   M_( c c\' ) C_( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c\'l\'g a n h )
@@ -1375,39 +1370,47 @@ $
       1 wide & c \> c\',
       0 & c <= c\'
       ) .
+$<eq_mamba2_all_off_diagonal_terms>
+which (I believe) are the C, A, and B blocks from @dao2024transformersssmsgeneralizedmodels. These
+factors can be conveniently, and succinctly, vectorized as in#footnote[These can also be written in
+  a form similar to @app_eq_mamba2_diag_propagator where we use masks instead of relying in
+  numerically unstable cancellations. $T_(c\' l' a) = exp (mono("sum")_l Z_(l l') A_(c\' l a))$,
+  $U_(c l a) = exp (mono("sum")_(l') (1 - Z_(l' l)) A_(c\' l' a))$ with $Z_(l l')$ the mask in
+  @app_eq_mamba2_diag_propagator;.]:
 $
-which (I believe) are the C, A, and B blocks from
-@dao2024transformersssmsgeneralizedmodels.
-
-These factors can be conveniently, and succinctly, vectorized as
-in#footnote[These can also be written in a form similar to
-@app_eq_mamba2_diag_propagator
-where we use masks instead of relying in numerically unstable cancellations. $T_(c\' l' a) = exp
-    (mono("sum")_l Z_(l l') A_(c\' l a))$,
-$U_(c l a) = exp (mono("sum")_(l') (1 - Z_(l' l)) A_(c\' l' a))$ with
-$Z_(l l')$ the mask in
-@app_eq_mamba2_diag_propagator;.]:
-$
-  T_( c\'l\'a ) &=exp ( A_( c\'l\'a ) - CUMSUM_( l\' )A_( c l\'a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )\
+  T_( c\'l\'a ) &=exp ( A_( c\'l\'a ) - CUMSUM_( l\' )A_( c\' l\'a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )\
   bold(A)_( c c\'a )&=exp ( SEGSUM_( c c\' )A_( c a ) - A_( c a ) ) \
   U_( c l a ) &=exp ( CUMSUM_( l ) ( A_( c l a ) ) ) .
 $
 
-==== Complete Solution
-
-The full solution decomposed in this way is then: $
-z _( c l a h ) &= C _( c l g n )e^( sans(A)_( c c\' l l\'a ) )cal(B)_( c l\'g a n h ) + M_( c c\' )C _( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c l\'g a n h )\
-$<app_eq_mamba2_recursion_soln>
-
-
-==== Computational Details
-
-A crucial computational point is that the matrix $bold(A)_(c c\'a)$ is low-rank:
+Several crucial computational points:
+- $cal(A)_( c c\'l l\'a ) = U_( c l a )bold(A)_( c c\'e )T_( c\'l\'a )$ is factorizable (low-rank)
+@eq_mamba2_A_factoring.
+- The middle factor $bold(A)_(c c\'a)$ can be factorized further:
 $
   bold(A)_(c c\'a) &= exp ( SEGSUM_( c c\' )A_( c a ) - A_( c a ) )\
-  & = exp (CUMSUM_( c ) A_( c a ) - A_(c a )) times exp ( - CUMSUM_( c\' ) A_( c\' a ) ) .
-$
-This fact ultimately means that the sums over $c, c\'$ in @app_eq_mamba2_recursion_soln can be
+  & = exp (CUMSUM_( c ) A_( c a ) - A_(c a )) times exp ( - CUMSUM_( c\' ) A_( c\' a ) )\
+  & = L_( c a )R_( c\'a ).
+$<eq_mamba2_smaller_A_factoring>
+
+
+encodes the special property that SSM attention is optimally
+$cal(O)( S )$, rather than $cal(O)( S^( 2 ) )$.
+Explicitly, we could compute
+@eq_mamba2_all_off_diagonal_terms in stages as in:
++ $z_( c\'g a n h ) <- T_( c\'l\'a )cal(B)_( c\'l\'g a n h )$ in $cal(O)( S D G N )$
++ Either
+  + $z_( c g a n h ) <- M_( c c\' ) bold(A)_( c c\'a ) z_( c\'g a n h )$ in $cal(O)( (S^( 2 ) D G N) / L^(
+  2 ) )$
+  + Use @eq_mamba2_smaller_A_factoring and compute in two steps:
+    + $z_( g a n h )<- R_( c\'a)z_( c\'g a n h )$ in $cal(O)( (S D G N) / L  )$
+    + $z_( c g a n h ) <- L _( c a )z_( g a n h )$ in $cal(O)( (S D G N) / L  )$.
+
++ $z_( c l g a n h )<- C_( c l g n ) U_( c l a )z_( c g a n h )$ in $cal(O)( S D G N )$
+
+
+
+This fact ultimately means that the sums over $c, c\'$ in @eq_mamba2_recursion_soln_chunked can be
 performed in $cal(O)(S)$ time, rather than the naive $cal(O)( S^( 2 ) )$ time. The mask is a mildly
 complicating factor here, since the entire sum over $c\'$ involves the factors
 $
@@ -1421,12 +1424,36 @@ $bold(A)_( c c\'a )= L_( c a )R_( c\' a )$, we have the manipulations:
 $
   M_( c c\' )bold(A)_( c c\'a )bold(B)_( c\' g a n h ) &= M_( c c\' )L_( c a )R_( c\' a )bold(B)_( c\' g a n h )\
   &= L_( c a ) sum_( c'=0 )^( c-1 )R_( c\' a )bold(B)_( c\' g a n h )\
-  &= L_( c a ) times (CUMSUM_c (R_( c a )bold(B)_( c\' g a n h )) - R_( c a )bold(B)_( c\' g a n h ))\
+  &= L_( c a ) times (CUMSUM_c (R_( c a )bold(B)_( c g a n h )) - R_( c a )bold(B)_( c g a n h ))\
   &= L_( c a ) times Z_( c l\' a )
 $
-The parenthesized terms can all be computed in $cal(O)( S )$ and the final elementwise product
-also takes $cal(O)( S )$ time, as claimed#footnote[Unfortunately, this is also a very numerically
+The parenthesized terms can all be computed in $cal(O)( S )$ and the final elementwise product also
+takes $cal(O)( S )$ time, as claimed#footnote[Unfortunately, this is also a very numerically
   unstable way to perform the computation, relying on cancellations in products of exponentials.].
+`mamba-ssm` appears to use something like this strategy.
+
+==== Chunked Solution
+
+The full solution decomposed in this way is then: $
+z _( c l a h ) &= C _( c l g n )e^( sans(A)_( c c\' l l\'a ) )cal(B)_( c l\'g a n h ) + M_( c c\' )C _( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c l\'g a n h )\
+$<eq_mamba2_recursion_soln_chunked>
+
+
+
+
+==== The Non-Chunked Solution
+
+For completeness, we can also write out the full, explicitly $cal(O)( S )$ solution to
+@eq_ssd computed without chunking and written in vectorized notation. We have:
+$
+  z_( s a h ) &= C_( s g n ) sum_( s\'=0 )^( s )exp(sum_( s=s\'+1 )^( s )A_( s\'a ) ) cal(B)_( s\'g a n h ) \
+  &= C_( s g n ) sum_( s\'=0 )^( s )exp( CUMSUM_( s ) A _( s a ) - CUMSUM_( s\' )A_( s\' a ) ) cal(B)_( s\'g a n h ) \
+  &= C_( s g n ) exp( CUMSUM_( s ) A _( s a ))times CUMSUM_( s )(exp( -CUMSUM_( s )A_( s a ) ) cal(B)_( s g a n h ))
+$
+Assuming an efficient $cal(O)( S )$ $CUMSUM$ implementation (up to constant factors), the above
+realizes the optimal asymptotic $cal(O)( S D G N )$ time (and memory) efficiency of
+@foot_optimal_mamba2_recursion. This is just the naive solution in slightly fancy language.
+
 
 === Aren't These Just RNNs?<rnns_and_ssm>
 Yes, but very special ones with the important computational difference that the recursion relations
@@ -1449,6 +1476,7 @@ In this section we summarize the train-time memory costs of Transformers
 under various training strategies#footnote[A nice related blog post is
 #link("https://blog.eleuther.ai/transformer-math/")[here].
 <foot_eleuther_math_101>].
+
 
 The memory cost is much more than simply the cost of the model
 parameters. Significant factors include:
@@ -4079,5 +4107,6 @@ F _"total" ^"model" & approx 12 B D L S  ( S +  ( 2+E  )D  ) .
 $
 
 = Convolutions
+
 
 #bibliography("bibliography.bib")
