@@ -23,7 +23,7 @@
 #let SEGSUM = math.op(`segsum`)
 #let SUM = math.op(`sum`)
 #let MHA = math.op(`MHA`)
-#let TOPK = math.op(`top_k`)
+#let TOPK = math.op(`topk`)
 #let TR = math.op(`Trace`)
 
 #let nice_box(body) = { box(stroke: black, inset: 1em, radius: .5em)[#body] }
@@ -131,11 +131,11 @@
   doc
 }
 #show: doc => conf(
-  title: [Decoder-Only Transformers],
+  title: [Decoders],
   authors: (
     (name: [Garrett Goon], affiliation: "", email: ""),
   ),
-  abstract: [Notes on various aspects of Decoder-Only Transformers (and related topics). Conventions
+  abstract: [Notes on various aspects of decoder models (and related topics). Conventions
     are in the appendix, @app_conventions.
   ],
   pagenumbering: "1",
@@ -1205,6 +1205,7 @@ analogously to transformer models:
     - $y_( s a h ) &= C_( s g n )h_( s g a h n ) + W^( D )_( a )x_( s a h )$
     - $=> y_( s a h ) &= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) ) times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) ) + W^( D )_( a ) x_( s a h )$
     - $=> y_( s a h )&= C_( s g n ) (sum_( s\'=0 )^( s )product_( s\'\'=s\'+1 )^( s )e^( Delta_( s\'\'a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) ) + W^( D )_( a ) x_( s a h)$
+    - $=> y_( s a h )&= C_( s g n ) (sum_( s\'=0 )^( s )e^( sum_( s\'\'=s\'+1 )^( s )Delta_( s\'\'a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) ) + W^( D )_( a ) x_( s a h)$
     + *Return* $y_(s e) = y_(s (a h))$ #h(1fr) `# Concatenate the heads back together. `
   ],
 )<algo_mamba2_scan>
@@ -1290,21 +1291,22 @@ $
   0 & s \< s\'
   )\
   &eq.triple e^( sans(A)_( s s\'a ) ) .
-$ Sharding and taking only the diagonal terms, the
-above turns into (no sum over the repeated $c$-index):
 $
-  cal(A)_( c c\' l l\'a ) &=
+Sharding and taking only the diagonal $c\'=c$ terms, the above turns into (no sum over the repeated
+$c$-index):
+$
+  cal(A)_( c c l l\'a ) &=
   cases(
   e^( A_( c l a )) times ... times e^( A_( c(l\'+1)a )) =exp ( sum_( l\'\'=l\'+1 )^( l )A_( c l\'\'a ) ) wide & l >= l\' ,
   0 & l \< l\'
   )\
-  &eq.triple e^( sans(A)_( c c\' l l\'a ) ) .
+  &eq.triple e^( sans(A)_( c c l l\'a ) ) .
 $
 
-The argument $sans(A)_(c c\' l l' a)$ can be constructed in various ways#footnote[$CUMSUM_s X_s
+The argument $sans(A)_(c c l l' a)$ can be constructed in various ways#footnote[$CUMSUM_s X_s
   equiv sum_(s' = 0)^s X_(s')$ and $SEGSUM$ stands for “segment sum\".]:
 $
-  sans(A)_( c c\' l l\'a )&= SEGSUM_( l l' ) ( A_( c l a ) ) + M_( l l\' )\
+  sans(A)_( c c l l\'a )&= SEGSUM_( l l' ) ( A_( c l a ) ) + M_( l l\' )\
   &eq.triple CUMSUM_( l )A_( c l a ) - CUMSUM_( l\' )A_( c l\'a ) + M_( l l\' ) \
   &= CUMSUM_( l ) ( A_( c l a )Z_( l l\' ) ) + I( l l\' )\
   Z_( l l\' ) &eq.triple cases(
@@ -1319,7 +1321,7 @@ $<app_eq_mamba2_diag_propagator>
 where the final form with the additional mask $Z_(l l')$ is better behaved numerically, as it does
 not rely on cancellations between sums. Careful attention should be paid to the inequality symbols
 in the masks. The remainder of these diagonal computations is straightforward: just compute $z _( c
-l a h ) = C _( c l g n )e^( sans(A)_( c c\' l l\'a ) )cal(B)_( c l\'g a n h )$, which takes $cal(O)(
+l a h ) = C _( c l g n )e^( sans(A)_( c c l l\'a ) )cal(B)_( c l\'g a n h )$, which takes $cal(O)(
 L S D G N )$ time, a factor of the chunk size $L$ larger that the optimal compute time
 (@foot_optimal_mamba2_recursion), due to the matmul. Note the embarrassingly parallel nature across
 the chunk index.
@@ -1345,8 +1347,8 @@ all the factors needed to get from the times specified by the $(c ' \, l ')$ ind
   blocks, respectively (though we actually differ slightly in detail from what the paper and
   `mamba-ssm` do).]:
 
-+ A right-factor which propagates the $cal(B)_(c\' l' g a n h)$ from
-  their disparate times $(c ' \, l ')$ all up to a common point in time.
++ A right-factor which propagates the $cal(B)_(c\' l' g a n h)$ from their disparate times $l \'$
+  within a chunk all up to the final time in a chunk: $l=L-1$.
 
 + A center-factor which propagates the previous element together for a
   period.
@@ -1362,7 +1364,7 @@ $
   &= exp (sum_( l\'\'=0 )^( l )A_( c l\'\'a) ) exp (sum_( c\'\'=c\'+1 )^( c-1 )sum_( l=0 )^( L-1 )A_( c\'\'l a ) ) exp ( sum_( l\'\'=l\'+1 )^( L-1 )A_( c\'l\'\'a) ) \
   &eq.triple U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a ) ,
 $<eq_mamba2_A_factoring>
-such that contribution from the $c\'<c$ terms reads
+such that the contribution from the $c\'<c$ terms reads
 $
   M_( c c\' ) C_( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c\'l\'g a n h )
   &= M_( c c\' )bold(C)_( c l g n a )bold(A)_( c c\'a )bold(B)_( c\'g a n h ) ,\
@@ -1378,7 +1380,7 @@ factors can be conveniently, and succinctly, vectorized as in#footnote[These can
   $U_(c l a) = exp (mono("sum")_(l') (1 - Z_(l' l)) A_(c\' l' a))$ with $Z_(l l')$ the mask in
   @app_eq_mamba2_diag_propagator;.]:
 $
-  T_( c\'l\'a ) &=exp ( A_( c\'l\'a ) - CUMSUM_( l\' )A_( c\' l\'a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )\
+  T_( c\'l\'a ) &=exp ( A_( c\'a ) - CUMSUM_( l\' )A_( c\' l\'a ) ) quad "where" quad A_( c a )eq.triple SUM_( l )A_( c l a )= (CUMSUM_l A_(c l a))|_(l = -1)\
   bold(A)_( c c\'a )&=exp ( SEGSUM_( c c\' )A_( c a ) - A_( c a ) ) \
   U_( c l a ) &=exp ( CUMSUM_( l ) ( A_( c l a ) ) ) .
 $
@@ -1434,8 +1436,9 @@ takes $cal(O)( S )$ time, as claimed#footnote[Unfortunately, this is also a very
 
 ==== Chunked Solution
 
-The full solution decomposed in this way is then: $
-z _( c l a h ) &= C _( c l g n )e^( sans(A)_( c c\' l l\'a ) )cal(B)_( c l\'g a n h ) + M_( c c\' )C _( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c l\'g a n h )\
+The full solution decomposed in this way is then:
+$
+  z_( c l a h ) &= C_( c l g n )e^( sans(A)_( c c l l\'a ) )cal(B)_( c l\'g a n h ) + M_( c c\' )C_( c l g n )U_( c l a )bold(A)_( c c\'a )T_( c\'l\'a )cal(B)_( c l\'g a n h )\
 $<eq_mamba2_recursion_soln_chunked>
 
 
@@ -1452,14 +1455,145 @@ $
 $
 Assuming an efficient $cal(O)( S )$ $CUMSUM$ implementation (up to constant factors), the above
 realizes the optimal asymptotic $cal(O)( S D G N )$ time (and memory) efficiency of
-@foot_optimal_mamba2_recursion. This is just the naive solution in slightly fancy language.
+@foot_optimal_mamba2_recursion. This is just the basic recurrent solution in slightly fancy language.
+
+
+==== Notes On the `mamba-ssm` Implementation
+
+The `mamba-ssm` implementation uses other names for quantities above.
+
+Focusing on the off-diagonal part of the scan, the first step computes:
+$
+  mono("states")_( c g a n h ) = exp ( sum_( l\'\'=l\'+1 )^( L-1 )A_( c l\'\'a) ) cal(B)_( c l\' g a n h ) ,
+$
+which are the "states" at upper time limit of each chunk. The `_chunk_state_fwd` kernel handles this.
+
+The second step takes $mono("states")_( c g a n h )$ and an $mono("initial_states")_( g a n h )$
+tensor, which defaults to zeros, and computes the tuple of $mono("final_state")$ and updates
+$mono("states")$ defined as in#footnote[I believe. Note the upper limit of the $c\'\'$ sum.] (making
+sums explicit)
+$
+  mono("out_states")_( c g a n h ) &= sum_( c\'=0 )^( c ) exp (sum_( c\'\'=c\'+1 )^( c )sum_( l=0 )^( L-1 )A_( c\'\'l a ) ) mono("states")_( c\' g a n h ) \
+  mono("final_state")_( g a n h ) &= mono("out_states")_( -1 g a n h )\
+  mono("states")_(c g a n h ) &= CAT_c ( mono("out_states")_( [:-1] g a n h ), mono("states")_( 0 g a n h ) )
+$<eq_mamba-ssm_middle_step>
+via a loop over chunks, with $mono("initial_states")$ setting initial conditions in the loop. This
+is the role of the `_state_passing_fwd` kernel. The updated $mono("states")$ is used in the
+remainder of the off-diagonal computation, as well as the diagonal part. $mono("final_state")$ is
+returned, but not used again (it can be used for inference).
+
+
+The final step uses the updated $mono("states")$ and computes
+$
+  mono("out")_( c l a h )& = C_( c l g n )exp (sum_( l\'=0 )^( l )A_( c l\'a) ) mono("states")_(c g a n h )
+$
+This is performed by `_chunk_scan_fwd`, which also performs the diagonal computation.
+
+==== Context Parallel Mamba2 Scan
+
+Sharding the mamba2 scan over devices. Shard the sequence dimension as $s -> (r t)$ with $r in {0 ,
+..., R-1}$ indexing the rank and $t in {0, ..., S/R -1}$. Organize the computation of the outputs
+$z_( r t a h )$ similarly to the full computation, into diagonal terms which can be completely
+computed locally to a rank and off-diagonal terms which require shards across ranks. We do not chunk
+down $t$ further at this time, but will later.
+
+
+The calculations are the essentially the same as before. The diagonal computation is
+embarassingly-parallel across ranks
+$
+  z^( "diag" )_( r t a h ) &= C_( r t g n )e^( sum_( t\'\'= t\'+1 )^( t )A_( r t\'\' a ) )cal(B)_( r t\' g a n h ) .
+$
+
+The first step of the off-diagonal computation is to create the states, which is also
+embarassingly-parallel across ranks:
+$
+  mono("states")_( r g a n h ) &= exp ( sum_( t\'\'=t\'+1 )^( S / R-1 )A_( r t\'\' a) ) cal(B)_( r t\' g a n h )
+$
+These are then updated by creating:
+$
+  mono("states")_( r g a n h ) &<- sum_( r\'=0 )^( r ) exp(sum_( r\'\'=r\'+1 )^( r )sum_( t=0 )^( S / R-1 )A_( r\'\'t a ) ) mono("states")_( r\' g a n h ) \
+  &eq.triple sum_( r\'=0 )^( r ) exp(sum_( r\'\'=r\'+1 )^( r )A_( r\'\' a ) ) mono("states")_( r\' g a n h ) \
+  & = mono("states")_( r g a n h ) + e^( A_( r a ) ) mono("states")_( (r-1) g a n h ) + e^( A_( r a ) + A_( (r-1) a ) ) mono("states")_( (r-2) g a n h ) \
+  & quad + med ...
+$
+which clearly involves communication.
+
+A naive way to compute the above would be serial:
++ Rank 0 passes its $mono("states")_( 0 g a n h )$ to rank 1.
++ Rank computes $e^( A_( 1a ) )mono("states")_( 0 g a n h )$ and add this to its own
+  $mono("states")_( 1 g a n h )$.
++ Rank 1 passes its state to rank 2.
++ ...
+But this idles GPUs
+
+
+#figure(
+  kind: "algorithm",
+  supplement: [Algorithm],
+  caption: [Ring Mamba Step],
+  pseudocode-list(booktabs: true)[
+    + Initialize empty $mono("buff")_(r g a n h )$ on rank $r$
+    + *For* $i in {0, ..., R-1}$ #h(1fr)
+      + Receive $mono("states")_( (r-1)g a n h )$ into $mono("buff")_( r g a n h )$
+      + $mono("buff")_( r g a n h ) <- e^( A_( r a ) )mono("buff")_( r g a n h )$
+      + $mono("buff")_( r g a n h ) <- mono("buff")_( r g a n h ) + mono("states")_( r g a n h )$
+      + *If* $i < r$:
+        + $mono("states")_( r g a n h ) <- mono("buff")_( r g a n h )$
+  ],
+)<algo_ring_mamba>
+
+
+from which we create the updated $mono("states")_( r g a n h )$. The final step is
+embarassingly-parallel again:
+$
+  mono("out")_( r t a h )& = C_( r t g n )exp (sum_( t\'=0 )^( t )A_( r t\'a) ) mono("states")_(r g a n h )
+$
+
+If we can perform the middle step and get the updated $mono("states")$ tensor on each rank, then
+final off-diagonal step is again embarassingly-parallel over ranks:
+$
+  mono("out")_(r t l a h )& = C_(r t l g n )exp (sum_( l\'=0 )^( l )A_(r t l\'a) ) mono("states")_(r t g a n h ) .
+$
+Computing the updated $mono("states")_(r t g a n h )$ is the difficult part.
+
+
+
+
+
+The second step requires interventions. A given rank has access to the following relevant quantities for
+a single value of $r$:
++ $mono("states")_( r t g a n h)$
++ $A_( r t a )eq.triple sum_( l=0 )^( L-1 )A_( r t l a )$
+
+Using only these quantities and the `mamba-ssm` kernels, we are able to compute the partial results:
+$
+  mono("out_states_partial")_(r t g a n h ) &= sum_( t\'=0 )^( t ) exp (sum_( t\'\'=t\'+1 )^( t )sum_( l=0 )^( L-1 )A_(r t\'\'l a ) ) mono("states")_(r t\' g a n h ) \
+$
+
+We ultimately need to compute the rank-chunked version of @eq_mamba-ssm_middle_step
+$
+  mono("out_states")_( r c g a n h ) &=sum_( r\'=0 )^( r ) sum_( c\'=0 )^( c ) exp (sum_( r\'\'=r\'+1 )^( r )sum_( c\'\'=c\'+1 )^( c )sum_( l=0 )^( L-1 )A_(r\'\' c\'\'l a ) ) mono("states")_(r\' c\' g a n h ) \
+$
+
+due to the sums over ranks. The full quantity we need to
+compute is
+$
+  mono("out_states")_( r c\' g a n h ) &=sum_( r\'=0 )^( r ) exp (sum_( r\'\'=r\'+1 )^( r )sum_( t=0 )^( S / R-1 )A_( r\'\'t a ) ) mono("states")_( r\'c\' g a n h ) \
+$
+where we made the outer sum over $r\'$ explicit. A given rank natively only has access to the
+following quantities for a single value of $r$:
++ $mono("states")_( r g a n h)$
++ $A_( r a )eq.triple sum_( t=0 )^( S / R-1 )A_( r t a )$
+
+
+
 
 
 === Aren't These Just RNNs?<rnns_and_ssm>
 Yes, but very special ones with the important computational difference that the recursion relations
-are #emph[linear] in the hidden state $h$. This crucial difference makes it possible to parallelize
-the operations during training. Compare @eq_s4_discrete to what typical RNN recursion relations
-would look like:
+are #emph[linear] in the hidden state $h$. This crucial difference improves the ability to
+parallelize the computations. Compare @eq_s4_discrete to what typical RNN recursion relations would
+look like:
 $
   h_( b s ) &= phi (A_( b b\' )h_( b\' (s-1) ) + B_( b a )x_( a s ) )\
   y_( c s ) &= phi (C_( c b )h_( b s ) + D_( c a )x_( a s ) ) .
@@ -2300,7 +2434,7 @@ The progression of tensor shapes held by any single worker is
 + `(B, S, E*D/T)`
 + `(B, S, D)`
 
-In the backwards pass, another (see @app_collective_communications)
+In the backwards pass, another `AllReduce` (see @app_collective_communications)
 is needed for proper gradient computations with respect to the first
 layer's outputs. This is true whenever an operation producing a sharded
 output involved non-sharded tensors: if an operation
@@ -2308,7 +2442,7 @@ $macron(y)_(macron(r)) = F (x \, dots.h)$ produces a sharded output from
 an unsharded in put $x$ (all other indices suppressed), the derivative
 with respect to $x$ requires a sum over ranks,
 $( partial cal(L) )/( partial x ) = ( partial cal(L) )/( partial macron(y) _(
-macron(r) ) ) ( partial macron(y) _( macron(y) ) )/( partial x )$.
+macron(r) ) ) ( partial macron(y) _( macron(r) ) )/( partial x )$.
 Note that each worker will have to store all components of the input $z$
 for the backward pass.
 
@@ -2459,7 +2593,7 @@ the $1 \/ T$'s improvements can be enacted by layering sequence
 parallelism on top (@subsec_seq_parallelism).
 
 == Sequence Parallelism <subsec_seq_parallelism>
-In @eq_act_mem_total_tensor_parallel;, not every factor is reduced by $T$. #strong[Sequence
+In @eq_act_mem_total_tensor_parallel not every factor is reduced by $T$. #strong[Sequence
   Parallelism] fixes that by noting that the remaining contributions, which essentially come from
 and #footnote[Recall, though, from @layer_norm that the parameters in are completely redundant and
   can simply be removed without having any effect on the expressive capabilities of the
@@ -2810,9 +2944,9 @@ $<eq_general_moe>
 where $G_( s e )(z_( s d ), ... ) in RR^( S times N_"ex" )$ is a gating (i.e.,
 weighting) function and $E _( e s d )  ( z _( s d )  ) in RR ^( N _"ex" times S times D )$ is the
 usual MLP operation performed by the $e$-th expert. Many of the entries $G_(e s)$ are zero in
-practice, and only the computations $E_(e s d) (z_(s d))$ corresponding to non-trivial gating values
-are performed, of course. Different MoE variants are essentially differentiated by the specific form
-of their weighting function.
+practice (i.e. it's sparse), and only the computations $E_(e s d) (z_(s d))$ corresponding to
+non-trivial gating values are performed, of course. Different MoE variants are essentially
+differentiated by the specific form of their weighting function.
 
 == Routing
 <routing>
@@ -2835,18 +2969,24 @@ Layered on top of this choice are the details of the routing mechanisms.
 Token and expert choice both introduce a tensor
 $W _( d e ) in RR ^( D times N _( "ex"
 ) )$ which is used to produce a score between each token and expert:
-$S_(s e) = z_(s d) W_(d e)$. In each case, we perform a `topk`
+$S_(s e) = z_(s d) W_(d e)$. In each case, we perform a $TOPK$
 computation and output a weighted sum of expert outputs: the two methods
-just differ in the dimension over which the `topk` is performed.
+just differ in the dimension over which the $TOPK$ is performed.
 
-For token choice, the gating function is: $
-G ^"expert"_( s e )(z _( s d ), W) &= SM_( s )  ( TOPK _( s )  ( z _( s d ) dot W _( d e )  )  )  ,
-$<eq_expert_choice> with `topk` acting as in the token choice case.
-$G_(s e)$ is sparse along the sequence dimension and has
-$N _"ex"k$ non-trivial elements. A (potential) disadvantage
-of expert choice is that some tokens may not be routed to any expert at
-all, but every expert is at least guaranteed an equal load. In this
-case, we effectively have $k = c times  (S )/( N _"ex" )$, with $c$ the capacity factor above.
+
+Typical gating functions in the two cases are:
+$
+  G^"expert"_( s e )(z_( s d ), W) &= SM_( s ) ( TOPK_( s ) ( z_( s d ) dot W_( d e ) ) ) \
+  G^"token"_( s e )(z_( s d ), W) &= SM_( e ) ( TOPK_( e ) ( z_( s d ) dot W_( d e ) ) ) ,
+$<eq_expert_and_tok_choice>
+with $TOPK$ setting any non-top-`k` entries to $-infinity$, in a slight abuse of notation.
+
+There are tradeoffs to each choice:
+- Some tokens may not be selected at all in expert choice, but the per-expert load is balanced by
+  construction.
+- All tokens gets assigned to an equal number of experts in token choice, but memory constraints of
+  the implementation may force some tokens to get dropped.
+
 
 == MegaBlocks
 <megablocks>
