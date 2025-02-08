@@ -26,7 +26,10 @@
 #let TOPK = math.op(`topk`)
 #let TR = math.op(`Trace`)
 
-#let nice_box(body) = { box(stroke: black, inset: 1em, radius: .5em)[#body] }
+/* #let nice_box(body) = { block(stroke: black, inset: 1em, radius: .5em)[#body] } */
+#let nice_box(body) = {
+  block(fill: luma(238), inset: 1em, radius: .5em)[#body]
+}
 
 #set table(
   inset: 6pt,
@@ -1473,7 +1476,9 @@ tensor, which defaults to zeros, and computes the tuple of $mono("final_state")$
 $mono("states")$ defined as in#footnote[I believe. Note the upper limit of the $c\'\'$ sum.] (making
 sums explicit)
 $
-  mono("out_states")_( c g a n h ) &= sum_( c\'=0 )^( c ) exp (sum_( c\'\'=c\'+1 )^( c )sum_( l=0 )^( L-1 )A_( c\'\'l a ) ) mono("states")_( c\' g a n h ) \
+  A_( c a )&eq.triple sum_( l=0 )^( L-1 )A_( c\'\'l a )\
+  mono("out_states")_( c g a n h ) &= sum_( c\'=0 )^( c ) exp (sum_( c\'\'=c\'+1 )^( c )A_( c\'\' a ) ) mono("states")_( c\' g a n h ) \
+  &quad + exp (sum_( c\'=0 )^( c )A_( c\' a ) ) mono("initial_states")_( g a n h ) \
   mono("final_state")_( g a n h ) &= mono("out_states")_( -1 g a n h )\
   mono("states")_(c g a n h ) &= CAT_c ( mono("out_states")_( [:-1] g a n h ), mono("states")_( 0 g a n h ) )
 $<eq_mamba-ssm_middle_step>
@@ -1489,13 +1494,35 @@ $
 $
 This is performed by `_chunk_scan_fwd`, which also performs the diagonal computation.
 
+#nice_box[
+  *Inference and $mono("initial_states")$*: to motivate the introduction of $mono("initial_states")$,
+  note that we can break up the $mono("out_states")$ computation with no $mono("initial_states")$
+  as in
+  $
+    mono("out_states")_( c g a n h ) &= sum_( c\'=0 )^( c ) exp (sum_( c\'\'=c\'+1 )^( c )A_( c\'\' a ) ) mono("states")_( c\' g a n h ) \
+    &= sum_( c\'=mono("stop") + 1 )^( c ) exp (sum_( c\'\'=c\'+1 )^( c )A_( c\'\' a ) ) mono("states")_( c\' g a n h )\
+    & quad + exp (sum_( c\'\'=mono("stop")+1 )^( c )A_( c\'\' a ) )sum_( c\'=0 )^( mono("stop") ) exp (sum_( c\'\'=c\'+1 )^( mono("stop") )A_( c\'\' a ) ) mono("states")_( c\' g a n h )\
+    &eq.triple sum_( c\'=mono("stop") + 1 )^( c ) exp (sum_( c\'\'=c\'+1 )^( c )A_( c\'\' a ) ) mono("later_states")_( c\' g a n h )\
+    & quad + exp (sum_( c\'\'=mono("stop")+1 )^( c )A_( c\'\' a ) ) mono("initial_states")_( g a n h )
+  $
+  That is, we can break down the computation into a first chunk which propagates the state up to
+  some arbitrary chunk boundary $mono("stop")$, and then use this info to propagate further from
+  $mono("stop")$ up to $c$. Clearly, this is useful for caching and/or piecewise computations.
+
+  Importantly, additional state for the depthwise convolution must also be passed to perform this
+  computation properly, as the convolution affects the values of $mono("later_states")$ above.
+]
+
+
+
+
 ==== Context Parallel Mamba2 Scan
 
 Sharding the mamba2 scan over devices. Shard the sequence dimension as $s -> (r t)$ with $r in {0 ,
 ..., R-1}$ indexing the rank and $t in {0, ..., S/R -1}$. Organize the computation of the outputs
 $z_( r t a h )$ similarly to the full computation, into diagonal terms which can be completely
 computed locally to a rank and off-diagonal terms which require shards across ranks. We do not chunk
-down $t$ further at this time, but will later.
+down $t$ further at this time, but will later to use the `mamba-ssm` kernels.
 
 
 The calculations are the essentially the same as before. The diagonal computation is
