@@ -20,6 +20,7 @@
 #let CA = math.op(`CausalAttention`)
 #let NORM = math.op(`Norm`)
 #let CUMSUM = math.op(`cumsum`)
+#let CUMPROD = math.op(`cumprod`)
 #let SEGSUM = math.op(`segsum`)
 #let SUM = math.op(`sum`)
 #let MHA = math.op(`MHA`)
@@ -164,7 +165,11 @@
 
 #show link: it => text(blue)[#it]
 /* Eq ref styling https://typst.app/docs/reference/model/ref/ */
-#set math.equation(numbering: "(1)", number-align: end + bottom)
+#set math.equation(
+  numbering: "(1)",
+  number-align: end + bottom,
+)
+#show math.equation: set block(breakable: true)
 #show ref: it => {
   let foot = footnote
   let eq = math.equation
@@ -964,6 +969,7 @@ Flash-attention-like techniques can be used to avoid materializing all
 of the $cal(O) ( S D ^2 )$ elements at once.
 
 = State Space Models
+
 <state-space-models>
 == Intro<sec_ssm_intro>
 
@@ -1392,46 +1398,42 @@ Several crucial computational points:
 - $cal(A)_( c c\'l l\'a ) = U_( c l a )bold(A)_( c c\'e )T_( c\'l\'a )$ is factorizable (low-rank)
 @eq_mamba2_A_factoring.
 - The middle factor $bold(A)_(c c\'a)$ can be factorized further:
-$
-  bold(A)_(c c\'a) &= exp ( SEGSUM_( c c\' )A_( c a ) - A_( c a ) )\
-  & = exp (CUMSUM_( c ) A_( c a ) - A_(c a )) times exp ( - CUMSUM_( c\' ) A_( c\' a ) )\
-  & = L_( c a )R_( c\'a ).
-$<eq_mamba2_smaller_A_factoring>
+  $
+    bold(A)_(c c\'a) &= exp ( SEGSUM_( c c\' )A_( c a ) - A_( c a ) )\
+    & = exp (CUMSUM_( c ) A_( c a ) - A_(c a )) times exp ( - CUMSUM_( c\' ) A_( c\' a ) )\
+    & = L_( c a )R_( c\'a ).
+  $<eq_mamba2_smaller_A_factoring>
+  which encodes the special property that SSM attention is optimally $cal(O)( S )$, rather than
+  $cal(O)( S^( 2 ) )$.
 
-
-encodes the special property that SSM attention is optimally
-$cal(O)( S )$, rather than $cal(O)( S^( 2 ) )$.
-Explicitly, we could compute
-@eq_mamba2_all_off_diagonal_terms in stages as in:
-+ $z_( c\'g a n h ) <- T_( c\'l\'a )cal(B)_( c\'l\'g a n h )$ in $cal(O)( S D G N )$
-+ Either
-  + $z_( c g a n h ) <- M_( c c\' ) bold(A)_( c c\'a ) z_( c\'g a n h )$ in $cal(O)( (S^( 2 ) D G N) / L^(
-  2 ) )$
-  + Use @eq_mamba2_smaller_A_factoring and compute in two steps:
-    + $z_( g a n h )<- R_( c\'a)z_( c\'g a n h )$ in $cal(O)( (S D G N) / L  )$
-    + $z_( c g a n h ) <- L _( c a )z_( g a n h )$ in $cal(O)( (S D G N) / L  )$.
-
-+ $z_( c l g a n h )<- C_( c l g n ) U_( c l a )z_( c g a n h )$ in $cal(O)( S D G N )$
-
-
-
-This fact ultimately means that the sums over $c, c\'$ in @eq_mamba2_recursion_soln_chunked can be
-performed in $cal(O)(S)$ time, rather than the naive $cal(O)( S^( 2 ) )$ time. The mask is a mildly
-complicating factor here, since the entire sum over $c\'$ involves the factors
+The entire $c\'$ sum also involves a causal mask,
 $
   M_( c c\' )bold(A)_( c c\'a )bold(B)_( c\' g a n h ) ,
 $
-and the product $M_( c c\' )bold(A)_( c c\'a )$ itself is not low-rank#footnote[Were it not for the
+which makes the whole combination $M_( c c\' )bold(A)_( c c\'a )$ non low-rank#footnote[Were it not for the
   mask, we could simply compute the sum by breaking the low-rank matrix into its natural factors as
   $bold(A)_( c c\'a )T_( c\'l\'a ) = L_( c a )R_( c\' a )T_( c\'l\'a )$, compute the $c\'$ sum in
-  $cal(O)( S )$ and multiply the scalar sum by $L_( c )$ in $cal(O)( S )$ again.]. Writing
-$bold(A)_( c c\'a )= L_( c a )R_( c\' a )$, we have the manipulations:
+  $cal(O)( S )$ and multiply the scalar sum by $L_( c )$ in $cal(O)( S )$ again.]. However, we have
+the manipulations:
 $
   M_( c c\' )bold(A)_( c c\'a )bold(B)_( c\' g a n h ) &= M_( c c\' )L_( c a )R_( c\' a )bold(B)_( c\' g a n h )\
   &= L_( c a ) sum_( c'=0 )^( c-1 )R_( c\' a )bold(B)_( c\' g a n h )\
   &= L_( c a ) times (CUMSUM_c (R_( c a )bold(B)_( c g a n h )) - R_( c a )bold(B)_( c g a n h ))\
   &= L_( c a ) times Z_( c l\' a )
-$
+$<eq_mamba2_efficient_mask_computation>
+Thus, the sums over $c, c\'$ in @eq_mamba2_recursion_soln_chunked can be performed in $cal(O)(S)$
+time, rather than the naive $cal(O)( S^( 2 ) )$ time.
+
+
+Therefore, one way we could compute @eq_mamba2_all_off_diagonal_terms in stages as in:
++ $z_( c\'g a n h ) <- T_( c\'l\'a )cal(B)_( c\'l\'g a n h )$ in $cal(O)( S D G N )$
++ Use @eq_mamba2_efficient_mask_computation to compute $z_( g a n h ) <- M_(c c\' )bold(A)_( c c\'
+  )z _( c\' g a n h )$ in $cal(O)( (S D G N) / L )$
++ $z_( c l g a n h )<- C_( c l g n ) U_( c l a )z_( c g a n h )$ in $cal(O)( S D G N )$
+
+
+
+
 The parenthesized terms can all be computed in $cal(O)( S )$ and the final elementwise product also
 takes $cal(O)( S )$ time, as claimed#footnote[Unfortunately, this is also a very numerically
   unstable way to perform the computation, relying on cancellations in products of exponentials.].
@@ -1477,14 +1479,18 @@ $mono("states")$ defined as in#footnote[I believe. Note the upper limit of the $
 sums explicit)
 $
   A_( c a )&eq.triple sum_( l=0 )^( L-1 )A_( c\'\'l a )\
-  mono("out_states")_( c g a n h ) &= sum_( c\'=0 )^( c ) exp (sum_( c\'\'=c\'+1 )^( c )A_( c\'\' a ) ) mono("states")_( c\' g a n h ) \
-  &quad + exp (sum_( c\'=0 )^( c )A_( c\' a ) ) mono("initial_states")_( g a n h ) \
-  mono("final_state")_( g a n h ) &= mono("out_states")_( -1 g a n h )\
+  mono("out_states")_(c g a n h ) &= sum_( c\'=0 )^( c -1 ) exp (sum_( c\'\'=c\'+1 )^( c )A_( c\'\' a ) ) mono("states")_( c\' g a n h ) \
+  &quad + exp (sum_( c\'=0 )^( c - 1 )A_( c\' a ) ) mono("initial_states")_( g a n h ) , quad ( c < S / L -1 ) \
+  mono("final_states")_( g a n h ) &= sum_( c\'=0 )^( S / L -1 ) exp (sum_( c\'\'=c\'+1 )^( S / L -1 )A_( c\'\' a ) ) mono("states")_( c\' g a n h )
+  + exp (sum_( c\'=0 )^( S / L -1 )A_( c\' a ) ) mono("initial_states")_( g a n h ) \
   mono("states")_(c g a n h ) &= CAT_c ( mono("out_states")_( [:-1] g a n h ), mono("states")_( 0 g a n h ) )
 $<eq_mamba-ssm_middle_step>
-via a loop over chunks, with $mono("initial_states")$ setting initial conditions in the loop. This
-is the role of the `_state_passing_fwd` kernel. The updated $mono("states")$ is used in the
-remainder of the off-diagonal computation, as well as the diagonal part. $mono("final_state")$ is
+via a loop over chunks, with $mono("initial_states")$ setting initial conditions in the
+loop#footnote[The indexing can be confusing and off-by-one errors are easy to make. The extreme
+  components take on values $mono("out_states")_( 0 ... ) = mono("initial_states")_( ... ) $,
+  $mono("out_states")_( c ... ) = mono("states")_( c ... ) + e^( A_( c a ) )mono("states")_( c-1 ... )$.]. This is the role of the
+`_state_passing_fwd` kernel. The updated $mono("states")$ is used in the remainder of the
+off-diagonal computation, as well as the diagonal part. $mono("final_state")$ can optionally be
 returned, but not used again (it can be used for inference).
 
 
@@ -1519,98 +1525,51 @@ This is performed by `_chunk_scan_fwd`, which also performs the diagonal computa
 ==== Context Parallel Mamba2 Scan
 
 Sharding the mamba2 scan over devices. Shard the sequence dimension as $s -> (r t)$ with $r in {0 ,
-..., R-1}$ indexing the rank and $t in {0, ..., S/R -1}$. Organize the computation of the outputs
-$z_( r t a h )$ similarly to the full computation, into diagonal terms which can be completely
-computed locally to a rank and off-diagonal terms which require shards across ranks. We do not chunk
-down $t$ further at this time, but will later to use the `mamba-ssm` kernels.
-
+..., R-1}$ indexing the rank and $t in {0, ..., S/R -1}$. We want to use the mamba2 chunking
+strategy (and kernels) locally on each node, so we further shard $t -> (c l)$ with $l in {0, ...,
+L-1}$ and $c in {0,..., S /(L R) -1 }$. Organize the computation of the outputs $z_( r c l a h )$
+similarly to the full computation, into diagonal terms which can be completely computed locally to a
+rank and off-diagonal terms which require shards across ranks.
 
 The calculations are the essentially the same as before. The diagonal computation is
 embarassingly-parallel across ranks
 $
-  z^( "diag" )_( r t a h ) &= C_( r t g n )e^( sum_( t\'\'= t\'+1 )^( t )A_( r t\'\' a ) )cal(B)_( r t\' g a n h ) .
+  z^( "diag" )_( r c l a h ) &= C_( r c l g n )e^( sum_( l\'\'= l\'+1 )^( l )A_( r c l\' a ) )cal(B)_( r c l\' g a n h ) .
 $
 
 The first step of the off-diagonal computation is to create the states, which is also
 embarassingly-parallel across ranks:
 $
-  mono("states")_( r g a n h ) &= exp ( sum_( t\'\'=t\'+1 )^( S / R-1 )A_( r t\'\' a) ) cal(B)_( r t\' g a n h )
+  mono("states")_( r c g a n h ) &= exp ( sum_( l\'=l+1 )^( L-1 )A_( r c l\' a) ) cal(B)_( r c l g a n h )
 $
-These are then updated by creating:
+Properly updating the states in the middle step requires computing
 $
-  mono("states")_( r g a n h ) &<- sum_( r\'=0 )^( r ) exp(sum_( r\'\'=r\'+1 )^( r )sum_( t=0 )^( S / R-1 )A_( r\'\'t a ) ) mono("states")_( r\' g a n h ) \
-  &eq.triple sum_( r\'=0 )^( r ) exp(sum_( r\'\'=r\'+1 )^( r )A_( r\'\' a ) ) mono("states")_( r\' g a n h ) \
-  & = mono("states")_( r g a n h ) + e^( A_( r a ) ) mono("states")_( (r-1) g a n h ) + e^( A_( r a ) + A_( (r-1) a ) ) mono("states")_( (r-2) g a n h ) \
-  & quad + med ...
+  mono("out_states")_( r c g a n h ) &<- exp(sum_( c\'\'=c\'+1  )^( c )A_( r c\'\' a ) ) mono("states")_( r c\' g a n h ) \
+  & quad + exp(sum_( c\'=0  )^( c )A_( r c\' a ) )sum_( r\'=0 )^( r-1 ) exp(sum_( r\'\'=r\' )^( r-1 )sum_( c\'\'=c\'+1  )^( S / (L R)-1 )A_( r\'\'c\'\' a ) ) mono("states")_( r\' c\' g a n h ) \
+  & = exp(sum_( c\'\'=c\'+1  )^( c )A_( r c\'\' a ) ) mono("states")_( r c\' g a n h )\
+  & quad + exp(sum_( c\'=0  )^( c )A_( r c\' a ) )sum_( r\'=0 )^( r-1 ) exp(sum_( r\'\'=r\'+1 )^( r-1 )A_( r\'\' a ) ) mono("final_states")_( r\' g a n h ) \
 $
-which clearly involves communication.
+and the sums over different ranks necessarily involve communication.
 
-A naive way to compute the above would be serial:
-+ Rank 0 passes its $mono("states")_( 0 g a n h )$ to rank 1.
-+ Rank computes $e^( A_( 1a ) )mono("states")_( 0 g a n h )$ and add this to its own
-  $mono("states")_( 1 g a n h )$.
-+ Rank 1 passes its state to rank 2.
+One way to compute the above would be serial:
++ Rank 0 computes its $mono("states")_( 0 g a n h )$ to rank 1.
++ Rank 1 uses $mono("states")_( 0 g a n h )$ as the $mono("initial_states")$ for its computation of
+  $mono("states")_( 1 g a n h )$
++ Rank 1 passes $mono("states")_( 1 g a n h )$ to rank 2.
 + ...
-But this idles GPUs
+This idles GPUs, but the state passing step also has a computational complexity which is smaller
+than those of other steps by a factor of $L$, the chunk size, and so the serial nature is likely
+acceptable for $mono("world_size") lt.tilde L$.
 
 
-#figure(
-  kind: "algorithm",
-  supplement: [Algorithm],
-  caption: [Ring Mamba Step],
-  pseudocode-list(booktabs: true)[
-    + Initialize empty $mono("buff")_(r g a n h )$ on rank $r$
-    + *For* $i in {0, ..., R-1}$ #h(1fr)
-      + Receive $mono("states")_( (r-1)g a n h )$ into $mono("buff")_( r g a n h )$
-      + $mono("buff")_( r g a n h ) <- e^( A_( r a ) )mono("buff")_( r g a n h )$
-      + $mono("buff")_( r g a n h ) <- mono("buff")_( r g a n h ) + mono("states")_( r g a n h )$
-      + *If* $i < r$:
-        + $mono("states")_( r g a n h ) <- mono("buff")_( r g a n h )$
-  ],
-)<algo_ring_mamba>
-
-
-from which we create the updated $mono("states")_( r g a n h )$. The final step is
-embarassingly-parallel again:
-$
-  mono("out")_( r t a h )& = C_( r t g n )exp (sum_( t\'=0 )^( t )A_( r t\'a) ) mono("states")_(r g a n h )
-$
-
-If we can perform the middle step and get the updated $mono("states")$ tensor on each rank, then
-final off-diagonal step is again embarassingly-parallel over ranks:
-$
-  mono("out")_(r t l a h )& = C_(r t l g n )exp (sum_( l\'=0 )^( l )A_(r t l\'a) ) mono("states")_(r t g a n h ) .
-$
-Computing the updated $mono("states")_(r t g a n h )$ is the difficult part.
+A different strategy is the following:
++ Every rank computes
 
 
 
 
 
-The second step requires interventions. A given rank has access to the following relevant quantities for
-a single value of $r$:
-+ $mono("states")_( r t g a n h)$
-+ $A_( r t a )eq.triple sum_( l=0 )^( L-1 )A_( r t l a )$
 
-Using only these quantities and the `mamba-ssm` kernels, we are able to compute the partial results:
-$
-  mono("out_states_partial")_(r t g a n h ) &= sum_( t\'=0 )^( t ) exp (sum_( t\'\'=t\'+1 )^( t )sum_( l=0 )^( L-1 )A_(r t\'\'l a ) ) mono("states")_(r t\' g a n h ) \
-$
-
-We ultimately need to compute the rank-chunked version of @eq_mamba-ssm_middle_step
-$
-  mono("out_states")_( r c g a n h ) &=sum_( r\'=0 )^( r ) sum_( c\'=0 )^( c ) exp (sum_( r\'\'=r\'+1 )^( r )sum_( c\'\'=c\'+1 )^( c )sum_( l=0 )^( L-1 )A_(r\'\' c\'\'l a ) ) mono("states")_(r\' c\' g a n h ) \
-$
-
-due to the sums over ranks. The full quantity we need to
-compute is
-$
-  mono("out_states")_( r c\' g a n h ) &=sum_( r\'=0 )^( r ) exp (sum_( r\'\'=r\'+1 )^( r )sum_( t=0 )^( S / R-1 )A_( r\'\'t a ) ) mono("states")_( r\'c\' g a n h ) \
-$
-where we made the outer sum over $r\'$ explicit. A given rank natively only has access to the
-following quantities for a single value of $r$:
-+ $mono("states")_( r g a n h)$
-+ $A_( r a )eq.triple sum_( t=0 )^( S / R-1 )A_( r t a )$
 
 
 
@@ -4273,7 +4232,106 @@ total: $
 F _"total" ^"model" & approx 12 B D L S  ( S +  ( 2+E  )D  ) .
 $
 
-= Convolutions
+= Ops
+
+Notes on various operations and their implementations.
+
+
+== Associative Scans
+
+Associative scans @prefixSumsBlelloch take some arbitrary tensor $x_( i ... )$, $i in {0, ..., N-1}$
+and other indices arbitrary (and omitted in the below), an associative operation $a(x, y) eq.triple
+x plus.circle y$ and computes the output $z_( i )$
+$
+  z_( i ) & eq.triple plus.circle.big_( j=0 )^( i )x_( j ) \
+  &=x_( 0 ) plus.circle x_( 1 ) plus.circle ... plus.circle x_( i )\
+  &=a( z_( i-1 ), x_( i )) =a( a(z_( i-2 ), x_( i-1 )), x_( i )) = ...
+$
+Assuming sufficiently many processors are available, such scans can be computed in $cal(O)( log N )$
+time, due to associativity. Common examples (also turn out to be special cases, for technical
+reasons discussed below):
+- $CUMSUM$: $plus.circle = + $, and $CUMSUM( x_( i ) ) = sum_( j=0 )^( i )x_( j ) eq.triple theta(i >= j)
+  x_( j )$, with and implicit summation over the $j$-index in the final expression and where
+  $theta(x)$ equals 1 if $x$ is true, and zero otherwise.
+- $CUMPROD$: $plus.circle = times $.
+
+Let's compute the backwards $(partial z_( j )) / (partial x_( i ))$. First, $(partial z_( j )) /
+(partial x_( i ))prop theta(j >= i)$. Another useful fact is that by associativity we can write
+$
+  z_( j ) &= (x_( 0 ) plus.circle ... plus.circle x_( i )) plus.circle ( x_( i+1 ) plus.circle ... plus.circle x_( j )) \
+  &=a(a(z_( i-1 ), x_( i )), z_( i+1:j+1 ))
+$
+where the final factor $z_( i+1: )$ is the scan of terms $i+1$ through $j$, in `python` notation.
+Working through the derivative gives the equivalent expressions (assuming $j>=i$)
+$
+  (partial z_( j )) / (partial x_( i ))&= (partial z_( j )) / (partial z_( j-1 )) (partial z_( j-1 )) / (partial z_( j-2 ))times ...times (partial z_( i+1 )) / (partial z_( i ))(partial z_( i )) / (partial x_( i ))\
+  & = partial_( z_( i ) ) a(z_( i ), z_( i+1:j+1 )) times partial_( x_( i ) )a(z_(i -1 ), x_( i ))
+$
+For backprop, we really need the dot-product of the above into the upstream gradient $(partial
+L)/(partial z_( j ))eq.triple g_( j )$:
+$
+  (partial L) / (partial x_( i )) = g_( j ) (partial z_( j )) / (partial x_( i )).
+$
+
+One method @chiuPscanDiff for computing the derivative in the form
+$
+  (partial L) / (partial x_( i )) = g_( j ) (partial z_( j )) / (partial z_( j-1 )) (partial z_( j-1 )) / (partial z_( j-2 ))times ...times (partial z_( i+1 )) / (partial z_( i ))(partial z_( i )) / (partial x_( i ))
+$
+is for each $i$ to compute the $CUMPROD_( j )$ of the tensors $[(partial z_( j )) / (partial z_( j-1 )),
+...,  (partial z_( i+1 )) / (partial z_( i ))]$ for values of $j$ (which can be done in at-worst
+$cal(O)( N )$ time ), dot with $g_( j )$ and multiply by $(partial z_( i )) / (partial x_( i ))$.
+
+In general, the entire backwards depends on all inputs $x_( i )$, knowing the values of the entire
+associative scan $z_( i )$, and computing all $cal(O)( N^( 2 ) )$ values of $CUMPROD_( j )((partial z_( j )) / (partial z_( j-1 )),
+...,  (partial z_( i+1 )) / (partial z_( i ))) eq.triple c_( i j )$. A special case is there the
+derivative $(partial z_( j )) / (partial x_( i ))$ is partially factorizable, as in
+$
+  (partial z_( j )) / (partial x_( i )) &= theta(j>=i) ell_( j )r_( i ) \
+  => (partial L) / (partial x_( i )) &= CUMSUM_( i )(g_( i )ell_( i ), mono("reverse") = mono("true")) times r_( i ) ,
+$
+by which we mean that the $CUMSUM$ runs on the tensor arguments with positions reversed over the scan
+axis. Both of the specific cases above have this property:
+- $plus.circle = + $: $(partial z_( j )) / (partial x_( i ))= theta(j>=i) $
+- $plus.circle = times $: $(partial z_( j )) / (partial x_( i ))= theta(j>=i) z_( j ) / x_( i ) $
+
+Writing the derivative as in
+$
+  (partial L) / (partial x_( i )) = g_( j )theta(j>=i) partial_( z_( i ) ) a(z_( i ), z_( i+1:j+1 )) times partial_( x_( i ) )a(z_(i -1 ), x_( i ))
+$
+this is seen to be equivalent to $a$ having the property that $partial_( z_( i ) ) a(z_( i ), z_(
+i+1:j+1 ))= x_( i )y_( j )$.
+
+
+== Convolutions
+
+Following `torch` conventions, a vanilla batched $D$-dimensional convolution involves:
+- A $(D+2)$-dimensional input $x_( b c_("in") i_( 0 ) ... i_( D-1 ) )$.
+- A $(D+2)$-dimensional weight $W_(c_( "out" )c_( "in" ) k_( 0 ) ... k_( D-1 ) )$.
+- A $1$-dimensional bias $b_(c_( "out" ))$.
+- A $(D+2)$-dimensional output $z_( b c_("out") j_( 0 ) ... j_( D-1 ) )$.
+
+Here, $c_( "in" ) in {0, ..., C_( "in" )-1}, c_( "out" ) in {0, ..., C_( "out" )-1}$ are the in- and
+out-channels, respectively, the input dimensions $i_( n )in {0, ..., I_( n )-1}$ and the kernel
+sizes $k_( n )in {0, ..., K_( n ) -1}$. Some padding is often added to the inputs, but we will
+assume that has already been done to simplify matter. The output dimensions range over $j_( n )in
+{0, ..., J_( n )-1}$, where $J_( n ) = I_( n ) - K_( n )$, and with
+$
+  z_( b c_("out") j_( 0 ) ... j_( D-1 ) ) & = b_( c_( "out" ) )+ W_(c_( "out" )c_( "in" ) k_( 0 ) ... k_( D-1 ) ) x_( b c_("in") (j_( 0 ) + k_( 0 )) ... (j_( D - 1 ) + k_( D-1 )) )
+$
+leaving sums implicit (with sums involving invalid index value giving zero).
+
+Given the upstream gradient $ (partial cal(L))/ (partial z_( b c_("out") j_( 0 ) ... j_( D-1 ) ) )
+= g_( b c_("out") j_( 0 ) ... j_( D-1 ) )$, the non-trivial downstream derivatives are
+$
+  (partial cal(L)) / (partial W_(c_( "out" )c_( "in" ) k_( 0 ) ... k_( D-1 ) )) & = g_( b c_("out") j_( 0 ) ... j_( D-1 ) )x_( b c_("in") (j_( 0 ) + k_( 0 )) ... (j_( D - 1 ) + k_( D-1 )) )\
+  (partial cal(L)) / (partial x_( b c_("in") i_( 0 ) ... i_( D-1 ))) & = g_( b c_("out") (i_( 0 ) - k_( 0 )) ... (i_( D-1 ) - k_( D-1 )) )W_(c_( "out" )c_( "in" ) k_( 0 ) ... k_( D-1 ) )
+$
+which are just more convolutions, suitably understood.
+
+
+
+
+
 
 
 #bibliography("bibliography.bib")
