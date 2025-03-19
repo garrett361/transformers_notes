@@ -22,6 +22,7 @@
 #let CUMSUM = math.op(`cumsum`)
 #let CUMPROD = math.op(`cumprod`)
 #let SEGSUM = math.op(`segsum`)
+#let SEGPROD = math.op(`segprod`)
 #let SUM = math.op(`sum`)
 #let MHA = math.op(`MHA`)
 #let TOPK = math.op(`topk`)
@@ -1089,7 +1090,8 @@ for dimensions and tensors:
 
   - Convolutional kernel $W_(e c)^K$.
 
-  - Selective-scan weights $W_(e n)^A$.
+  - Selective-scan weights#footnote[Implemented as $W^( A ) = - exp(A)$ where $A$ is the actual
+  learnable weight in $mono("mamba-ssm")$.] $W_(e n)^A < 0$.
 
   - Residual connection weights $W_e^D$.
 
@@ -1139,9 +1141,9 @@ be computed.]
 )<algo_mamba1_scan>
 
 
-As noted above, the creation of the intermediates
-$x_(s e)^0 \, x_(s e)^1 \, B_(s n) \, C_(s n)$ and part of $Delta_(s e)$
-can all be formed in a single large matmul.
+
+As noted above, the creation of the intermediates $x_(s e)^0 \, x_(s e)^1 \, B_(s n) \, C_(s n)$ and
+part of $Delta_(s e)$ can all be formed in a single large matmul.
 
 == Mamba 2
 <mamba-2>
@@ -1159,7 +1161,7 @@ Mamba2 introduces some changes:
   introduced, analogously to transformers.
 
 - The $e$-index from two selective-scan weights is removed: they are now
-  per-head scalars $W_a^A \, W_a^D$.
+  per-head scalars $W_a^A \, W_a^D$. As before, $W_a^A< 0$.
 
 - The intermediate $Delta_(s a)$ is also reduced to a per-head,
   per-sequence-position scalar, with respect to the hidden dimension.
@@ -1205,7 +1207,7 @@ analogously to transformer models:
     + *Inputs*: $x_(s e) in bb(R)^(S times E)$ $x_(s a h) = x_(s (a h)) = x_(s e)$ #h(1fr) `# Break the inputs up into attention heads.`
     + $B_(s g n) = W_(g n e)^B x_(s e)$ #h(1fr) `# Create intermediates B, C, Delta (can fuse)`#footnote[The `mamba_ssm` and `mamba.py` implementations differ here in that the latter optionally applies a norm operator post-projection.].
     + $C_(s g n) = W_(g n e)^C x_(s e)$ $Delta_(s a) = W_(a e)^Delta x_(s e)$.
-    + $Delta_(s a) = mono("Softplus") (Delta_(s a))$. #h(1fr) `# For some reason.` $mono("Softplus") (x) equiv ln (1 + e^x)$.
+    + $Delta_(s a) = mono("Softplus") (Delta_(s a))$. #h(1fr) `# For some reason. Force positive?` $mono("Softplus") (x) equiv ln (1 + e^x)$.
     + $B_(s g n) = K_(g n s s')^B star.op B_(s g n)$ #h(1fr) `# 1D grouped conv. over the seq. dim. (fused)`
     + $C_(s g n) = K_(g n s s')^C star.op C_(s g n)$
     + Solve recursion#footnote[Note that each recursion step requires $cal(O)( A H G N ) =cal(O)( D G N )$ operations,
@@ -1313,7 +1315,8 @@ $
 $
 
 The argument $sans(A)_(c c l l' a)$ can be constructed in various ways#footnote[$CUMSUM_s X_s
-  equiv sum_(s' = 0)^s X_(s')$ and $SEGSUM$ stands for “segment sum\".]:
+  equiv sum_(s' = 0)^s X_(s')$ and $SEGSUM$ stands for “segment sum\": $SEGSUM_( s s\' )(X_s) =sum
+  _( s\'\'=s\'+1 )^( s )X_( s\'\' )$.]:
 $
   sans(A)_( c c l l\'a )&= SEGSUM_( l l' ) ( A_( c l a ) ) + M_( l l\' )\
   &eq.triple CUMSUM_( l )A_( c l a ) - CUMSUM_( l\' )A_( c l\'a ) + M_( l l\' ) \
@@ -2999,6 +3002,45 @@ Shared experts forces one particular expert to always be used, with the
 motivation of having the differentiated expert serve as a common pool of
 knowledge.
 
+
+== DeepSeekV3
+
+DeepSeekV3 @deepseekai2025deepseekv3technicalreport has various architectural changes, most of which are not MoE specific, but which we
+document here anyway.
+
+=== Multi-Head Latent Attention
+
+The idea is to compress all keys and values into a single, compressed latent representation
+@deepseekai2024deepseekv2strongeconomicalefficient.
+
+Rather than creating the $O(S A H)$ keys and values like
+$
+  k_( s a h ) &= W^( K )_( a h d ) z_( s d) \
+  v_( s a h ) &= W^( V )_( a h d ) z_( s d) ,
+$
+just create a single latent
+$
+  c_( s c ) &= W^( C )_( a c ) z_( s d)
+$
+with the size of the $c in {0,..., C - 1}$ dimension obeying $C << A H$. The usual keys and values
+are created by projecting $c_( s c )$ back up to the usual dimensions: $k ~ W ^( K C ) dot c, v ~
+W^( V C ) dot c$. This is an inference-time optimization, since it reduces the effective $k v$-cache
+size: we store the smaller $c_( s c )$ tensor, rather than separate and larger $k, v$ tensors. A
+similar compression is applied during production of the queries#footnote[Which seems a poor choice?
+  In @deepseekai2025deepseekv3technicalreport it's claimed that this reduces activation memory, but
+  that seems incorrect (projection-matrix memory is slightly reduced).]
+
+The DeepSeek handling of RoPE is also slightly different. They keys and values produced from the
+latent tensor $c$ do not have RoPE applied, and instead additional keys and queries which have RoPE
+applied are concatenated (along the model feature dimensions) with those of the previous paragraph:
+$k^( mono("RoPE") ) ~ mono("RoPE")(W dot z)$ and $q^( mono("RoPE") ) ~ mono("RoPE")(W dot c)$,
+respectively built from the hidden states and latents again for inference-time optimization reasons.
+
+In the end, the $c$ and $k^( mono("RoPE") )$ tensors are what are cached during inference.
+
+
+
+
 = Inference
 <inference>
 == Basics and Problems
@@ -3269,7 +3311,7 @@ parameters:
 
 - $E$: expansion factor for MLP layer (usually $E = 4$)
 
-- $H$: $D \/ A$, the head dimension size
+- $H$: the head dimension size. Equal to $D \/ A$ for vanilla multi-head attention.
 
 - $K$: the block size (maximum sequence length#footnote[In the absence
   of methods such as ALiBi @ALiBi can be used to extend the sequence
@@ -4247,8 +4289,12 @@ $
   &=x_( 0 ) plus.circle x_( 1 ) plus.circle ... plus.circle x_( i )\
   &=a( z_( i-1 ), x_( i )) =a( a(z_( i-2 ), x_( i-1 )), x_( i )) = ...
 $
+where $a(z_( -1 ), x_( 0 )) eq.triple x_( 0 )$. For now, we assume the operation is elementwise
+(pointwise), which lets us avoid writing out any indices on its arguments other than the sequence
+index for the dimension over which we are scanning.
+
 Assuming sufficiently many processors are available, such scans can be computed in $cal(O)( log N )$
-time, due to associativity. Common examples (also turn out to be special cases, for technical
+time, due to associativity. Common examples (which also turn out to be special cases, for technical
 reasons discussed below):
 - $CUMSUM$: $plus.circle = + $, and $CUMSUM( x_( i ) ) = sum_( j=0 )^( i )x_( j ) eq.triple theta(i >= j)
   x_( j )$, with and implicit summation over the $j$-index in the final expression and where
@@ -4273,13 +4319,24 @@ $
   (partial L) / (partial x_( i )) = g_( j ) (partial z_( j )) / (partial x_( i )).
 $
 
-One method @chiuPscanDiff for computing the derivative in the form
+One method for computing the derivative in the form
 $
   (partial L) / (partial x_( i )) = g_( j ) (partial z_( j )) / (partial z_( j-1 )) (partial z_( j-1 )) / (partial z_( j-2 ))times ...times (partial z_( i+1 )) / (partial z_( i ))(partial z_( i )) / (partial x_( i ))
 $
-is for each $i$ to compute the $CUMPROD_( j )$ of the tensors $[(partial z_( j )) / (partial z_( j-1 )),
-...,  (partial z_( i+1 )) / (partial z_( i ))]$ for values of $j$ (which can be done in at-worst
-$cal(O)( N )$ time ), dot with $g_( j )$ and multiply by $(partial z_( i )) / (partial x_( i ))$.
+is to note that the product of the $( (partial z_( j )) / (partial z_( j-1 )), ..., (partial
+z_( i+1)) / (partial z_( i )) )$ factors in the middle can be written as the segmented
+product#footnote[$SEGPROD_(i j)(X_i) eq.triple product_( k=j+1 )^( i )X_( k )$, vanishing for $j>=i$.]
+of the collection of tensors $(1,  (partial z_( 1 )) / (partial z_( 0 )), ..., (partial
+z_( N- 1)) / (partial z_( N-2 )) ) eq.triple D_( i )$:
+$
+  (partial L) / (partial x_( i )) = g_( j )SEGPROD_( j i ) (D_( j ))(partial z_( i )) / (partial x_( i )) ,
+$
+and the $SEGPROD$ can be computed via $CUMPROD$s and masking, which are all GPU friendly, as are the
+dot-product with $g_( j )$ and the element wise product with $(partial z_( i )) / (partial x_( i
+))$.
+This is roughly equivalent to what is done in @chiuPscanDiff.
+
+
 
 In general, the entire backwards depends on all inputs $x_( i )$, knowing the values of the entire
 associative scan $z_( i )$, and computing all $cal(O)( N^( 2 ) )$ values of $CUMPROD_( j )((partial z_( j )) / (partial z_( j-1 )),
@@ -4299,12 +4356,13 @@ $
   (partial L) / (partial x_( i )) = g_( j )theta(j>=i) partial_( z_( i ) ) a(z_( i ), z_( i+1:j+1 )) times partial_( x_( i ) )a(z_(i -1 ), x_( i ))
 $
 this is seen to be equivalent to $a$ having the property that $partial_( z_( i ) ) a(z_( i ), z_(
-i+1:j+1 ))= x_( i )y_( j )$.
+i+1:j+1 ))= x_( i )y_( j )$ for some factors $x, y$.
 
 
 == Convolutions
 
-Following `torch` conventions, a vanilla batched $D$-dimensional convolution involves:
+Following `torch` conventions, a vanilla batched $D$-dimensional convolution#footnote[These are more
+  precisely called cross-correlations or sliding-dot-product operations in some fields.] involves:
 - A $(D+2)$-dimensional input $x_( b c_("in") i_( 0 ) ... i_( D-1 ) )$.
 - A $(D+2)$-dimensional weight $W_(c_( "out" )c_( "in" ) k_( 0 ) ... k_( D-1 ) )$.
 - A $1$-dimensional bias $b_(c_( "out" ))$.
@@ -4312,13 +4370,41 @@ Following `torch` conventions, a vanilla batched $D$-dimensional convolution inv
 
 Here, $c_( "in" ) in {0, ..., C_( "in" )-1}, c_( "out" ) in {0, ..., C_( "out" )-1}$ are the in- and
 out-channels, respectively, the input dimensions $i_( n )in {0, ..., I_( n )-1}$ and the kernel
-sizes $k_( n )in {0, ..., K_( n ) -1}$. Some padding is often added to the inputs, but we will
-assume that has already been done to simplify matter. The output dimensions range over $j_( n )in
-{0, ..., J_( n )-1}$, where $J_( n ) = I_( n ) - K_( n )$, and with
+sizes $k_( n )in {0, ..., K_( n ) -1}$: this defines the tuple $mono("kernel_size") = (K_0, ..., K_( D-1 ))$. Some padding is often added to the inputs, but we will
+assume that has already been done to simplify matters for now. The output dimensions range over $j_(
+n )in {0, ..., J_( n )-1}$, where $J_( n ) = I_( n ) - K_( n )$, and with
 $
   z_( b c_("out") j_( 0 ) ... j_( D-1 ) ) & = b_( c_( "out" ) )+ W_(c_( "out" )c_( "in" ) k_( 0 ) ... k_( D-1 ) ) x_( b c_("in") (j_( 0 ) + k_( 0 )) ... (j_( D - 1 ) + k_( D-1 )) )
 $
-leaving sums implicit (with sums involving invalid index value giving zero).
+leaving sums implicit (with sums involving invalid index values giving zero).
+
+=== Options
+
+There are various options which generalize the vanilla convolution. Each of these are integers
+specified per-dimension.
+- $mono("padding")$: Applies $mono("padding")$ units of padding to both sides of the input
+  dimension. Can be zeros, wrapping, etc.
+- $mono("stride")$: Determines how many units the filter advances in the given direction. Vanilla
+  convolutions have $mono("stride")=1$.
+- $mono("dilation")$: Effectively expands the $mono("kernel_size")$ by the dilation factor by making
+  the kernels sparsely applied to the inputs. $mono("dilation")-1$ input elements are skipped over
+  between kernel entry applications. Vanilla convolutions have $mono("dilation")=1$.
+
+
+=== Output Shape
+
+Consider the case of a 1D conv over a dimension of size $L_( "in" )$; all other cases are similar.
+The $mono("padding")$ is applied to both sizes of this dimension, so the effective input size is
+$L_( "in" )+2 times mono("padding")$. The kernel itself spans $mono("dilation") times
+(mono("kernel_size")-1)+1 eq.triple mono("eff_kernel_size")$ units#footnote[So, we need $L_( "in" )+2 times mono("padding") >= mono("dilation") times
+(mono("kernel_size")-1)+1$ to have a valid convolution.], leaving an output dimension of size:
+$
+  L_( "out" )&= 1 + floor.l((L_( "in" )+ 2 times mono("padding") - mono("dilation") times (mono("kernel_size") -1) - 1 ) / (mono("stride")) )\
+  &=1 + floor.l((L_( "in" )+ 2 times mono("padding") - mono("eff_kernel_size")) / (mono("stride")) )
+$
+
+
+=== Backwards
 
 Given the upstream gradient $ (partial cal(L))/ (partial z_( b c_("out") j_( 0 ) ... j_( D-1 ) ) )
 = g_( b c_("out") j_( 0 ) ... j_( D-1 ) )$, the non-trivial downstream derivatives are
