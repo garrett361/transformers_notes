@@ -39,8 +39,8 @@
 )
 
 #show figure.where(kind: table): set figure.caption(position: top)
-
 #show figure.where(kind: image): set figure.caption(position: bottom)
+#show figure.caption: set align(left)
 
 
 #let content-to-string(content) = {
@@ -2814,7 +2814,277 @@ in the subsequent iterations:
   and no rank serves as a bottleneck.
 
 == Pipeline Parallelism <subsec_pipe_parallelism>
-TODO
+
+Pipeline Parallelism splits the model along the layer dimension, putting different layers on
+different GPUs in the simplest cases. Model and optimizer state memory is thereby saved, per GPU.
+
+While this also shards activation memory, efficiency demands that multiple batches be concurrently
+in flight with all GPUs processing data at all times to avoid any bubbles. This means that efficient
+pipeline parallelism does not qualitatively decrease activation memory usage, relative to
+ZeRO-3/FSDP.
+
+All of the complication is in the pipeline schedule. Some terminology and notation:
+- Gradient aggregation is used in pipeline parallelism, with $M$ concurrent "minibatches" in flight
+  per-pipeline. Each minibatch may contain more than one example batched together, but different
+  elements in the minibatch may be at different stages of the pipeline.
+- The pipeline parallel degree $P$ is the number of GPUs used in the scheme.
+- $t_f$ and $t_b$ are the times for it would take for the _entire_ model, respectively, perform a forward and
+  backwards pass#footnote[$t_b approx 2 t_f $ is generally a good
+  approximation, which we will sometimes use.] on a single minibatch on a single GPU (assuming it had the memory available to do so).
+- We define the bubble efficiency ratio $0<= epsilon_( b )<=1$ as the ratio of the ideal time for
+  the entire workload to the actual time $epsilon_( b )= t_( "ideal" ) \/ t_( "actual" )$, where the
+  ideal (and unachievable) compute time for $P$ GPUs is
+$
+  t_( "ideal" ) = M / P times (t_( f ) +t_( b )).
+$
+- We assume that the work per pipeline stage is constant.
+
+
+Having $M >= P$ is typical and is a strict necessity for efficient usage of simple pipeline
+strategies, but the interleaved schedules of @sec_interleaved_pp help alleviate this requirement and
+we do not assume this relation holds. We largely ignore communication costs in the simplified
+analysis below.
+
+=== Naive Schedule: The Worst
+<sec_naive_pp>
+
+The most naive, and worst, schedule is to do the computation maximally sequentially. See
+@fig_naive_pipeline. However, it is a simple case to analyze and lets us introduce useful notation.
+Any number of minibatches $M$ can be in flight with this strategy, up to memory constraints.
+
+In this strategy, the pipeline stages (indexed by $p in {0, ..., P-1}$) proceed in order, with $p=0$
+performing the forward on all $M$ minibatches, then $p=1$ taking over starting from the communicated
+activations, etc. The backwards is just in the reversed order.
+
+For the present case, every GPU computes is idle for $P-1$ out of $P$ stages and each state performs
+a total of $t_( "ideal" )$ compute, so the total actual time is $t_( "actual" )=P $ giving:
+$
+  epsilon^( "naive" )_( b ) = 1 / P,
+$<eq_naive_pp_eff>
+which reduces to $e_( b ) =1 $ as $P --> 1$, as it should.
+
+
+#figure(
+  image("figures/naive_pipeline.png"),
+  caption: [
+    Diagram of naive pipelining, from @ultrascale_playbook.
+  ],
+)
+<fig_naive_pipeline>
+
+
+=== All Forward All Backward
+<sec_afab_pp>
+
+
+The easiest improvement over the naive schedule of @sec_naive_pp is to separate the minibatches. The
+previous approach processed all $M$ batches in stage $p=0$ before passing any activations along.
+Better is to process each minibatch item individually and pass on activations immediately upon
+availability. See @fig_afab_pipeline. Any number of minibatches $M$ can be in flight with this
+strategy, up to memory constraints. This is the GPipe algorithm
+@huang2019gpipeefficienttraininggiant.
+
+
+With this strategy the final rank does not need to wait as long to start computing: after $(P-1)/P times t_( f )$
+it receives its first data, a reduction by a factor of $M$. The last rank performs all of its compute in
+time $M/ P times (t_( f ) + t_( p )) = t_( "ideal" )$, and it takes another $(P-1)/P times t_( b )$ for the previous
+ranks to finish the backwards pass on the last minibatch. The total time is then
+$
+  t^( "AFAB" )_( "actual" ) &= (P-1) / P times (t_( f ) + t_( b )) + t_( "ideal" )\
+  &= (P-1) / M times t_( "ideal" ) + t_( "ideal" )
+$
+yielding
+$
+  epsilon^( "AFAB" )_( b ) = 1 / (1 + (P-1) / M) ,
+$
+<eq_afab_pp_eff>
+which reduces to @eq_naive_pp_eff when $ M=1$ and goes to unity as $M --> oo$, as it should.
+
+
+#figure(
+  image("figures/afab_schedule.png"),
+  caption: [
+    Diagram of the AFAB schedule, from @ultrascale_playbook.
+  ],
+)
+<fig_afab_pipeline>
+
+=== 1F1B
+<sec_1f1b_pp>
+
+The next improvement is to not wait around until all $M$ microbatches have completed to start the
+backwards. This schedule does not reduce the bubble over that of @sec_afab_pp, but it allows us to
+release activation memory sooner. See @fig_1f1b_pipeline. Arbitrary minibatch size $M$ can be
+handled with this strategy, but only $P$ minibatches will be in flight at any given time, as
+explained below. This strategy is used in PipeDream @harlap2018pipedreamfastefficientpipeline.
+
+The final ranks starts the backwards on its first minibatch immediately after completing the
+forward, and then alternates between forwards and backwards passes. The second-to-last stage,
+$p=P-2$ is expected to be ready to process the gradients computed by the final stage upon
+availability, which limits the total pipeline to have $P$ total minibatches in flight. Once the
+gradients for a minibatched are processed by the lead $p=0$ stage, a new set of $P$ minibatches can
+be added to the queue, with the lead rank alternating between processing new minibatches and
+processing gradients passed from previous minibatches. Because the backwards iterations tend to be
+nearly twice as long as the forwards, this strategy can be very effective at closing the bubble
+during the "steady state" regime.
+
+The time for the final rank to receive its first data is the same as @sec_afab_pp, as are the total
+compute time on the final rank and the time for the backwards on the last minibatch to be
+calculated. Thus, the bubble efficiency is the same as @eq_afab_pp_eff:
+$
+  epsilon^( "1F1B" )_b & = 1 / (1 + (P-1) / M ) .
+$
+<eq_1f1b_pp_eff>
+
+#figure(
+  image("figures/1f1b_schedule.png"),
+  caption: [
+    Diagram of the 1F1B schedule, from @ultrascale_playbook. Here, the minibatch size is $M=2P$.
+  ],
+)
+<fig_1f1b_pipeline>
+
+
+=== Interleaved Schedules
+<sec_interleaved_pp>
+
+The 1F1B schedule of @sec_1f1b_pp did not improve upon the time efficiency of the AFAB schedule of
+@sec_afab_pp. The fixed time cost of the final stage to compute its forwards and backwards passes
+($t_( "ideal" )$) means that the only way to improve is to get the final GPU work
+earlier in the pipeline process and/or to shorten up the remaining compute time required once the
+final GPU finishes its final backwards pass.
+
+One way to achieve this is to change the GPU-to-stage mapping. Instead of a simple linear mapping
+with across $P$ GPUs and $P$ stages (stages and GPUs have been synonymous thus far), we can break
+the model up into $v times P$ stages assigned to the GPUs in round-robin fashion: GPU $p$ gets stages
+$(p,p + P, ..., p +  (v-1) P)$. Stages still pass activations around in order, which now cyclically
+loops over GPUs. See @fig_interleaved_pipeline, as well as
+@narayanan2021efficientlargescalelanguagemodel @lamypoirier2023breadthfirstpipelineparallelism.
+
+The advantage is that each GPU now only takes $t_( f ) \/ (v P)$ time per stage per minibatch and
+hence the final GPU in the pipeline parallel group only waits time $(P-1) times t_( f ) \/(v P)$ to
+start computing, an improvement by a factor of $v$. The savings on the backend are analogous and the
+efficiency works out to be:
+$
+  epsilon^( "inter" )_( b ) &= 1 / (1 + (P-1) / (M v))
+$
+The tradeoff here is more
+communication, which was not accounted for above and limits us from taking $v --> oo$ (in addition
+to the finiteness of the model). Ignoring these costs momentarily, one important takeaway from this
+construction is that we can get an efficient $epsilon approx 1$ workload even when there are fewer
+minibatches than GPUs $M < P$ by taking $v$ large enough, which is not possible for any of the other
+strategies thus far.
+
+#figure(
+  image("figures/interleaved_schedule.png"),
+  caption: [
+    Diagram of the interleaved schedule, from @ultrascale_playbook. This is specifically a
+    depth-first schedule, which performs the backwards as soon as possible. A breadth-first schedule
+    would finish all forwards before adding more backwards passes.
+  ],
+)
+<fig_interleaved_pipeline>
+
+
+
+=== Depth-First vs. Breadth-First Scheduling and Data Parallelism
+<sec_depth_vs_breadth_pp>
+
+The AFAB and 1F1B strategies only differed in their scheduling order: the former performs all
+forwards before performing any backwards, while the latter performs the backwards as soon as
+possible. As mentioned, the latter helps reduce the required activation. But when pipeline
+parallelism is combined with data parallelism, there AFAB type schedules gain an advantage: the
+entire backwards for the late stage layers finishes earlier, allowing us to kick off the
+data-parallel gradient reductions sooner, allowing for more compute-communication overlap.
+
+These alternatives are more generally referred to as depth-first and breadth-first schedules
+@lamypoirier2023breadthfirstpipelineparallelism and apply equally well to the interleaved schedules
+of @sec_interleaved_pp.
+
+There are also in-between options: rather than running the minimum number of forwards before a
+backwards (depth-first) or the maximum (breadth-first), it is possible to run schemes between these
+extremes. Llama3 @grattafiori2024llama3herdmodels uses an interleaved schedule with one of these
+middle strategies.
+
+
+=== The Zero-Bubble Strategies
+<sec_zb_pp>
+
+The (aspirationally named) zero-bubble @qi2023zerobubblepipelineparallelism strategies improve upon
+pipeline schedules by breaking down the backwards pass into those operations which populate
+gradients on learnable weights and those which compute gradients of other intermediates. The two can
+be scheduled independently (at the cost of holding activations for longer). See @fig_zb_pipeline.
+
+These zero-bubble strategies do not reduce the warm-up bubble, but rather help reduce the bubble on
+the backend. They key is that it is only the gradients with respect to intermediates which must be
+computed in a strict causal order. By prioritizing computing these first, the final rank can compute
+all of these blocking gradients earlier, allowing earlier ranks to also compute their final
+gradients earlier, and filling the previously bubble-filled backend time steps of the later ranks
+with remaining weight gradient computations.
+
+
+In order to get a formula for the efficiency, assume we are in the maximally advantageous scenario
+where all activation and gradient compute on the early ranks can be overlapped with the computation
+for the final rank's weight gradients which were saved for last. This cuts out the entire backend
+bubble, giving
+$
+  t^( "zb" )_( "actual" ) = (P-1) / P times t_( f ) + t_( "ideal" ) \
+  epsilon^( "zb" )_( b ) = 1 / (1 + (P-1 ) / M - ((P-1) t_( b )) / (P t_( "ideal" ) ))
+$
+For instance, if the rest of the pipeline for the activation's backward passes takes relatively
+little time, then it can e
+
+
+#figure(
+  image("figures/zb_schedules.png"),
+  caption: [
+    Diagram of two zero-bubble schedules, from @qi2023zerobubblepipelineparallelism (by way of
+    @ultrascale_playbook). In the top diagram, the backwards-for-intermediates steps in light blue
+    (`B` in the legend) finish before the green backwards-for-weights (`W` in the legend), decreasing
+    the wait-times for early stages. See the light-blue boxed marked with an 8. The bottom strategy
+    incorporates a non-standard protocol for the optimizer steps. These two stages are approximately
+    depth-first and breadth-first zero-bubble strategies, respectively.
+  ],
+)
+<fig_zb_pipeline>
+
+
+=== DualPipe
+<sec_dualpipe_pp>
+
+The warmup-stage bubble is unavoidable, as a consequence of the causal dependencies of the typical
+model, but it can be mitigated by moving to a double-ended pipeline structure. DualPipe
+@deepseekai2025deepseekv3technicalreport uses this strategy. It isn't described in detail, but seems
+to be the following. See @fig_dualpipe_pipeline.
+
+Create a double-ended pipeline setup on $P$ ranks (with both $P$ and $M$ even) with rank $p$
+assigned two stages: $(p, P-p-1)$. E.g., both the lead and last ranks get the zeroth and final
+stages of the model. Memory costs are now only reduced by $P/2$, rather than $P$. Minibatches are
+injected into the pipeline in pairs, one at rank 0 and the other at the final rank $P-1$. These
+follow the normal (non-interleaved) pipeline flow, albeit with the batches injected at the final
+rank passing in the reversed rank order. Ranks $(P/ 2 -1, P/2)$ are now the ranks to receive work
+last so the initial wait is reduced to $ (P/2 -1) times t_( f ) \/ P$. These middle ranks then
+perform $t_( "ideal" )$ computation#footnote[Since for every mini batch they compute only one of $P$
+  stages] and then need to wait time $ (P/2 -1) times t_( b ) \/ P$ for the downstream ranks to
+finish their remaining backwards work. Total time and efficiency:
+$
+  t^( "dual" )_( f ) &= (P / 2 -1) / P times (t_( f ) + t_( b )) + t_( "ideal" )\
+  epsilon^( "dual" )_( b ) &= 1 / (1 + (P\/2 -1) / M)
+$
+This is a greater time efficiency per GPU, but at the cost of doubled memory per GPU.
+
+
+The more important aspect of DualPipe is how it manages to overlap communications and compute,
+leveraging both zero-bubble type decompositions and new innovation; see
+@deepseekai2025deepseekv3technicalreport for more details.
+
+#figure(
+  image("figures/dualpipe_schedule.png"),
+  caption: [
+    Diagram of the DualPipe schedule, from @deepseekai2025deepseekv3technicalreport.
+  ],
+)
+<fig_dualpipe_pipeline>
 
 = Vision
 <vision>
@@ -3296,7 +3566,7 @@ TODO
 
 #show: appendix
 
-= Conventions and Notation
+= ionventions and Notation
 <app_conventions>
 We loosely follow the conventions of @korthikanti2022reducing. Common
 parameters:
@@ -3318,6 +3588,8 @@ parameters:
   length at inference time.])
 
 - $L$: number of transformer layers
+
+- $M$: number of minibatches for pipeline parallelism
 
 - $N _"params"$: total number of model parameters
 
