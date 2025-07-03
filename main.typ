@@ -2816,11 +2816,12 @@ in the subsequent iterations:
 == Pipeline Parallelism <subsec_pipe_parallelism>
 
 Pipeline Parallelism splits the model along the layer dimension, putting different layers on
-different GPUs in the simplest cases. Model and optimizer state memory is thereby saved, per GPU.
+different GPUs in the simplest cases. Model and optimizer state memory is thereby saved by sharding
+the costs across GPUs.
 
 While this also shards activation memory, efficiency demands that multiple batches be concurrently
 in flight with all GPUs processing data at all times to avoid any bubbles. This means that efficient
-pipeline parallelism does not qualitatively decrease activation memory usage, relative to
+pipeline parallelism does not parametrically decrease activation memory usage, relative to
 ZeRO-3/FSDP.
 
 All of the complication is in the pipeline schedule. Some terminology and notation:
@@ -2853,11 +2854,12 @@ The most naive, and worst, schedule is to do the computation maximally sequentia
 Any number of minibatches $M$ can be in flight with this strategy, up to memory constraints.
 
 In this strategy, the pipeline stages (indexed by $p in {0, ..., P-1}$) proceed in order, with $p=0$
-performing the forward on all $M$ minibatches, then $p=1$ taking over starting from the communicated
-activations, etc. The backwards is just in the reversed order.
+performing the forward on all $M$ minibatches at once, then $p=1$ taking over starting from the
+communicated activations, etc. The backwards is just in the reversed order.
 
-For the present case, every GPU computes is idle for $P-1$ out of $P$ stages and each state performs
-a total of $t_( "ideal" )$ compute, so the total actual time is $t_( "actual" )=P $ giving:
+For the present case, every GPU computes is idle for $P-1$ out of $P$ stages and each stage performs
+a total of $t_( "ideal" )$ compute, so the total actual time is $t_( "actual" )=P times t_("ideal")$
+giving:
 $
   epsilon^( "naive" )_( b ) = 1 / P,
 $<eq_naive_pp_eff>
@@ -3073,10 +3075,9 @@ $
 $
 This is a greater time efficiency per GPU, but at the cost of doubled memory per GPU.
 
-
 The more important aspect of DualPipe is how it manages to overlap communications and compute,
-leveraging both zero-bubble type decompositions and new innovation; see
-@deepseekai2025deepseekv3technicalreport for more details.
+leveraging both zero-bubble type decompositions and new innovations specific to their architecture;
+see @deepseekai2025deepseekv3technicalreport for more details.
 
 #figure(
   image("figures/dualpipe_schedule.png"),
@@ -3224,6 +3225,7 @@ There are two dominant schemes:
 Layered on top of this choice are the details of the routing mechanisms.
 
 === Token Choice vs Expert Choice
+
 <token-choice-vs-expert-choice>
 Token and expert choice both introduce a tensor
 $W _( d e ) in RR ^( D times N _( "ex"
