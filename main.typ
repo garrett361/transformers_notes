@@ -3758,7 +3758,7 @@ following is from the
 <nvidia-gpu-architecture>
 NVIDIA GPUs consist of some amount of relatively-slow off-chip DRAM
 memory#footnote[This is the number usually reported when discussing a
-given GPU, e.g. 32GiB for the top-of-the-line A100], relatively-fast
+given GPU, e.g. 80GiB for the top-of-the-line A100], relatively-fast
 on-chip SRAM, and a number of #strong[streaming multiprocessors] (SMs)
 which perform the parallel computations. Inside more-recent GPUs, the
 SMs carry both “CUDA cores\" and \"Tensor cores\", where the latter are
