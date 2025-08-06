@@ -160,8 +160,6 @@
   doc,
 )
 
-
-
 /* https://github.com/typst/typst/discussions/4031#discussioncomment-9258528 */
 #let appendix(body) = {
   set heading(numbering: "A.1", supplement: [Appendix])
@@ -3580,7 +3578,8 @@ TODO
 
 #show: appendix
 
-= ionventions and Notation
+
+= Conventions and Notation
 <app_conventions>
 We loosely follow the conventions of @korthikanti2022reducing. Common
 parameters:
@@ -3759,6 +3758,83 @@ of shape `X.shape=Size(R, ...)` such that the tensor on rank `r` is `x=X[r]`. Th
   $T_x = T_((macron(r) y))$, then an over the $y$ index produces
   produces the tensor $T_(z macron(r))$ defined by
   $T_(z macron(r)) = T_x$ on all workers. E.g. rank `r` receives `x_out = X.reshape(X.shape[1], R, X.shape[:2])[:,r]`.
+
+= Device Meshes <app_device_meshes>
+
+
+Complex sharding schemes are often expressed in terms of device meshes. A `device_mesh` describes
+the various communication groups that each of the `R` ranks involved in the compute belongs to. In
+the usual case, `device_mesh` has `R` elements in it, one for each rank in the group, e.g. it
+contains the values in `range(R)`. If there are `g` independent communication groups in the mesh,
+then `device_mesh` will be `g`-dimensional , where the sizes of each dimension (`device_mesh.shape` =
+`(g_0, g_1, ...)`) divides `R`.
+
+== Basic Example
+
+An example is helpful: given two 8-gpu nodes with FSDP within a node and pipeline parallelism across
+nodes, the `device_mesh` will typically be `(2, 8)`. Of course, `(8, 2)` is also valid, but the
+typical convention is that the rightmost dimension is contiguous in ranks (row-major, morally
+speaking) and hence rightmost dimension has the best locality#footnote[That is, FSDP communications
+  within this dimension stay within-node, for this setup.], which is what you want for the costly
+FSDP comms. Explicitly:
+
+$
+  mono("device_mesh") =
+  mat(delim:"[",
+  0, 1, 2, 3, 4, 5, 6, 7;
+  8, 9, 10, 11, 12, 13, 14, 15;
+)
+$
+
+== Slicing
+
+We can also discuss slices of a general `device_mesh`, which return the set of ranks which belong to
+the communication group corresponding to the given slice dimension. We follow the `torch`
+conventions. Slicing is useful when a given tensor only needs to be reduced over a subset of the
+ranks, for example. Slicing can be a confusing topic since:
+1. `device_mesh` slicing is not the same as tensor slicing
+2. The result of a slice is particular to there rank performing the slice.
+
+Assume that we give a name to each dimension of the mesh: say the `i`-th dimension of the mesh has
+size `g_i` and name `'n_i'`. The slice of the mesh over dimensions `('n_i', 'n_j', ...)` produces a
+new mesh of shape`(g_i, g_j, ...)` with `g_i * g_j * ... ` elements. On rank `r`, this slice
+contains the ranks belonging to the communication groups `('n_i', 'n_j', ...)` which rank `r` _also
+belongs to_, which is why the slice result is different on different ranks.
+
+More precisely, for each mesh axis there is a single index value for which the corresponding
+_tensor_ slice of the mesh contains a given rank `r`, and the `device_mesh` slice over a set of
+named axes corresponds to the submesh where all dimensions _not_ in this named set are restricted to
+these particular index values. A mouthful.
+
+For instance, the mesh of the previous section only contains rank `r=11` for the single-axis
+_tensor_ slices `device_mesh[1, :]` and `device_mesh[:, 3]` and on this rank the corresponding named
+device mesh slices are related to the tensor slices as:
+$
+  mono("device_mesh['pp']")|_( r=11 ) = mono("device_mesh")[:, 3] = [3, 11] \
+  mono("device_mesh['fsdp']")|_( r=11) = mono("device_mesh")[1, :] = [8, 9, 10, 11, 12, 13, 14, 15]
+.
+$
+
+A contrived 3D example: PP+CP+FSDP on a 8-gpu node, in that order. The mesh looks like
+$
+  mono("device_mesh") =
+  [[[0, 1], [2, 3]], [[4, 5], [6, 7]]] .
+$
+On rank `r=0`, the 2D CP+FSDP named slice is related to the tensor slice via
+$
+  mono("device_mesh['cp', 'fsdp']")|_( r=0 )=
+  mat(delim:"[",
+  0, 1;
+  2, 3;
+)
+  = mono("device_mesh")[0, :, :]
+$
+and the 1D FSDP slice is
+$
+  mono("device_mesh['fsdp']")|_( r=0 )= [0, 1] = mono("device_mesh")[0, 0, :] .
+$
+
+
 
 = Hardware
 <hardware>
@@ -4887,9 +4963,7 @@ RULER @hsieh2024rulerwhatsrealcontext: A collection of long-context specific sub
 See @fig_RULER for examples.
 
 
-#figure(
-  image("figures/RULER.png"),
-)
+#figure(image("figures/RULER.png"))
 <fig_RULER>
 
 
