@@ -627,9 +627,23 @@ loss = F.cross_entropy(outputs_flat, targets_flat)
 ```
 
 == Architecture and Algorithm Variants
+
 <architecture-and-algorithm-variants>
 There are, of course, many variants on the basic architecture. Some
 particularly important ones are summarized here.
+
+=== RMS Norm <subsec_rms_norm>
+
+RMS Norm @zhang2019rootmeansquarelayer is a minimized layer norm (@layer_norm) which skips removing
+the mean, adding the bias, and only divides by the mean squared activation:
+$
+  z_( b s d ) & <- ( (z_( b s d ) ) / sqrt( epsilon + 1 / D sum_d z_( b s d )^( 2 )  ) ) gamma_d
+  equiv mono("RMSNorm")_d z_( b s d ) .
+$
+Like in the layer norm case, the weight $gamma_( d )$ is again redundant if immediately followed by
+a linear layer.
+
+
 
 === GLU Variants<subsec_glu_variants>
 In @shazeer2020gluvariantsimprovetransformer, Shazeer advocated for
@@ -944,6 +958,17 @@ guideline than a strict recipe.]:
   ],
 ) <algo_fa_bwd_advanced>
 
+=== Implementation Notes
+
+In addition to the final outputs, $z_( s a h )$, typical flash attention implementations will also
+return the logarithm of the sum of exponentials (minus the max value) which provide the normalization factor. Usually
+called `lse` or `losgumexp`:
+$
+  ell_( a s ) &= log(sum_( s\' ) exp(q_( s a h ) k_( s\' a h ) - max_( s\' ) (q_( s a h ) k_( s\' a h )))) \
+  z_( s a h ) &= exp(q _( s a h\' ) k_( s\' a h\' ) - max_( s\' ) (q_( s a h ) k_( s\' a h )) - ell_( a s )) v_( s\' a h )
+$
+This quantity is important and frequently used, e.g. in distributed attention implementations.
+
 
 === Linear Attention <subsec_linear_attn>
 Linear attention @katharopoulos2020transformersrnnsfastautoregressive
@@ -978,6 +1003,7 @@ for each token position:
 $B_(d' d)^s = CUMSUM_s (k_(s d') v_(s d))$, effectively.
 Flash-attention-like techniques can be used to avoid materializing all
 of the $cal(O) ( S D ^2 )$ elements at once.
+
 
 = State Space Models
 
@@ -3812,7 +3838,7 @@ device mesh slices are related to the tensor slices as:
 $
   mono("device_mesh['pp']")|_( r=11 ) = mono("device_mesh")[:, 3] = [3, 11] \
   mono("device_mesh['fsdp']")|_( r=11) = mono("device_mesh")[1, :] = [8, 9, 10, 11, 12, 13, 14, 15]
-.
+  .
 $
 
 A contrived 3D example: PP+CP+FSDP on a 8-gpu node, in that order. The mesh looks like
