@@ -755,6 +755,42 @@ where $ theta_d & = 10^(- 8 d \/ D) med . $ The RoPE memory costs are thus $cal(
 @eq_rope] can be computed in $cal(O) ( B S D )$ time, rather than $cal(O) ( B S D ^2 )$, as it would
 be for a general rotation matrix. See the paper for explicit expressions.
 
+While not obvious, the 2x2 form of the RoPE rotations above is in fact completely
+general#footnote[Thanks to Davis Wertheimer for teaching me these facts.], after accounting for the
+aribtitrariness inherent in the key and query projections. A general $S O(N)$ rotation can be
+expressed in the form $R = C dot B dot C^T$ where $C in S O (N)$ and $B$ is block diagonal with 2x2
+or 1x1 blocks. This can be demonstrated from the real Schur dedomposition specialized on $S O (N)$
+elements or through the
+#link("https://leimao.github.io/blog/Matrix-Block-Diagonalization-Theorem/")[block diagonal
+  decomposition] after using specific properties of $S O (N)$ eigenvectors and
+eigenvalues#footnote[Namely, that eigenvalues generically come in pairs of phases $exp(plus.minus i
+  theta)$, the real and imaginary components of eigenvectors have the same norm, and the real and
+  imaginary components of eigenvectors belonging to different eigenvalue pairs are all mutually
+  orthogonal.]. From this decomposition, we are guaranteed that we can write $R(1) = C dot B dot
+B^T$, and hence $R(s)=R(1)^s=C dot B^s dot C^T$ satisfies all conditions we require, and the `C`
+factors can be absorbed into the key and query projectors without loss of generality.
+
+==== RoPE Implementation Notes
+
+There are two common implementation strategies which (annoyingly) differ from each other in
+important ways.
+
+*HuggingFace Style*: In this implementation, cosine and sines of shape `(seqlen, head_dim)` are
+provided, $cos_( s h )$ and $sin_( s h  )$. In this approach, rather than pairing up consecutive
+dimensions $h, h+1$ to perform the 2x2 rotations over, we pair up head dimension indices $h,h +
+H/2$. So, the rotated queries, say, are given by
+$
+  q_( s h )\' &= q_( s h ) cos_( s h ) + overline(q)_( s h ) sin_( s h ) \
+  overline(q)_( s h ) & eq.triple CAT([ - q_( s[H/2:] ), q_( s[:H/2] )])
+$
+
+*Complex Style*: In this implementation, phases $p_( s d ) = exp(i theta _( s d ))$ are provided,
+where the $d$ index is `head_dim/2` = $H/2$ dimensional. The query, say, is then reshaped to have a
+final two-dimensional axis, $q_( s h ) -->  q _( s d t)$, $t in {0, 1}$ where the last two axes are
+interpreted as the real and imaginary components of a complex tensor, respectively: $q _( s d t) -->
+overline(q)_(s d)$. The RoPE-rotated queries then come from taking the real and imaginary parts of
+$overline(q)_(s d)  exp(i theta _( s d )) $ and reshaping into a `(seqlen, head_dim)` shaped tensor.
+
 === Flash Attention <subsec_flash_attention>
 Flash Attention @dao2022flashattention@dao2023flashattention2 optimizes
 the self attention computation by never materializing the
