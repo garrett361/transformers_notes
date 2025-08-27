@@ -708,7 +708,7 @@ extend the viable context length by more clever mechanisms with stronger
 implicit biases.
 
 RoPE and its variants can be motivated by a few natural conditions.
-Given the queries and keys for an input $q_(s d) \, k_(s d)$
+Given the queries and keys for an input $q_(s h) \, k_(s h)$
 (suppressing batch indices), the corresponding attention scores
 computation $a_(s s') (q_s \, k_(s'))$ should reasonably satisfy the
 below:
@@ -725,34 +725,34 @@ below:
   standard normalization.
 
 These conditions suggest a very natural family of solutions: just rotate
-the usual queries by some fixed element of $S O (d)$ using a generator
+the usual queries by some fixed element of $S O (H)$ using a generator
 proportional to the position index and rotate the keys by the conjugate
-element. That is, replace the $q_(s d) \, k_(s d)$ by
+element. That is, replace the $q_(s h) \, k_(s d)$ by
 $
-  q'_( s d )&eq.triple [e^( i s hat(n)dot T ) ]_( d d' ) q_( s d' ) eq.triple R(s)_( d d' ) q_( s d' ) \
-  k'_( s d )&eq.triple [e^( -i s hat(n)dot T ) ]_( d d' ) k_( s d' ) eq.triple R(s)^( dagger )_( d d' ) k_( s d' ) ,
+  q'_( s h )&eq.triple [e^( i s hat(n)dot T ) ]_( h h' ) q_( s h' ) eq.triple R(s)_( h h' ) q_( s h' ) \
+  k'_( s h )&eq.triple [e^( -i s hat(n)dot T ) ]_( h h' ) k_( s h' ) eq.triple R(s)^( dagger )_( h h' ) k_( s h' ) ,
 $<eq_rope>
 which makes their dot-product is
-$q'_(s d) k'_(s' d) = R (s - s ') q_(s d) k_(s d')$.
+$q'_(s h) k'_(s' h) = R (s - s ') q_(s h) k_(s h')$.
 
-Performing the above computation with a dense element of $S O (D)$ is
+Performing the above computation with a dense element of $S O (H)$ is
 infeasible, as it would require a new dense matrix-multiply by a unique
-$D times D$ matrix at each sequence position#footnote[For one, the
-$cal(O) ( S D ^2 )$ memory cost to store the matrices
-would be prohibitive. The FLOPs cost is only $2 B S D^2$, the same as
+$H times H$ matrix at each sequence position#footnote[For one, the
+$cal(O) ( S H ^2 )$ memory cost to store the matrices
+would be prohibitive. The FLOPs cost is only $2 B S H^2$, the same as
 for other matrix multiplies, but because different matrices are needed
 at position (it's a batched matrix multiply), these FLOPs would be much
 more GPU memory-bandwidth intensive.] In the original RoPE paper, the
 rotation $hat(n)$ was chosen such that the matrices are $2 times 2$
-block-diagonal with the entries of the form#footnote[If $D$ isn't even,
+block-diagonal with the entries of the form#footnote[If $H$ isn't even,
 the vectors are padded by an extra zero.]
 $
-  R (s)_([d : d + 2] [d : d + 2]) & = mat(delim: "(", cos (s theta_d), - sin (s theta_d); sin (s theta_d), cos (s theta_d))
+  R (s)_([h : h + 2] [h : h + 2]) & = mat(delim: "(", cos (s theta_h), - sin (s theta_h); sin (s theta_h), cos (s theta_h))
 $
-where $ theta_d & = 10^(- 8 d \/ D) med . $ The RoPE memory costs are thus $cal(O) ( K D
-)$#footnote[A single RoPE buffer can be shared amongst all attention layers, amortizing the memory
+where $ theta_h & = 10^(- 4 h \/ H) med . $ The RoPE memory costs are thus $cal(O) ( K H
+)$ per attention head#footnote[A single RoPE buffer can be shared amongst all attention layers, amortizing the memory
     costs.]. The sparsity present in this constrained form of the RoPE matrices means that
-@eq_rope] can be computed in $cal(O) ( B S D )$ time, rather than $cal(O) ( B S D ^2 )$, as it would
+@eq_rope] can be computed in $cal(O) ( B S H )$ time, rather than $cal(O) ( B S H ^2 )$, as it would
 be for a general rotation matrix. See the paper for explicit expressions.
 
 While not obvious, the 2x2 form of the RoPE rotations above is in fact completely
@@ -761,7 +761,7 @@ aribtitrariness inherent in the key and query projections. A general $S O(N)$ ro
 expressed in the form $R = C dot B dot C^T$ where $C in S O (N)$ and $B$ is block diagonal with 2x2
 or 1x1 blocks. This can be demonstrated from the real Schur dedomposition specialized on $S O (N)$
 elements or through the
-#link("https://leimao.github.io/blog/Matrix-Block-Diagonalization-Theorem/")[block diagonal
+#link("https://leimao.github.io/blog/Matrix-Block-Hiagonalization-Theorem/")[block diagonal
   decomposition] after using specific properties of $S O (N)$ eigenvectors and
 eigenvalues#footnote[Namely, that eigenvalues generically come in pairs of phases $exp(plus.minus i
   theta)$, the real and imaginary components of eigenvectors have the same norm, and the real and
@@ -780,16 +780,79 @@ provided, $cos_( s h )$ and $sin_( s h  )$. In this approach, rather than pairin
 dimensions $h, h+1$ to perform the 2x2 rotations over, we pair up head dimension indices $h,h +
 H/2$. So, the rotated queries, say, are given by
 $
-  q_( s h )\' &= q_( s h ) cos_( s h ) + overline(q)_( s h ) sin_( s h ) \
-  overline(q)_( s h ) & eq.triple CAT([ - q_( s[H/2:] ), q_( s[:H/2] )])
+  q_( s h )\' &= q_( s h ) cos_( s h ) + overline(q)_( s h ) sin_( s h ) , space
+  overline(q)_( s h ) & eq.triple CAT([ - q_( s[H/2:] ), q_( s[:H/2] )]) space .
 $
 
-*Complex Style*: In this implementation, phases $p_( s d ) = exp(i theta _( s d ))$ are provided,
+*Complex Style*: In this implementation, phases $p_( s h ) = exp(i theta _( s h ))$ are provided,
 where the $d$ index is `head_dim/2` = $H/2$ dimensional. The query, say, is then reshaped to have a
-final two-dimensional axis, $q_( s h ) -->  q _( s d t)$, $t in {0, 1}$ where the last two axes are
-interpreted as the real and imaginary components of a complex tensor, respectively: $q _( s d t) -->
-overline(q)_(s d)$. The RoPE-rotated queries then come from taking the real and imaginary parts of
-$overline(q)_(s d)  exp(i theta _( s d )) $ and reshaping into a `(seqlen, head_dim)` shaped tensor.
+final two-dimensional axis, $q_( s h ) -->  q _( s h t)$, $t in {0, 1}$ where the last two axes are
+interpreted as the real and imaginary components of a complex tensor, respectively: $q _( s h t) -->
+overline(q)_(s h)$. The RoPE-rotated queries then come from taking the real and imaginary parts of
+$overline(q)_(s h)  exp(i theta _( s h )) $ and reshaping into a `(seqlen, head_dim)` shaped tensor.
+
+==== YaRN
+
+YaRN @peng2023yarnefficientcontextwindow is a commonly-used RoPE extension variant based on the
+following observations. Let $S$ be the original context length that the model was trained on and
+$S\'$ be the target length: $S\'>S$.
+
+First, assume that $theta_h= b^( -h/H ) eq.triple (2 pi)/lambda _( h)$ for some
+base#footnote[Typical default is $b=10^( 4 )$, as above.], so that the pair of heads#footnote[with
+  $h in {0, 2, 4, H-2}$.] $ {h, h+1}$ undergo a full rotation when used to describe a relative
+distance $s= lambda_( h )= 2 pi b^( h/H )$. Therefore, higher-indexed heads rotate over a longer
+token horizon, with the maximal horizon being $cal(O)( b )$. For context lengths $1<< S << b$, low
+head-index pairs undergo many rotations, making the RoPE mapping from relative distances to angle
+degenerate, while high head-index pairs undergo less than a full rotation, leading to the intuition
+that low head-index pairs will be better at capturing local distance information, while high-index
+pairs can better capture longer-distance features.
+
+
+When scaling up to lengths $S\'$, the most naive strategy is to rescale the overall angle: $theta_(
+h ) --> S/(S\')times theta_( h )$. This is referred to as _Positional Interpolation_, or PI, and
+ensures that the same maximal rotations are achieved when processing sequences of length up to $S\'$
+as were seen when originally only processing up to $S$. The naive PI strategy is empirically found
+to lead to degraded short-context performance. An alternative strategy is to instead rescale the
+base, $b--> kappa times b$ for some $kappa > 1$. The former strategy is a uniform dilation of the
+wavelength for all heads, while the latter performs a greater dilation for higher head indices. A
+choice of $kappa$ that connects the two strategies is to choose this parameter such that the angle
+for the higher head index, $theta_( H-2 )$, is the same in both cases. This is called the NTK-aware
+scheme.
+
+YaRN aims for a middle ground, with the criteria of preserving the wavelengths of the
+short-wavelength heads and linearly scaling the long-wavelength heads so that they undergo the same
+maximal degree of rotation over horizon $S\'$ as they previously did over $S$. That is:
+- If $lambda_( h ) << S$, do not adjust the wavelength.
+- If $lambda_( h ) >= S$, use linear interpolation, as in PI.
+Let $r_( h ) eq.triple (S)/lambda_( h ) $ be the number of rotations that head-pair idx $h$
+undergoes over the original context length. We specify two parameters#footnote[Typical: $alpha,
+  beta=1,32$.], $alpha < beta$, that demarcate the boundaries of the above regions and a linear
+interpolation function:
+$
+gamma_( h ) (r_( h )) = cases(
+0 "if" r_( h ) < alpha,
+(r - alpha)/ (beta -alpha) "if" alpha <=r_( h ) <= beta,
+1 "if" r_( h ) > beta,
+)
+$
+
+The new, YaRN wavelengths are then specified by a weighted sum of the PI and original wavelengths:
+$
+lambda\'_( h ) = (1 - gamma_( h )) times (S\')/S times lambda_( h ) + gamma_( h ) lambda_( h )
+$
+Therefore the high head-index/long-wavelength pairs ($gamma_( h ) --> 0$) get the full linear
+interpolation, while the low head-index pairs ($gamma_( h ) --> 1$) have unchanged wavelengths.  The
+head-index boundaries $h_( alpha ), h_( beta )$ for which $r_( h )= alpha$ and $r_( h )= beta$ are
+given by:
+$
+h_( alpha ) = H ln((S\')/(2 pi alpha)) / ln(b) , space
+h_( beta ) = H ln((S\')/(2 pi beta)) / ln(b)
+$
+
+In practice, it is found that YaRN scalings increase attentions scores. This can be counteracted by
+increasing the temperature, correspondingly. YaRN suggests scaling#footnote[Equivalent to scaling
+  the keys and queries by $0.1 ln((S\')/S) + 1$.] $T --> T / (0.1 ln((S\')/S) +
+1)^2$, found by a phenomenological fit.
 
 === Flash Attention <subsec_flash_attention>
 Flash Attention @dao2022flashattention@dao2023flashattention2 optimizes
