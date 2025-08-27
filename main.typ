@@ -739,7 +739,7 @@ Performing the above computation with a dense element of $S O (H)$ is
 infeasible, as it would require a new dense matrix-multiply by a unique
 $H times H$ matrix at each sequence position#footnote[For one, the
 $cal(O) ( S H ^2 )$ memory cost to store the matrices
-would be prohibitive. The FLOPs cost is only $2 B S H^2$, the same as
+would be significant. The FLOPs cost is only $2 B S H^2$, the same as
 for other matrix multiplies, but because different matrices are needed
 at position (it's a batched matrix multiply), these FLOPs would be much
 more GPU memory-bandwidth intensive.] In the original RoPE paper, the
@@ -749,11 +749,12 @@ the vectors are padded by an extra zero.]
 $
   R (s)_([h : h + 2] [h : h + 2]) & = mat(delim: "(", cos (s theta_h), - sin (s theta_h); sin (s theta_h), cos (s theta_h))
 $
-where $ theta_h & = 10^(- 4 h \/ H) med . $ The RoPE memory costs are thus $cal(O) ( K H
-)$ per attention head#footnote[A single RoPE buffer can be shared amongst all attention layers, amortizing the memory
-    costs.]. The sparsity present in this constrained form of the RoPE matrices means that
-@eq_rope] can be computed in $cal(O) ( B S H )$ time, rather than $cal(O) ( B S H ^2 )$, as it would
-be for a general rotation matrix. See the paper for explicit expressions.
+where $ theta_h & = 10^(- 4 h \/ H) med . $ The RoPE memory costs are thus $cal(O) ( K
+H)$#footnote[A single RoPE buffer can be shared amongst all attention layers and are broadcast
+  across all heads, amortizing the memory costs.]. The sparsity present in this constrained form of
+the RoPE matrices means that @eq_rope] can be computed in $cal(O) ( B S H )$ time, rather than
+$cal(O) ( B S H ^2 )$, as it would be for a general rotation matrix. See the paper for explicit
+expressions.
 
 While not obvious, the 2x2 form of the RoPE rotations above is in fact completely
 general#footnote[Thanks to Davis Wertheimer for teaching me these facts.], after accounting for the
