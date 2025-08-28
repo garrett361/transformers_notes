@@ -2041,11 +2041,12 @@ Start with the case where there is no recomputation activations. These
 are the #strong[model FLOPs] of @korthikanti2022reducing, as compared to
 the #strong[hardware FLOPs] which account for gradient checkpointing.
 
-==== : Forwards
+==== Multi-Head Attention: Forwards
 <forwards>
 The FLOPs costs:
 
-- Generating the query, key, and value vectors: $6 B S D^2$
+- Generating the query, key, and value vectors: $6 B S D^2$ for vanilla MHA, or $(2+mono("gqa"))
+  times B S D ^ 2 approx 2 B S D^( 2 )$ if using GQA (Sec. @subsec_grouped_attn) with $mono("gqa") = N_( k/v ) / N _( q )$.
 
 - Attention scores: $2 B D S^2$
 
@@ -2053,7 +2054,27 @@ The FLOPs costs:
 
 - Final projection: $2 B S D^2$
 
-==== : Forwards
+
+
+==== Mamba2: Forwards
+
+The forward-pass flops for a Mamba2 layers are as follows:
+
+1. Matmul for creating various intermediates: $4 E S D^2 times (1+ cal(O)(  (mono("n_groups")  N)/D, H/D))$
+2. Convolutions: $cal(O)( S D C)$
+3. Scan: $cal(O)( S D )$
+4. Out projections: $2S E D^( 2 )$
+
+Collecting the dominant $cal(O)(S D^( 2 ) )$ terms and assuming sequence lengths are short enough
+such that the $cal(O)( S^2 )$ MHA terms are negligible, we see that Mamba2 is $(6 E)/ (4 +
+mono("gqa"))$ times more expensive in terms of FLOPS. For the typical $E = 2, mono("gqa")<<1$
+values, this is a $approx 3 times$ difference.
+
+
+
+
+
+==== MLP: Forwards
 <forwards-1>
 Passing a through the layer, the FLOPs due to the first and second
 matrix-multiplies are equal, with total matrix-multiply FLOPs
