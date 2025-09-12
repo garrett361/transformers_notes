@@ -1105,20 +1105,97 @@ Flash-attention-like techniques can be used to avoid materializing all
 of the $cal(O) ( S D ^2 )$ elements at once.
 
 
-= State Space Models
+= Linear Attention
 
-<state-space-models>
-== Intro<sec_ssm_intro>
+<linear-attn>
+
+== Intro<linear-attn-intro>
 
 
 The all-to-all attention mechanism of transformers is a pain: $cal(O)( S^( 2 ) )$ compute at
-training time and $cal(O)( S )$ next-token generation. State space models return, more or less, to
+training time and $cal(O)( S )$ next-token generation. Linear attention models return, more or less, to
 the old LSTM type strategy of encoding the conditional history into finite-sized state. The dream is
 faster generation and better memory efficiency:
 - Parallelizable#footnote[Better parallelization support is what differentiated S4 models from their
   RNN/LSTM predecessors; see @rnns_and_ssm.] $cal(O)( S )$ training.
 - Constant $cal(O)( 1 )$ generation.
 - Sequence-length-independent state, reducing the inference-time memory bandwidth burden compared to the kv-cache; @sec_kv_cache.
+
+
+== General Structure
+
+We follow the unified discussion of @yang2025gateddeltanetworksimproving on linear attention models
+here, to get a general orientation.
+
+=== Simple Linear Attention
+The simplest linear attention variant comes from just removing the $SM$ operation. The linear
+attention outputs are of the form#footnote[We neglect the causal mask for simplicity.]:
+$
+  o_( s d ) = q_( s d\' ) k_( d\' s\' ) v_( s\' d ) space ,
+$<eq_linear_attn>
+with the crucial point being that the $d\'$ and $s\'$ sums can be done in any order, whereas for
+$SM$-attention the $d\'$ sum must be done first. The outputs can be therefore written as
+$
+  o_( s d ) &= S_(s d d \' )q_( s d\' ) space ,
+$
+where the state $S_(s d d\' )$ is recursively built up as#footnote[No sum over $s$ in the RHS of either of these expressions now.]
+$
+  S_( s d d\' ) & = S_( (s-1) d d\' ) + v_( s d )k_( s d\' ) space , space S_(-1 d\' d ) eq.triple 0 space .
+$<eq_linear_attn_state>
+This property enables $cal(O)( 1 )$ inference, since only the most recent state needs to be cached,
+rather that the full $cal(O)( S )$ KV-cache.
+
+This simplest version of linear attention is not very performant, especially at long sequence
+lengths, and a zoo of variants exists. Intuitively @schlag2021lineartransformerssecretlyfast, the
+lack of performance is likely connected to following facts:
+- At any given time step, we are compressing all information into a fixed-size $cal(O)( D^( 2 ) )$
+  and $S$-independent state, unlike in $SM$-attention where the state (KV-cache) is $cal(O)( S )$
+- Information is continually added to the state. There is no explicit mechanism to replace old
+  information or avoid adding present information.
+
+Gating and the delta-rule are two architecture alterations which attempt to alleviate these pain
+points, as discussed below.
+
+=== $S_( s d d\' )$ as a Look-up Table
+<sec_S_look_up>
+A common mental model is to think of $S_( s d d\' ) = sum_( s\'=0 )^( s )v_( s\' d )k_( s\' d\' )$
+as a noisy dictionary we are extracting keys from. In the simplifying limit where the $k_( s\'d\' )$
+are all normalized #link("https://sustcsonglin.github.io/blog/2024/deltanet-1/")[Songling Yang
+  explains this well here.] to unit dot-product, we can then extract out a given value at $s\'$ up
+to an error term (which is not obviously small at all) as in
+$
+  S_( s d d\' ) k_( s\'d\' )= v_( s\' d ) + sum_( s\'\'!= s\' ) v_( s\'\' d )k_( s\'\' d\' ) k_( s\'d\' ) eq.triple v_( s\' d ) + epsilon space .
+$<eq_kv_dict>
+From this perspective, the limitation with constant-space state and long sequence is clear: there can
+be at most $D$ orthogonal keys, whereas we may be storing $S >> D$ steps worth of information.
+
+
+
+=== Gating
+
+The ability to remove old information can be implemented by _gating_: we add a (data-dependent)
+prefactor to the recursion relation
+$
+  S_( s d d\' ) & = alpha_( s )S_( (s-1) d d\' ) + v_( s d )k_( s d\' ) space ,
+$<eq_gated_linear_attn_state>
+where usually $0 <= alpha_( s ) <= 1$. For sufficiently expressive $alpha_( s )$, gating can
+completely erase old state when needed, e.g. when the subject of a conversation completely changes.
+The mamba models are one example which using gating.
+
+=== Delta Rule
+
+Rather than completely erasing old state, it may be desirable to selectively overwrite old state,
+which is what the _delta rule_ strives for @schlag2021lineartransformerssecretlyfast. The form
+of the update is
+$
+  S_( s d d\' ) & = S_( (s-1) d d\'\' )( bold(1) -beta_( s ) k_( s d\'\') k_( s d\' ) ) + beta_( s )v_( s d )k_( s d\' )
+$<eq_delta_rule_linear_attn_state>
+where $beta_( s )$ is again data-dependent. The relation between the above form and the ability to
+overwrite state entries is somewhat imprecise#footnote[And confusingly discussed in the literature,
+  in my opinion.], but is based on the view of $S$ as a look-up table as in Sec. @sec_S_look_up, where
+$S_( s d d\' ) k _( s\'d\' )$ extracts a particular value. The first term above morally is capable
+of removing a key from the dictionary at the previous time step, and the last term overwrites it (again, very roughly).
+
 
 
 == S4 <sec_s4>
