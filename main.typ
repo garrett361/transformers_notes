@@ -32,6 +32,9 @@
 #let nice_box(body) = {
   block(fill: luma(238), inset: 1em, radius: .5em)[#body]
 }
+#let warn_box(body) = {
+  block(fill: rgb("#FF9999"), inset: 1em, radius: .5em)[#body]
+}
 
 #set table(
   inset: 6pt,
@@ -830,7 +833,7 @@ undergoes over the original context length. We specify two parameters#footnote[T
   beta=1,32$.], $alpha < beta$, that demarcate the boundaries of the above regions and a linear
 interpolation function:
 $
-gamma_( h ) (r_( h )) = cases(
+  gamma_( h ) (r_( h )) = cases(
 0 "if" r_( h ) < alpha,
 (r - alpha)/ (beta -alpha) "if" alpha <=r_( h ) <= beta,
 1 "if" r_( h ) > beta,
@@ -839,15 +842,15 @@ $
 
 The new, YaRN wavelengths are then specified by a weighted sum of the PI and original wavelengths:
 $
-lambda\'_( h ) = (1 - gamma_( h )) times (S\')/S times lambda_( h ) + gamma_( h ) lambda_( h )
+  lambda\'_( h ) = (1 - gamma_( h )) times (S\') / S times lambda_( h ) + gamma_( h ) lambda_( h )
 $
 Therefore the high head-index/long-wavelength pairs ($gamma_( h ) --> 0$) get the full linear
-interpolation, while the low head-index pairs ($gamma_( h ) --> 1$) have unchanged wavelengths.  The
+interpolation, while the low head-index pairs ($gamma_( h ) --> 1$) have unchanged wavelengths. The
 head-index boundaries $h_( alpha ), h_( beta )$ for which $r_( h )= alpha$ and $r_( h )= beta$ are
 given by:
 $
-h_( alpha ) = H ln((S\')/(2 pi alpha)) / ln(b) , space
-h_( beta ) = H ln((S\')/(2 pi beta)) / ln(b)
+  h_( alpha ) = H ln((S\')/(2 pi alpha)) / ln(b) , space
+  h_( beta ) = H ln((S\')/(2 pi beta)) / ln(b)
 $
 
 In practice, it is found that YaRN scalings increase attentions scores. This can be counteracted by
@@ -1805,7 +1808,7 @@ factors which would make the computation of $h_(b s)$ non-associative. But in th
 x$ limit, the operations are #emph[associative] which makes them #emph[parallelizable], via known
 scan algorithms @prefixSumsBlelloch.
 
-= Training
+= Pretraining
 <training>
 == Memory <sec_memory_training>
 In this section we summarize the train-time memory costs of Transformers
@@ -2582,6 +2585,222 @@ is a problem, because it requires generation which is both expensive and
 not differentiable (the problem DPO solves). So, the authors perform a
 rough estimate of the scale and do not backpropagate through $z_0$,
 (which is a bit questionable).
+
+= RL
+
+
+== Background
+
+#link("https://sites.krieger.jhu.edu/jared-kaplan/files/2019/04/ContemporaryMLforPhysicists.pdf")[See
+  Jared Kaplan's notes for a concise review of RL.]
+
+=== Terminology and Fundamentals
+
+In Reinforcement Learning (RL), a _policy_ is a map from states to actions: $pi: S-->A$. From this
+perspective, a LLM is a policy whose actions are predictions and whose state is all previously seen
+tokens.
+
+Other terminology:
+
+- *On-Policy vs Off-Policy*: On-policy RL only learns based on the current policy, whereas
+  off-policy incorporates information from other policies. RL with a larger teacher model is an
+  example of off-policy, as is performing multiple policy-gradient optimizer updates (see below) with
+  the reference model held fixed, as opposed to updating the reference model after each step.
+- *Reward Function*: the reward for the given action taken at time $t$. RL attempts to maximize some
+  function of rewards. If $s_( t )$ is the state at time $t$ and $a_t$ the action taken, then $R_t =
+R_t (a_t, s_t, s_(t+1))$ in general, though for LLM RL often $R_t = R_t (a_t)$ alone.
+- *Advantage Function*: just the difference between the reward function and some baseline, $A_t =
+  A_t (a_t, s_t, s_(t+1))$. Sometimes more useful than a reward function directly.
+
+
+Starting from some initial state described by distribution $rho(s_0)$, the probability distribution
+over a given chain of state-action pairs is given by
+$
+  P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 )| pi ) = rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi(a_t|s_t)
+$
+policy $pi(a_t|s_t)$ describing the probability that action $a_t$ is taken given the current state
+$s_t$, and where $p( s_( t+1 )| a_( t ), s_( t ) )$ is a (probably unknown) distribution describing
+the probability of transitioning to state $s_( t+1 )$ given that action $a_t$ was taken.
+
+=== Policy Gradients
+<sec_policy_grads>
+
+In _policy gradient_ (PG) RL, the goal is to learn an improved policy which maximizes some reward
+function which grades the policy's chosen actions#footnote[An alternative RL method is $Q$-learning,
+  which we skip for now.]. In general, the goal is to maximize some quantity $R$ defined over the
+state-action path taken by the system. A common historical choice is to use a weighted sum of
+rewards (or advantages): $R(s_( T ), a_( T-1 ), ..., s_( 0 )) = sum_( t ) gamma^( t ) R_t (a_t, s_t,
+s_(t+1))$. The expected value is then
+$
+  J(pi) &eq.triple angle.l R angle.r \
+  &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t )) P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 )| pi ) R(s_( T ), a_( T-1 ), ..., s_( 0 )) \
+  &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t )) rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi(a_t,s_t) R(s_( T ), a_( T-1 ), ..., s_( 0 )) space .
+$
+
+If the policy depend on parameters $theta$, $pi= pi_( theta )$, then we could attempt to maximize
+the above through gradient-based optimization strategies, as usual. Taking a gradient and
+manipulating terms, we have $J(pi) = J(theta) $ and
+$
+  nabla_( theta ) J(theta) &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t ) )P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 )| pi ) nabla_( theta ) ln pi_( theta )(a_( t ), s_( t )) R(s_( T ), a_( T-1 ), ..., s_( 0 )) \
+  &eq.triple angle.l R nabla_( theta ) ln pi_( theta ) angle.r .
+$
+
+When we try to compute the above gradient in practice, there are important subtleties which can be
+quite confusing. The natural strategy is to follow one or more trajectories generated by a given
+policy, compute the empirical average $S(theta) =angle.l R ln pi_( theta ) angle.r_( "empirical" )$
+over the realized sequence of states and actions, and use back propagation to compute the gradient.
+The subtlety is that this _surrogate_ function $S(theta)$ is not the same as the expectation value above:
+$S(theta) != J(theta)$. Only their first derivatives match in general#footnote[Due to the gradient
+  only hitting the $ln$ term in the empirical average, while they also hit the distribution in
+  $J(theta)$. For example: $nabla_i nabla_j J(theta) = angle.l R (nabla_( i ) ln pi_( theta )
+  nabla_( j ) ln pi_( theta ) +nabla_( i ) nabla_( j ) ln pi_( theta )) angle.r$ while $nabla_i
+  nabla_j S(theta) = angle.l R nabla_( i ) nabla_( j ) ln pi_( theta ) angle.r _( "empirical" )$ ].
+$S(theta)$ itself is therefore not an inherently meaningful quantity and so you may not want to plot
+the surrogate loss! Decreasing surrogate loss is not necessarily informative of anything.
+
+
+== PPO
+<sec_ppo>
+
+Promximal policy optimization @schulman2017proximalpolicyoptimizationalgorithms (PPO) is the
+starting point which most LLM RL pipelines build upon. Essentially, it just adds clipping to the
+surrogate objective.
+
+Let $pi_( theta )(a_t|s_t)$ be the current model, $pi_( theta_( "old" ) )(a_t|s_t)$ be the same
+model with parameters $theta_( "old" )$ (which may or may not be different from $theta$), and $r_(
+t)(theta) =(pi_( theta)(y_t|x_(t-1)))/(pi_( theta_("old"))(y_t|x_(t-1)))$. The PPO empirical
+surrogate objective is:
+$
+  S(theta) = angle.l min(r_(t)(theta)A_( t ), "clip"(r_(t)(theta), 1-epsilon, 1+epsilon) A_t ) angle.r_( "emiprical" ) space .
+$<eq_ppo>
+Here $epsilon >0$ is a hyperparameter#footnote[$epsilon~cal(O)( 1e-1 )$ is common], $A_t$ is the
+advantage, and $"clip"(x, l, h)$ is
+$
+  "clip"(x, l, h) := cases(
+  l "if" x < l,
+  x "if" l <= x <= h,
+  h "if" h < x
+)
+$
+In practice, the min and clip operations are applied for every token prediction and averaged over
+the sequence length, rather than computed once at the sequence level, but we leave the notation
+schematic above and will be more precise in later sections.
+
+
+The PPO surrogate creates the same derivatives as the surrogate in @sec_policy_grads in the limit
+where (using the same advantage function) we take the derivative with respect to $theta$ and set
+$theta_( "old" ) --> theta$ post-derivative. So, a typical workflow could be:
+1. Start from a given checkpoint and perform some batch of PPO RL. The gradients for this step will
+  be the same as vanilla PG, since the clipping does nothing.
+2. Perform more PPO RL steps with $pi_( theta_( "old" ) )$ kept as the original checkpoint. The
+  clipping is non-trivial for these steps.
+3. Update $pi_( theta_( "old" ) )$ at some point#footnote[A confusing point: as of Summer 2025, many
+   PPO libraries and variants update $pi_( theta_( "old" ) )$ after every optimizer step (i.e. they
+  are "on-policy"), in which case the $min$ and clipping are completely irrelevant. The appendix of
+  @shao2024deepseekmathpushinglimitsmathematical has a good discussion of this and comparison of
+  different training methods.].
+
+The clipping is punitive:
+- If for a given term in the empirical average, $A_t$ is positive and $r_t > 1+epsilon$, then the
+  contribution to $S(theta)$ is $~(1+epsilon) A_t$ which is $theta$-independent and which therefore
+  provides no gradient to the learning algorithm.
+- For $A_t < 0$ terms, non-confident $r_t < 1 - epsilon$ cases will similarly produce no gradient.
+
+So, very confident moves which lead to worse outcomes still provide gradients, while very confident
+moves towards better outcomes get their gradients discarded.
+
+In order for the predictions of the updated model to avoid straying too far from the initial
+checkpoint, a $-beta D_( "KL" )(pi_( theta_( "old" ) )|| pi_( theta ))$ penalty term is sometimes
+added.
+
+
+
+== DeepSeek R1 and GRPO
+<sec_grpo>
+
+We left the PPO advantage function unspecified in @sec_ppo, but historically it involves specifying
+an independent critic model and having multiple in-flight models is a headache.
+
+In DeepSeek's work on Group-Relative Policy Optimization (GRPO)
+@shao2024deepseekmathpushinglimitsmathematical as applied to their R1 model
+@deepseekai2025deepseekr1incentivizingreasoningcapability, they dispense with the need for a
+secondary model and define their advantage function as follows. The reference model $pi_( theta_(
+"old" ) )$ is the current version of the model.
+1. For each state $s_t$ (that is, prefix question $q$), sample $G$ responses from $pi_( theta_(
+   "old" ) )$: $a_( t)^( g )$, $g in {0, ..., G-1}$.
+2. A reward is computed for each such response: $r_( t )^( g )= r(a_( t )^( g ))$.
+  Programmatically verifiable rewards are especially attractive for this step, where $r_( t )^( g
+   )$ takes on some pair of binary values depending on whether the answer is correct or not#footnote[Such
+  simple scoring is also claimed to be robust against "reward hacking", where the model optimizes RL
+  rewards through unintended means, e.g. through undesirably short or long answer,
+  style-over-substance generation, etc.].
+3. The advantage of each response is just the z-score:
+$
+  A_t^( g ) = (r_( t )^( g ) - "mean"_( g\' )(r_( t )^( g\' ))) / ("std"_( g\' )(r_( t )^( g\' )))
+$<eq_grpo_advantage>
+If we always take the current model as the $pi_( theta_( "old" ) )$, then we use @eq_ppo with
+$theta_( "old" ) --> theta$ post-derivative, in which case the $min$ and $"clip"$ operations are
+trivial. DeepSeek's GRPO also uses the KL-divergence penalty, but uses a
+#link("http://joschu.net/blog/kl-approx.html")[different unbiased estimator] than the naive one.
+
+The empirical average, which we have conspicuously avoided defining, is taken as (neglecting the KL
+term)
+$
+  S(theta) = 1 / G sum_( g ) min(r_(t)^( g )(theta)A_( t )^( g ), "clip"(r_(t)^( g )(theta), 1-epsilon, 1+epsilon) A_t^( g ) ) space .
+$
+Namely, every response is weighted the same.
+
+#warn_box[
+  NOTE: not currently clear to me if the min op is applied at the full output sequence or token level.
+]
+
+== DAPO
+<sec_dapo>
+
+Dynamic sAmpling Policy Optimization (DAPO) @yu2025dapoopensourcellmreinforcement proposes several
+improvements over GRPO:
+1. Dropping the KL divergence penalty.
+2. Weighting each token in each response equally, rather than weighting each total response equally.
+  Specifically, DAPO does this by dividing the total surrogate by the sum of all tokens.
+3. Introducing independent high and low clipping parameters: $epsilon --> epsilon_( "low" ),
+  epsilon_( "high" )$ with $epsilon_( "high" ) > epsilon_( "low" )$.
+4. The GRPO style advantage @eq_grpo_advantage is still used, but because this advantage leads to
+  zero gradient when all responses are either correct or incorrect, DAPO continually samples
+  responses and rejects batches which have such trivial gradients, continuing until the desired DAPO
+  global batch size is reached.
+
+Reasoning and justification:
+1. Unclear, maybe overly restrictive to generating CoT and reasoning behavior effectively.
+2. Penalizes overly-long and poor CoT responses, which are a common failure mode.
+3. Decoupling the clipping with $epsilon_( "high" ) > epsilon_( "low" )$ encourages more exploration
+  from positive-advantage samples, , relative to the $epsilon_( "high" ) = epsilon_( "low" )$
+  baseline, as grads now contribute for $A_t>0$ whenever $r_( t ) (theta) < 1+ epsilon _( "high" )$.
+4. As the model improves, the number of responses groups which are all correct tends to increase, so
+  this strategy naturally injects more signal by discarding such cases.
+
+
+More from DAPO:
+- They penalize responses which exceed some pre-defined threshold, which they say greatly helps
+  stability.
+- They track the following quantities during training:
+  - Mean response length.
+  - Mean reward score.
+  - Entropy (of what, exactly? mean entropy over the vobcab averaged over response length?)
+  - Generation probabilities (also unclear how this is defined)
+
+
+== Skywork
+<sec_skywork>
+
+Skywork @he2025skyworkopenreasoner1 uses some similar tactics to DAPO (Sec. @sec_dapo):
+1. Filtering out prompts that yield all-correct or all-wrong answers within each iteration, and
+  removing all-correct prompts entirely from future iterations.
+2. Multi-stage training, with progressively increasing sequence lengths.
+3. An entropy-per-token term is added to the surrogate, with its coefficient dynamically adjusted to
+  maintain a targeted entropy level.
+4. Also does not average over tokens within a sequence, but unlike DAPO they remove all
+  token-counting division factors entirely, so the gradient scales with the number of tokens in a batch
+5. No KL loss term.
 
 = Parallelism
 <parallelism>
@@ -4044,7 +4263,10 @@ $
   mono("device_mesh") =
   [[[0, 1], [2, 3]], [[4, 5], [6, 7]]] .
 $
-On rank `r=0`, the 2D CP+FSDP named slice is related to the tensor slice via
+On rank `r=0`, the 2D CP+FSDP named slice#footnote[As of September 2025, `torch` also allows you to
+  define a flattened version of a slice, e.g. $mono("cp_fsdp_mesh") = mono("device_mesh['cp', 'fsdp']._flatten('cp_fsdp')")$,
+  which is just a 1D mesh containing all ranks in the slice the present rank.] is related to the
+tensor slice via
 $
   mono("device_mesh['cp', 'fsdp']")|_( r=0 )=
   mat(delim:"[",
@@ -4057,7 +4279,6 @@ and the 1D FSDP slice is
 $
   mono("device_mesh['fsdp']")|_( r=0 )= [0, 1] = mono("device_mesh")[0, 0, :] .
 $
-
 
 
 = Hardware
@@ -5002,7 +5223,8 @@ which are just more convolutions, suitably understood.
 
 
 
-= Evaluation
+= Evaluation <app_eval>
+
 
 It is hard to remember all of the different common LLM evaluation tasks. Here is a partial list, with
 sample questions for some:
@@ -5034,7 +5256,7 @@ sample questions for some:
   D) Chromosomal recombination will not occur in different species.]
 
 - *GSM8K* @cobbe2021trainingverifierssolvemath: Mathematical word problems. Computation is encapsulated
-in \<\<...>> brackets and the final answer prefixed by hash tags.
+in \<\<...>> brackets and the final answer prefixed by hash tags. Note:
 #quote[
   (Question) Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?
 
