@@ -801,15 +801,15 @@ YaRN @peng2023yarnefficientcontextwindow is a commonly-used RoPE extension varia
 following observations. Let $S$ be the original context length that the model was trained on and
 $S\'$ be the target length: $S\'>S$.
 
-First, assume that $theta_h= b^( -h/H ) eq.triple (2 pi)/lambda _( h)$ for some
-base#footnote[Typical default is $b=10^( 4 )$, as above.], so that the pair of heads#footnote[with
-  $h in {0, 2, 4, H-2}$.] $ {h, h+1}$ undergo a full rotation when used to describe a relative
-distance $s= lambda_( h )= 2 pi b^( h/H )$. Therefore, higher-indexed heads rotate over a longer
-token horizon, with the maximal horizon being $cal(O)( b )$. For context lengths $1<< S << b$, low
-head-index pairs undergo many rotations, making the RoPE mapping from relative distances to angle
-degenerate, while high head-index pairs undergo less than a full rotation, leading to the intuition
-that low head-index pairs will be better at capturing local distance information, while high-index
-pairs can better capture longer-distance features.
+First, assume that $theta_h= b^( -(floor.l h/2 floor.r)/H ) eq.triple (2 pi)/lambda _( h)$ for some
+base#footnote[Typical default is $b=10^( 4 )$, as above.], so that head $h$ (and $h+1$) undergoes a
+full rotation when used to describe a relative distance $s= lambda_( h )= 2 pi b^( (floor.l h/2 floor.r)/H )$.
+Therefore, higher-indexed heads rotate over a longer token horizon, with the maximal horizon being
+$cal(O)( b )$. For context lengths $1<< S << b$, low head-index pairs undergo many rotations, making
+the RoPE mapping from relative distances to angle degenerate, while high head-index pairs undergo
+less than a full rotation, leading to the intuition that low head-index pairs will be better at
+capturing local distance information, while high-index pairs can better capture longer-distance
+features.
 
 
 When scaling up to lengths $S\'$, the most naive strategy is to rescale the overall angle: $theta_(
@@ -818,10 +818,11 @@ ensures that the same maximal rotations are achieved when processing sequences o
 as were seen when originally only processing up to $S$. The naive PI strategy is empirically found
 to lead to degraded short-context performance. An alternative strategy is to instead rescale the
 base, $b--> kappa times b$ for some $kappa > 1$. The former strategy is a uniform dilation of the
-wavelength for all heads, while the latter performs a greater dilation for higher head indices. A
-choice of $kappa$ that connects the two strategies is to choose this parameter such that the angle
-for the higher head index, $theta_( H-2 )$, is the same in both cases. This is called the NTK-aware
-scheme.
+wavelength for all heads, while the latter #footnote[Called ABF for adjusted base frequency
+  @xiong2023effectivelongcontextscalingfoundation.] performs a greater dilation for higher head
+indices. A choice of $kappa$ that connects the two strategies is to choose this parameter such that
+the angle for the higher head index, $theta_( H-2 )$, is the same in both cases. This is called the
+NTK-aware scheme.
 
 YaRN aims for a middle ground, with the criteria of preserving the wavelengths of the
 short-wavelength heads and linearly scaling the long-wavelength heads so that they undergo the same
@@ -831,31 +832,33 @@ maximal degree of rotation over horizon $S\'$ as they previously did over $S$. T
 Let $r_( h ) eq.triple (S)/lambda_( h ) $ be the number of rotations that head-pair idx $h$
 undergoes over the original context length. We specify two parameters#footnote[Typical: $alpha,
   beta=1,32$.], $alpha < beta$, that demarcate the boundaries of the above regions and a linear
-interpolation function:
+interpolation function $0 <=gamma_( h ) <= 1$ such that the YaRN wavelengths are a weighted sum of
+the PI and original wavelengths:
+$
+  lambda\'_( h ) &= (1 - gamma_( h )) times (S\') / S times lambda_( h ) + gamma_( h ) lambda_( h )
+$
+where high head-index/long-wavelength pairs ($gamma_( h ) --> 0$) get the full linear
+interpolation and the low head-index pairs ($gamma_( h ) --> 1$) have unchanged wavelengths. The specific
+form of $gamma_( h )$ is:
 $
   gamma_( h ) (r_( h )) = cases(
-0 "if" r_( h ) < alpha,
-(r - alpha)/ (beta -alpha) "if" alpha <=r_( h ) <= beta,
-1 "if" r_( h ) > beta,
+0 wide &"if" r_( h ) < alpha,
+(r_( h ) - alpha)/ (beta -alpha) &"if" alpha <=r_( h ) <= beta,
+1 &"if" r_( h ) > beta,
 )
 $
-
-The new, YaRN wavelengths are then specified by a weighted sum of the PI and original wavelengths:
+or as a function of the head index $h$:
 $
-  lambda\'_( h ) = (1 - gamma_( h )) times (S\') / S times lambda_( h ) + gamma_( h ) lambda_( h )
-$
-Therefore the high head-index/long-wavelength pairs ($gamma_( h ) --> 0$) get the full linear
-interpolation, while the low head-index pairs ($gamma_( h ) --> 1$) have unchanged wavelengths. The
-head-index boundaries $h_( alpha ), h_( beta )$ for which $r_( h )= alpha$ and $r_( h )= beta$ are
-given by:
-$
-  h_( alpha ) = H ln((S\')/(2 pi alpha)) / ln(b) , space
-  h_( beta ) = H ln((S\')/(2 pi beta)) / ln(b)
+  gamma_( h ) = cases(
+1  wide&"if" floor.l h/2 floor.r < H ln(S / (2 pi beta)) ,
+(r_( h ) - alpha)/ (beta -alpha) &"if" H ln(S / (2 pi beta)) <= floor.l h/2 floor.r   <= H ln(S / (2 pi alpha)),
+0 &"if" floor.l h/2 floor.r > H ln(S / (2 pi alpha)),
+) space .
 $
 
-In practice, it is found that YaRN scalings increase attentions scores. This can be counteracted by
-increasing the temperature, correspondingly. YaRN suggests scaling#footnote[Equivalent to scaling
-  the keys and queries by $0.1 ln((S\')/S) + 1$.] $T --> T / (0.1 ln((S\')/S) +
+
+Finally, YaRN suggests scaling#footnote[Equivalent to scaling the keys and queries by $0.1
+  ln((S\')/S) + 1$.] the temperature by $T --> T / (0.1 ln((S\')/S) +
 1)^2$, found by a phenomenological fit.
 
 === Flash Attention <subsec_flash_attention>
@@ -1128,22 +1131,26 @@ faster generation and better memory efficiency:
 == General Structure
 
 We follow the unified discussion of @yang2025gateddeltanetworksimproving on linear attention models
-here, to get a general orientation.
+here, to get a general orientation. Later, we discuss specific linear attention variants.
 
 === Simple Linear Attention
 The simplest linear attention variant comes from just removing the $SM$ operation. The linear
 attention outputs are of the form#footnote[We neglect the causal mask for simplicity.]:
 $
-  o_( s d ) = q_( s d\' ) k_( d\' s\' ) v_( s\' d ) space ,
+  o_( s d ) = q_( s d\' ) k_( s\' d\') v_( s\' d )m_( s s\' ) space ,
 $<eq_linear_attn>
 with the crucial point being that the $d\'$ and $s\'$ sums can be done in any order, whereas for
-$SM$-attention the $d\'$ sum must be done first. The outputs can be therefore written as
+$SM$-attention the $d\'$ sum must be done first#footnote[Here $m_( s s\' )$ is the causal mask.].
+The outputs can be therefore written as
 $
-  o_( s d ) &= S_(s d d \' )q_( s d\' ) space ,
+  o_( s d ) &= q_( s d\' )S_(s d \' d ) space ,
 $
-where the state $S_(s d d\' )$ is recursively built up as#footnote[No sum over $s$ in the RHS of either of these expressions now.]
+where the state $S_(s d\' d )$ is recursively built up as#footnote[No sum over $s$ in the RHS of
+  either of these expressions now. Other linear attention architectures may not have this specific
+  key-and-value structure for building up state, but they will have this general additive, recursive
+  structure.]
 $
-  S_( s d d\' ) & = S_( (s-1) d d\' ) + v_( s d )k_( s d\' ) space , space S_(-1 d\' d ) eq.triple 0 space .
+  S_( s d\' d ) & = S_( (s-1) d\' d) + k_( s d\' )v_( s d ) space , space S_(-1 d\' d ) eq.triple 0 space .
 $<eq_linear_attn_state>
 This property enables $cal(O)( 1 )$ inference, since only the most recent state needs to be cached,
 rather that the full $cal(O)( S )$ KV-cache.
@@ -1159,304 +1166,267 @@ lack of performance is likely connected to following facts:
 Gating and the delta-rule are two architecture alterations which attempt to alleviate these pain
 points, as discussed below.
 
-=== $S_( s d d\' )$ as a Look-up Table
+=== $S_( s d\' d )$ as a Look-up Table
 <sec_S_look_up>
-A common mental model is to think of $S_( s d d\' ) = sum_( s\'=0 )^( s )v_( s\' d )k_( s\' d\' )$
+A common mental model is to think of $S_( s  d\' d ) = sum_( s\'=0 )^( s )k_( s\' d\' )v_( s\' d )$
 as a noisy dictionary we are extracting keys from. In the simplifying limit where the $k_( s\'d\' )$
-are all normalized #link("https://sustcsonglin.github.io/blog/2024/deltanet-1/")[Songling Yang
-  explains this well here.] to unit dot-product, we can then extract out a given value at $s\'$ up
-to an error term (which is not obviously small at all) as in
+are all orthonormal for different $s$ values, we can extract out a given value at $s\'$ up to an
+error term (which is not obviously small at all) as in
 $
-  S_( s d d\' ) k_( s\'d\' )= v_( s\' d ) + sum_( s\'\'!= s\' ) v_( s\'\' d )k_( s\'\' d\' ) k_( s\'d\' ) eq.triple v_( s\' d ) + epsilon space .
+  k_( s\'d\' ) S_( s d\' d ) = v_( s\' d ) + sum_( s\'\'!= s\' ) v_( s\'\' d )k_( s\'\' d\' ) k_( s\'d\' ) eq.triple v_( s\' d ) + epsilon space .
 $<eq_kv_dict>
 From this perspective, the limitation with constant-space state and long sequence is clear: there can
 be at most $D$ orthogonal keys, whereas we may be storing $S >> D$ steps worth of information.
+#link("https://sustcsonglin.github.io/blog/2024/deltanet-1/")[Songling Yang has a nice writeup
+  here.]
 
 
 
 === Gating
+<sec_gated_linear_attn>
 
 The ability to remove old information can be implemented by _gating_: we add a (data-dependent)
-prefactor to the recursion relation
-$
-  S_( s d d\' ) & = alpha_( s )S_( (s-1) d d\' ) + v_( s d )k_( s d\' ) space ,
-$<eq_gated_linear_attn_state>
-where usually $0 <= alpha_( s ) <= 1$. For sufficiently expressive $alpha_( s )$, gating can
-completely erase old state when needed, e.g. when the subject of a conversation completely changes.
-The mamba models are one example which using gating.
+prefactor to the recursion relation $ S_( s d\' d ) & = alpha_( s )S_( (s-1) d\' d ) + k_( s d\'
+)v_( s d ) space , $<eq_gated_linear_attn_state> where usually $0 <= alpha_( s ) <= 1$. In general,
+$alpha_( s )$ may have a more complex tensor structure, but we keep it simple here. For sufficiently
+expressive $alpha_( s )$, gating can completely erase old state when needed, e.g. when the subject
+of a conversation completely changes.#footnote[For instance, we could ask our architecture to
+  process two independent sequences concatenated together with a special separator token in the
+  middle. The hidden state should be reset at the separator token and a gated linear attention
+  architecture would be (in-principle) capable of this.] The mamba models are one example which
+using gating.
 
 === Delta Rule
+<sec_delta_rule_linear_attn>
 
 Rather than completely erasing old state, it may be desirable to selectively overwrite old state,
 which is what the _delta rule_ strives for @schlag2021lineartransformerssecretlyfast. The form
 of the update is
 $
-  S_( s d d\' ) & = S_( (s-1) d d\'\' )( bold(1) -beta_( s ) k_( s d\'\') k_( s d\' ) ) + beta_( s )v_( s d )k_( s d\' )
-$<eq_delta_rule_linear_attn_state>
-where $beta_( s )$ is again data-dependent. The relation between the above form and the ability to
-overwrite state entries is somewhat imprecise#footnote[And confusingly discussed in the literature,
-  in my opinion.], but is based on the view of $S$ as a look-up table as in Sec. @sec_S_look_up, where
-$S_( s d d\' ) k _( s\'d\' )$ extracts a particular value. The first term above morally is capable
-of removing a key from the dictionary at the previous time step, and the last term overwrites it (again, very roughly).
+  S_( s d\' d ) & = (delta_( d\' d\'\' ) -beta_( s ) k_( s d\' )k_( s d \'\') )S_( (s-1) d\'\' d \'\' ) + beta_( s )k_( s d\' )v_( s d )
+$<eq_delta_rule_linear_attn_state>-
+where $beta_( s )$ is again data-dependent#footnote[The value range of $beta_( s )$ varies by model,
+  but usually it's between zero and 1 or -1 and 1.].
+
+Taking the viewpoint in Sec. @sec_S_look_up that we query the state $S_( s d\' d )$ as in $k dot S ~
+v$, the above modification makes the architecture capable of removing entries from the dictionary.
+For instance, in the limit that $beta_( s ) = 1/ (k_s dot k_s)$ the matrix $bold(1) -beta_( s ) k_( s d\'\') k_( s
+d\')$ is a projector onto the space orthogonal#footnote[That is, $S dot (1 - k times.circle k) dot k
+  = 0$, schematically.] to $k_( s d )$ and so this removes the corresponding entry from the old
+dictionary at step $s-1$ and overwrites it with the new $v times.circle k$ entry. Often the $k$ and
+$v$ tensors are explicitly normalized prior to use, as well.
 
 
+== Efficient Implementations
 
-== S4 <sec_s4>
-The S4 model of @s4 is a good starting point. These are based off a
-continuous representation in which some input signal#footnote[We use the
-notation of the mamba paper @mamba, which differs from that of the S4
-paper @s4.] $x_a (t)$ is converted to an output $y_c (t)$ via an in
-intermediate latent variable $h_b (t)$, with the above related as in
+Efficient kernel implementations use tricks for linear attention. We start with vanilla linear
+attention.
+
+
+=== Flash Linear Attention
+
+Two natural, but naive, approaches to linear attention are suboptimal on modern hardware:
+- Fully parallelized: compute $q dot k$ first, apply the mask, and then dot into the values. The
+  positive is that this uses GPU-friendly matmuls, but the total computational complexity is too
+high#footnote[Overloading $S$ to be both sequence length and state here.]: $cal(O)( S^2 D + D^( 2 )
+S )$.
+- Fully recurrent: use recursion as in @eq_linear_attn_state to build up the state and perform a dot
+  product over the hidden dimension to compute the outputs. This is cheaper in FLOPs, $cal(O)(
+D^2 S)$, but all of the operations have low arithmetic intensity.
+
+
+A middle-ground chunked strategy can perform better than either of the above. We chunk the sequence
+index $s -> (c t) -> c t$ into chunks of size $C$ with $t in {0, ..., C-1}$ and $t in {0, ...,
+S/C-1}$. We then compute:
 $
-  partial_( t )h_( b )(t) &= A_( b b\' )h_( b\' )(t) + B_( b a )x_( a )(t)\
-  y_( c )(t) &= C_( h b )h_( b )(t) + D_( c a )x_( a )(t) .
-$<eq_s4_continuous>
-The capitalized tensors are the learnable weight
-matrices. $D$ is often set to zero in the literature. Basically, the
-information in the sequence $x_s$ is stored in $h_s$, an internal memory
-for the model, much like the RNN/LSTM models of the past.
-
-For discrete sequences, we discretize: $
-h _( b s ) &= A _( b b\' )h _( b\' (s-1) ) + B _( b a )x _( a s )\
-y _( c s ) &= C _( c b )h _( b s ) + D _( c a )x _( a s )   .
-$<eq_s4_discrete> where one can also relate these weights to those in
-@eq_s4_continuous given the
-discretization scheme (see @sec_mamba).
-
-Subject to the initial condition $h_b^(- 1) = 0$, the above solves to
+  o_( c t d ) = q_( c t d\' ) S_( c t d\' d )
 $
-  y_s & = sum_(s' = 0)^s C dot.op A^(s - s) dot.op B dot.op x_(s') + D x_s med \,
+where the recursion relation becomes:
 $
-omitting hidden dimension indices. Proper normalization of the various
-weights is non-trivial; see @s4 for details. Further, diagonalization
-clearly makes the $A^(s - n)$ computation easier, but care must be taken
-here, too. Clearly, the above computation is highly parallelizable. The
-/* S4 (and mamba) papers describe @eq_s4_soln as */
-a
+  S_( c t d\' d ) &= S_( (c-1) 0 d\' d ) + sum_( t\'=0 )^( t )k_( c t\' d\' ) v_( c t\' d ) \
+  &eq.triple cal(S)_( (c-1) d\' d ) + sum_( t\'=0 )^( t )k_( c t\' d\' ) v_( c t\' d ),
+$
+introducing notation for the state at the start of each chunk boundary. Getting only the states at
+chunk boundaries is easy and GPU friendly, since the sum extends over the entire $t$-index (i.e. it
+is a matmul):
+$
+  cal(S)_( c d\' d ) &= cal(S)_( (c-1) d\' d ) + k_( c t d\' ) v_( c t d ) space ,
+$
+all such tensors computable in $cal(O)( D^( 2 ) S )$ time.
+And so the entire output can be written as:
+$
+  o_( c t d ) = q_( c t d\' ) cal(S)_( (c-1) d\' d ) + q_( c t d\' )sum_( t\'=0 )^( t )k_( c t\' d\' ) v_( c t\' d ) space .
+$
+The first term takes $cal(O)( D^2 S )$ time, again, and the second can be computed in the
+fully-parallelized manner described above:
+$
+  q_( c t d\' )sum_( t\'=0 )^( t )k_( c t\' d\' ) v_( c t\' d ) = q_( c t d\' ) k_( c t\' d\' )v_( c t\' d ) m_( t t\' ) space ,
+$
+computing $q dot k$ first in $cal(O)( S C D )$. If $C << D$, then this is both:
++ Cheaper than full recursion, asymptotically.
++ Hardware friendly.
 
-Writing the above operation as $y_(c s) = Sigma_(c a s s') x_(a s')$,
-one can build an non-linear S4 layer by acting on the output with a
-non-linearity and then mixing feature dimensions with a weight matrix:
-$ z_(c s) & = W_(c c\') phi (Sigma^(c\' a s s') x_(a s')) $ Assuming
-the $c$ and $a$ hidden dimensions have the same size, the operations can
-then be naturally composed.
+There are further important implementation details, such as whether all the $cal(S)$ are realized in
+HBM or not as this affects the degree of parallelism, but the above is the core strategy that
+everything builds on.
 
-Taking all hidden dimensions to have size $cal(O) ( D )$, the number of learnable weights is $cal(O)
-( D ^2 )$. Training can be parallelized across the sequence dimension (via the representation
-/* @eq_s4_soln;, scaling linearly in sequence */
-length. Iterative generation from $x_(a s) arrow.r y_(c s)$, given knowledge of the previous hidden
-state $h_(b (s - 1))$ takes only $cal(O) ( D ^2 )$ (via the representation @eq_s4_discrete;). There
-is no sequence-length dependence for next-output generation, unlike for transformers, which is the
-main draw here: constant-time generation.
+=== Gated
 
-== Mamba<sec_mamba>
-A large limitation of the S4 model @eq_s4_discrete is that the various weights are fixed quantities
-which do not adjust to the input#footnote[For instance, we could ask our architecture to process two
-  independent sequences concatenated together with a special separator token in the middle. The
-  hidden state should be reset at the separator token and the mamba architecture would be
-  (in-principle) capable of this, while the S4 would not.] $x_(s d)$. Mamba @mamba extends S4 by
-replacing the fixed weights by functions of the inputs. This alters the recursive structure and
-requires various techniques for an efficient GPU implementation, which is the primary focus of the
-paper.
+Let's add a gate in the following form:
+$
+  S_( s d\' d ) & = alpha_( s d\' )S_( (s-1) d\' d ) + k_( s d\' )v_( s d ) space .
+$
+The corresponding parallelized form of the outputs is
+$
+  o_( s d ) = product_( s\'\'=1 )^( s-1 )alpha_( s\'\' d\')q_( s d\' ) k_( s\' d\' ) v_( s\' d )m_( s s\' ) space .
+$
+If we let $b_( s d ) = product_( s\'=1 ) ^( s-1 )alpha_( s\' d )  $ with $b_( -1 ) eq.triple 1$, then we
+could write the above as
+$
+  o_( s d ) = (q_( s d\' ) b_( s d\' )) (k_( d\' s\' ) / b_( s\' d\' )) v_( s\' d )m_( s s\' ) space ,
+$
+and use the linear attention strategy, since the above is of exactly the same form with modifies
+queries and keys. But this form is unacceptably numerically unstable (since the division is likely
+to fail and `nan`). So we instead need to do something like:
+$
+  o_( s d ) = q_( s d\' ) k_( d\' s\' ) exp(ln b_( s d\' ) - ln b_( s\'d\' )) v_( s\' d )m_( s s\' ) space ,
+$
 
-The mamba architecture is as follows, based on the implementation in
-#link("https://github.com/alxndrTL/mamba.py")[`mamba.py`] and
-#link("https://github.com/state-spaces/mamba")[`mamba_ssm`]. Notation
-for dimensions and tensors:
 
-- Mamba maps sequences to sequences, the same as for transformers.
-  $z_(s d) = mono("mamba") (x_(s d))$. Batch dimension suppressed
-  throughout.
+Chunking again#footnote[Almost certainly have some off-by one or worse errors in this section.], we have:
+$
+  S_( c t d\' d ) & = product_( t\'=0 )^( t )alpha_( c t\' d\' )cal(S)_( (c-1) d\' d ) + sum_( t\'=0 )^( t )product_( t\'\'=t\'+1 )^( t-1 )alpha_( c t\'\' d\' )k_( c t\' d\' )v_( c t\' d ) space ,
+$
+and the boundary value recursion simplifies to
+$
+  cal(S)_( c d\' d ) & = product_( t )alpha_( c t d\' )cal(S)_( (c-1) d\' d ) + sum_( t\'=0 )product_( t\'\'=t\'+1 )^( C-1 )alpha_( c t\'\' d\' )k_( c t\' d\' )v_( c t\' d ) \
+  & eq.triple cal(B)_( c d\' )cal(S)_( (c-1) d\' d ) + sum_( t\'=0 )product_( t\'\'=t\'+1 )^( C-1 )alpha_( c t\'\' d\' )k_( c t\' d\' )v_( c t\' d ) \ \
+$
+The last term can be computed in a GPU friendly way by, say, first computing $product_( t\'\'=t\'+1
+)^( C-1 )alpha_( c t\'\' d\' )k_( c t\' d\' )$ and finally computing the dot product on $t\'$.
 
-- Various dimensions:
+And so the entire output can be written as:
+$
+  o_( c t d ) = q_( c t d\' ) product_( t\'=0 )^( t )alpha_( c t\' d\' )cal(S)_( (c-1) d\' d ) + q_( c t d\' )sum_( t\'=0 )^( t )product_( t\'\'=t\'+1 )^( t-1 )alpha_( c t\'\' d\' )k_( c t\' d\' )v_( c t\' d ) space .
+$
+The first term we compute in $cal(O)( D^( 2 )S )$, first solving the recursion relation for the
+$cal(S)_( c d d\' )$ computing $q_( c t d\' ) product_( t\'=0 )^( t )alpha_( c t\' d\' )$ and dotting the result
+against $cal(S)_( (c-1) d\' d )$, all relatively GPU friendly operations which are themselves constructed
+in $cal(O)( D^( 2 )S )$ via recursion. The final term is more challenging; finish later.
 
-  - $d in (0 \, dots.h \, D - 1)$: the input's hidden dimensions,
-    `d_model`.
 
-  - $e in (0 \, dots.h \, E times D - 1)$: expanded internal hidden
-    dimension. Usually $E = 2$ in practice.
+=== Delta
 
-  - $s in (0 \, dots.h \, S - 1)$: sequence length.
-
-  - $n in (0 \, dots.h \, N - 1)$: another internal hidden dimension,
-    controlling the size of the internal memory; `d_state`. Defaults to
-    16.
-
-  - $r in (0 \, dots.h \, R - 1)$: another internal hidden dimension,
-    `d_rank`. Defaults to $ceil.l D \/ 16 ceil.r$.
-
-  - $c in (0 \, dots.h \, C - 1)$: convolution kernel size; `d_conv`, 4
-    by default. Used to convolve over the sequence dimension.
-
-- Learnable parameters#footnote[In practice, many of these are fused
-  together for more efficient matmuls. We also omit potential bias
-  terms.]:
-
-  - Two in-projectors from `d_model ` to the expanded dimension:
-    $W_(e d)^(I_0)$, $W_(e d)^(I_1)$.
-
-  - Out-projector from the expanded internal dimension back to
-    `d_model ` $W_(d e)^O$.
-
-  - Two projectors used in creating the intermediate $Delta_(s e)$:
-    $W_(r e)^(Delta_0)$, $W_(e r)^(Delta_1)$.
-
-  - Projectors for creating the intermediates $B_(s n)$ and $C_(s n)$:
-    $W_(n e)^B$, $W_(n e)^C$
-
-  - Convolutional kernel $W_(e c)^K$.
-
-  - Selective-scan weights#footnote[Implemented as $W^( A ) = - exp(A)$ where $A$ is the actual
-  learnable weight in $mono("mamba-ssm")$.] $W_(e n)^A < 0$.
-
-  - Residual connection weights $W_e^D$.
-
-The notation here is not the same as that of the papers. We write all
-learnable weights as $W_dots.h^X$.
-
-Mamba blocks then perform the following logical operation:
-
-#figure(
-  kind: "algorithm",
-  supplement: [Algorithm],
-  caption: [Mamba],
-  pseudocode-list(booktabs: true)[
-    + *Inputs*: tensor $x_(s d) in bb(R)^(S times D)$
-    + $x_(s e)^0 = W_(e d)^(I_0) x_(s d)$, $x_(s e)^1 = W_(e d)^(I_1) x_(s d)$ #h(1fr) `# Create expanded tensors from inputs (can fuse)`
-    + $x_(s e)^2 = K_(e s s') star.op x_(s e)^1$ #h(1fr) `# Grouped conv. over the seq dim using W^K.`
-    + $x_(s e)^3 = phi (x_(s e)^2)$ #h(1fr) `# Elementwise non-linearity (silu)`
-    + $x_(s e)^4 = mono("selective_scan") (x_(s e)^3)$ #h(1fr) `# Selective scan`
-    + $x_(s e)^5 = x_(s e)^4 times.circle phi (x_(s e)^0)$ #h(1fr) `# Elementwise product and non-linearity (silu)`
-    + *Return* $z_(s d) = W_(d e)^O x_(s e)^5$ #h(1fr) `# Project back down.`
-  ],
-)<algo_mamba_1>
-where the `selective_scan` operation above is#footnote[The
-`mamba_ssm` and `mamba.py` implementations differ in the first step in
-that the latter optionally applies a norm operator post-projection. The
-exponentials here might seem odd, but are probably motivated by the
-existence of good cumulative sum kernels, which is how the exponents can
-be computed.]
-
-#figure(
-  kind: "algorithm",
-  supplement: [Algorithm],
-  caption: [Selective Scan],
-  pseudocode-list(booktabs: true)[
-    + *Inputs*: $x_(s e) in bb(R)^(S times E)$
-    + $B_(s n) = W_(n e)^B x_(s e)$ #h(1fr) `# Create intermediates B, C, Delta (can fuse).`
-    + $C_(s n) = W_e^C x_(s e)$
-    + $Delta_(s e) = W_(e r)^(Delta_1) W_(r e)^(Delta_0) x_(s e)$.
-    + Solve recursion, subject to $h_((- 1) e n) = 0$:
-    - $h_( s e n ) &= exp ( Delta_( s e ) W^(A)_( e n ) ) h_( (s-1)e n) + Delta_( s e )B_( s n )x_( s e )$
-    - $y_( s e ) &= C_( s n )h_( s e n ) + W^( D )_( e )x_( s e )$
-    - $=> y_( s e ) &= C_( s n ) (sum_( s\'=0 )^( s )e^( Delta_( s e )W^(A)_( e n ) ) times ... times e^( Delta_( (s\'+1)e )W^(A)_( e n ) ) Delta_( s\'e ) B_( s\'n ) x_( s\'e ) ) + W^( D )_( e ) x_( s e )$
-    - $=> y_( s e )&= C_( s n ) (sum_( s\'=0 )^( s )product_( s\'\'=s\'+1 )^( s )e^( Delta_( s\'\'e
-          )W^(A)_( e n ) ) Delta_( s\'e ) B_( s\'n ) x_( s\'e ) ) + W^( D )_( e ) x_( s e)$
-    + *Return* $y_(s e) in bb(R)^(S times E)$
-  ],
-)<algo_mamba1_scan>
+We have
+$
+  S_( s d\' d ) & = (delta_( d\' d\'\' ) -beta_( s ) k_( s d\' )k_( s d \'\') )S_( (s-1) d\'\' d \'\' ) + beta_( s )k_( s d\' )v_( s d )
+$
+which we chunk as#footnote[As always, off-by-one errors are highly likely.]
+$
+  S_( c t d\' d ) & = (delta_( d\' d\'\' ) -beta_( c t ) k_(c t d\' )k_(c t d \'\') )S_( c(t-1) d\'\' d ) + beta_(c t)k_(c t d\' )v_(c t d ) \
+  & = ( product_( t\'=0 )^( t )(delta_( d\' d\'\' ) -beta_( c t\' ) k_(c t\' d\' )k_(c t\' d \'\') ) )cal(S)_( (c-1) d\'\' d \'\' ) \
+  &+ sum_( t\'=0 )^( t ) ( product_( t\'\'=t\'+1 )^( t )(delta_( d\' d\'\' ) -beta_( c t\'\' ) k_(c t\'\' d\' )k_(c t\'\' d \'\') ) )beta_(c t\')k_(c t\' d\' )v_(c t\' d ) \
+  & eq.triple P_( c t d\' d\' \' ) cal(S)_( (c-1) d\'\' d ) + H_( c t d d\' )
+$
+Let
+$
+  P_(c t d\' d\'\' ) &eq.triple product_( t\'=0 )^( t )(delta_( d\' d\'\' ) -beta_( c t\' ) k_(c t\' d\' )k_(c t\' d \'\') ) \
+  H_(c t d\' d\'\' ) &eq.triple sum_( t\'=0 )^( t ) ( product_( t\'\'=t\'+1 )^( t )(delta_( d\' d\'\' ) -beta_( c t\'\' ) k_(c t\'\' d\' )k_(c t\'\' d \'\') ) )beta_(c t\')k_(c t\' d\' )v_(c t\' d )
+$
+so that
 
 
 
-As noted above, the creation of the intermediates $x_(s e)^0 \, x_(s e)^1 \, B_(s n) \, C_(s n)$ and
-part of $Delta_(s e)$ can all be formed in a single large matmul.
 
-== Mamba 2
-<mamba-2>
-Mamba2 introduces some changes:
+== Mamba2
+<sec_mamba2>
 
-- The $n$-dimension is expanded to `ngroups` such dimensions (though
-  `ngroups`=1 is the default), with associated index
-  $g in (0 \, dots.h \, G - 1)$, $G equiv mono("ngroups")$. Adding a
-  non-trivial `ngroups` seems completely degenerate with expanding the
-  $n$ dimension of size `d_state` to size
-  $mono("d_state") times mono("ngroups")$.
+=== Architecture Overview
 
-- A head-index $a in (0 \, dots.h \, A - 1)$ ($A equiv mono("nheads")$)
-  and head dimension $h in (0 \, dots.h \, H)$ ($A times H = E$) are
-  introduced, analogously to transformers.
+Mamba2 is a gated, linear attention variant. It is somewhat complex, so we sketch an overview here:
++ The inputs $x_( s )$ are projected to create several different intermediates $y_( s )$
++ A short-filter, depthwise, causal convolution is performed over many of the intermediates, with some
+  having an activation function applied subsequently.
++ A linear, gated recursion relation along the lines of Sec. @sec_gated_linear_attn is applied to
+  build up internal state, with the inputs and gating factors built from the preceding intermediates.
++ The recursion outputs are multiplied by another elementwise gate, and the final output comes from
+  norming and projecting.
 
-- The $e$-index from two selective-scan weights is removed: they are now
-  per-head scalars $W_a^A \, W_a^D$. As before, $W_a^A< 0$.
+=== Architecture Details
 
-- The intermediate $Delta_(s a)$ is also reduced to a per-head,
-  per-sequence-position scalar, with respect to the hidden dimension.
-  This tensor is now created via a single matmul with weight
-  $W_(a e)^Delta$.
+Now the specifics. The inputs $x_( s d )$ create the initial intermediates through projections, activation functions, and convolutions:
+$
+  h_(s e) &= K^( h )_( e s s\' ) convolve mono("silu")(W_(e d)^(h) x_(s d))\
+  Delta_(s a) &= mono("Softplus")(W_(a e)^Delta x_(s e)) \
+  G_(s e) &= mono("silu")(W_(e d)^(G) x_(s d)) \
+  B_(s g n) &=K^( B )_( e s s\' ) convolve W_(g n e)^B x_(s e) \
+  C_(s g n) &=K^( C )_( e s s\' ) convolve W_(g n e)^C x_(s e) \
+$
+which can be implemented through fused matmuls and convolutions. The meaning of the various new
+indices is discussed below. A combination of $Delta$, $h$, and $B$ form the hidden state which gets
+added at every step in the recursion relation#footnote[The analogue of the $v_( s ) dot k_( s )$
+  term in @eq_linear_attn_state.], $Delta$ controls the gating ($alpha_( s )~ e^( Delta W^( A ) )$
+in @eq_gated_linear_attn_state), $G_( s e )$ controls the final gate, $C$ is used as an intermediate
+projection.
 
-- The short 1D convolution is now also taken over the $B$ and $C$
-  intermediates with kernels $W_(g n c)^(K_B)$, $W_(g n c)^(K_B)$.
+Given the above, a particular scan (discussed in detail below) is performed to create another
+intermediate,
+$
+  y_( s e ) = mono("scan")(h_( s e ), Delta_( s a ), B_( s g n ), C_( s g n ), W^( D )_( a ), W^( A )_( a ))
+$
+and the final output of the model is a projection of the normed, gated scan outputs:
+$
+  z_( s e ) = W_( d e )^( O )space NORM_( e )(y_( s e ) times.circle G_( s e )) space .
+$
 
-The updated model:
+Circling back to notation, we have:
+
+- $d in (0 \, dots.h \, D - 1)$: the input's hidden dimensions, `d_model`.
+- $s in (0 \, dots.h \, S - 1)$: sequence length.
+- $a in (0 \, dots.h \, A - 1)$: an attention-head-like index.
+- $h in (0 \, dots.h \, D/H - 1)$: a head-dim-like index.
+- $e in (0 \, dots.h \, E times D - 1)$: expanded internal hidden dimension#footnote[Default: $E = 2$.].
+- $n in (0 \, dots.h \, N - 1)$: another internal hidden dimension, controlling the size of the
+  internal memory; `d_state`#footnote[Defaults: $N=16$.].
+- `d_conv` (not yet mentioned) is the convolution kernel size#footnote[Default: $4$.].
+- Learnable parameters are the $W$'s (projections) and $K$'s (convolutional kernels). $W^(A)_(e n)$
+  is notable in that it is strictly non-positive#footnote[Implemented as $W^( A ) = - exp(A)$ where
+  $A$ is the actual learnable weight in $mono("mamba-ssm")$.].
+
+The scan operation first divides the intermediate $h_( s e )$ into heads, $h_( s e ) -> h_( s (a h)
+)$, solves the recursive relation#footnote[This is the Mamba2 analogue of the $S_( s ) = alpha_( s
+)S_( s-1) + v_( s ) dot k_( s )$ form in @sec_gated_linear_attn.]
+$
+  w_( s g a h n ) &= exp ( Delta_( s a ) W^(A)_( a ) ) w_( (s-1)g a h n) + Delta_( s a )B_( s g n )h_( s a h )
+$<algo_mamba2_scan>
+and returns the final result#footnote[Note that each recursion step requires $cal(O)( A H G N ) =cal(O)( D G N )$ operations,
+and so we should be able to optimally solve the entire recursion in $cal(O)(S D G N )$ time.]<foot_optimal_mamba2_recursion>
+$
+  y_( s a h ) &= C_( s g n )w_( s g a h n ) + W^( D )_( a )x_( s a h )
+$
+after re-concatenating the heads: $y_( s (a h) ) --> y _( s e )$. We can, of course, also write out
+the full solution as
+$
+  y_( s a h )&= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) ) times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) ) + W^( D )_( a ) x_( s a h ) \
+  &= C_( s g n ) (sum_( s\'=0 )^( s )e^( sum_( s\'\'=s\'+1 )^( s )Delta_( s\'\'a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) h_( s\'a h ) ) + W^( D )_( a ) x_( s a h) \
+$
 
 
-
-#figure(
-  kind: "algorithm",
-  supplement: [Algorithm],
-  caption: [Mamba2],
-  pseudocode-list(booktabs: true)[
-    + *Inputs* $x_(s d) in bb(R)^(S times D)$
-    + $x_(s e)^0 = W_(e d)^(I_0) x_(s d)$, $x_(s e)^1 = W_(e d)^(I_1) x_(s d)$ #h(1fr) `# Create expanded tensors from inputs (can fuse)`
-    + $x_(s e)^2 = K_(e s s') star.op x_(s e)^1$ #h(1fr) `# 1D grouped convolution over the sequence dimension (fused)`
-    + $x_(s e)^3 = phi (x_(s e)^2)$ #h(1fr) `# Elementwise non-linearity (silu)`
-    + $x_(s e)^4 = mono("selective_scan2") (x_(s e)^3)$ #h(1fr) `# Selective scan`
-    + $x^5_( s e ) = NORM (x^4_( s e ) times.circle phi ( x^0_( s e ) ) )_( e )$ #h(1fr) `# Elementwise product, non-linearity, and norm (RMS)`
-    + *Return* $z_(s d) = W_(d e)^O x_(s e)^5$ #h(1fr) `# Project back down.`
-  ],
-)<algo_mamba_2>
-
-
-
-The mechanical differences are the normalization step and the details of
-the `selective_scan2` operation, which is essentially the same as
-before, but now the hidden $e$ is split into multiple attention heads,
-analogously to transformer models:
-
-
-
-#figure(
-  kind: "algorithm",
-  supplement: [Algorithm],
-  caption: [Selective Scan 2: `selective_scan2`],
-  pseudocode-list(booktabs: true)[
-    + *Inputs*: $x_(s e) in bb(R)^(S times E)$ $x_(s a h) = x_(s (a h)) = x_(s e)$ #h(1fr) `# Break the inputs up into attention heads.`
-    + $B_(s g n) = W_(g n e)^B x_(s e)$ #h(1fr) `# Create intermediates B, C, Delta (can fuse)`#footnote[The `mamba_ssm` and `mamba.py` implementations differ here in that the latter optionally applies a norm operator post-projection.].
-    + $C_(s g n) = W_(g n e)^C x_(s e)$ $Delta_(s a) = W_(a e)^Delta x_(s e)$.
-    + $Delta_(s a) = mono("Softplus") (Delta_(s a))$. #h(1fr) `# For some reason. Force positive?` $mono("Softplus") (x) equiv ln (1 + e^x)$.
-    + $B_(s g n) = K_(g n s s')^B star.op B_(s g n)$ #h(1fr) `# 1D grouped conv. over the seq. dim. (fused)`
-    + $C_(s g n) = K_(g n s s')^C star.op C_(s g n)$
-    + Solve recursion#footnote[Note that each recursion step requires $cal(O)( A H G N ) =cal(O)( D G N )$ operations,
-      and so we should be able to optimally solve the entire recursion in $cal(O)(S D G N )$ time.]<foot_optimal_mamba2_recursion>, subject to $h_((- 1) g a h n) = 0$:
-    - $h_( s g a h n ) &= exp ( Delta_( s a ) W^(A)_( a ) ) h_( (s-1)g a h n) + Delta_( s a )B_( s g n )x_( s a h )$
-    - $y_( s a h ) &= C_( s g n )h_( s g a h n ) + W^( D )_( a )x_( s a h )$
-    - $=> y_( s a h ) &= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) ) times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) ) + W^( D )_( a ) x_( s a h )$
-    - $=> y_( s a h )&= C_( s g n ) (sum_( s\'=0 )^( s )product_( s\'\'=s\'+1 )^( s )e^( Delta_( s\'\'a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) ) + W^( D )_( a ) x_( s a h)$
-    - $=> y_( s a h )&= C_( s g n ) (sum_( s\'=0 )^( s )e^( sum_( s\'\'=s\'+1 )^( s )Delta_( s\'\'a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) ) + W^( D )_( a ) x_( s a h)$
-    + *Return* $y_(s e) = y_(s (a h))$ #h(1fr) `# Concatenate the heads back together. `
-  ],
-)<algo_mamba2_scan>
-
-As before, many of the matmuls can be performed as one big operation,
-and the three short convolutions can be similarly fused into a single
-convolution. The two algorithms ~@algo_mamba1_scan and
-~@algo_mamba2_scan are nearly identical; they just differ in some
-tensor shapes.
 
 === Mamba2 Duality with Attention
 <mamba2-duality-with-attention>
-There are only two steps in which tokens at different temporal positions
-interact in the Mamba2 model:
+There are only two steps in which tokens at different temporal positions interact in the Mamba2
+model:
 
 + In the short 1D convolution.
 
 + In the recurrence relation, where we create the intermediate
   $
-    z_(s a h) & = C_(s g n) (sum_(s' = 0)^s e^(Delta_(s a) W_a^A) times dots.h times e^(Delta_((s ' + 1) a) W_a^A) Delta_(s' a) B_(s' g n) x_(s' a h)) equiv M_(a s s') x_(s' a h)
+    y_(s a h) & = C_(s g n) (sum_(s' = 0)^s e^(Delta_(s a) W_a^A) times dots.h times e^(Delta_((s ' + 1) a) W_a^A) Delta_(s' a) B_(s' g n) w_(s' a h)) equiv M_(a s s') w_(s' a h)
   $
   which is the most complicated step of the model.
 
-As noted above, the second case is ultimately just a matrix-multiply on the input tensors $x_(s a
+ws noted above, the second case is ultimately just a matrix-multiply on the input tensors $w_(s a
   h)$ with the tensor $M_(a s s')$, where operations across attention head are all independent. The
 $M_(a s s')$ tensor has $cal(O) ( A S ^2 )$ elements, which we clearly do not want to concurrently
 materalize. All of this should sound familiar: the above is highly analogous to the structure and
@@ -1464,19 +1434,16 @@ problems of flash attention, @subsec_flash_attention, albeit with important diff
 details of the operator $M_(a s s')$. This is the “duality\" discussed in
 @dao2024transformersssmsgeneralizedmodels and the broad strokes of the efficient algorithm
 implementation for Mamba2 echos that of flash attention: partition the computation over the sequence
-dimensions and compute $z_(s a h)$ in chunks over the $s$-dimension, so as to avoid realizing any
+dimensions and compute $y_(s a h)$ in chunks over the $s$-dimension, so as to avoid realizing any
 $cal(O) ( S ^2 )$ tensors.
-
-Similar statements hold for the original Mamba; the index names and
-choices just make the analogy more readily recognizable in Mamba2.
 
 === Details: Cumsums, Chunking, and the Mamba2 Scan
 <details-cumsums-chunking-and-the-mamba2-scan>
 Some more details about how to compute the recursion solution in
 @algo_mamba2_scan. Similarly to the previous section, let
 $
-  z_( s a h ) &= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) ) times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) x_( s\'a h ) )\
-  &eq.triple C_( s g n )cal(A)_( s s\'a )Delta_( s\'a )B_( s\'g n ) x_( s\'a h )\
+  y_( s a h ) &= C_( s g n ) (sum_( s\'=0 )^( s )e^( Delta_( s a )W^(A)_( a ) ) times ... times e^( Delta_( (s\'+1)a )W^(A)_( a ) ) Delta_( s\'a )B_( s\'g n ) w_( s\'a h ) )\
+  &eq.triple C_( s g n )cal(A)_( s s\'a )Delta_( s\'a )B_( s\'g n ) w_( s\'a h )\
   &eq.triple C_( s g n )cal(A)_( s s\'a )cal(B)_( s\'g a n h )
 $<eq_ssd>
 The above is the most complex part of the Mamba2
@@ -1548,10 +1515,10 @@ $
 $<app_eq_mamba2_diag_propagator>
 where the final form with the additional mask $Z_(l l')$ is better behaved numerically, as it does
 not rely on cancellations between sums. Careful attention should be paid to the inequality symbols
-in the masks. The remainder of these diagonal computations is straightforward: just compute $z _( c
+in the masks. The remainder of these diagonal computations is straightforward: just compute $y _( c
 l a h ) = C _( c l g n )e^( sans(A)_( c c l l\'a ) )cal(B)_( c l\'g a n h )$, which takes $cal(O)(
 L S D G N )$ time, a factor of the chunk size $L$ larger that the optimal compute time
-(@foot_optimal_mamba2_recursion), due to the matmul. Note the embarrassingly parallel nature across
+// (@foot_optimal_mamba2_recursion), due to the matmul. Note the embarrassingly parallel nature across
 the chunk index.
 
 
@@ -1560,7 +1527,7 @@ the chunk index.
 Now we compute the remaining off-diagonal terms. Compute one
 $(c \, c ')$ chunk at a time, i.e. we compute
 $
-  z_(c l a h) = C_(c l g n) cal(A)_(c c\' l l' a) cal(B)_(c\' l' g a n h) med \,
+  y_(c l a h) = C_(c l g n) cal(A)_(c c\' l l' a) cal(B)_(c\' l' g a n h) med \,
 $
 by iterating over the $c\'$ sum, similarly to flash attention. As written, this would be $cal(O)(
 S^( 2 ) D G N )$ computation which is an entire factor of $S$ larger than optimal due to the sums
@@ -1645,10 +1612,10 @@ time, rather than the naive $cal(O)( S^( 2 ) )$ time.
 
 
 Therefore, one way we could compute @eq_mamba2_all_off_diagonal_terms in stages as in:
-+ $z_( c\'g a n h ) <- T_( c\'l\'a )cal(B)_( c\'l\'g a n h )$ in $cal(O)( S D G N )$
-+ Use @eq_mamba2_efficient_mask_computation to compute $z_( g a n h ) <- M_(c c\' )bold(A)_( c c\'
-  )z _( c\' g a n h )$ in $cal(O)( (S D G N) / L )$
-+ $z_( c l g a n h )<- C_( c l g n ) U_( c l a )z_( c g a n h )$ in $cal(O)( S D G N )$
++ $y_( c\'g a n h ) <- T_( c\'l\'a )cal(B)_( c\'l\'g a n h )$ in $cal(O)( S D G N )$
++ Use @eq_mamba2_efficient_mask_computation to compute $y_( g a n h ) <- M_(c c\' )bold(A)_( c c\'
+  )y _( c\' g a n h )$ in $cal(O)( (S D G N) / L )$
++ $y_( c l g a n h )<- C_( c l g n ) U_( c l a )z_( c g a n h )$ in $cal(O)( S D G N )$
 
 
 
@@ -1679,7 +1646,7 @@ $
 $
 Assuming an efficient $cal(O)( S )$ $CUMSUM$ implementation (up to constant factors), the above
 realizes the optimal asymptotic $cal(O)( S D G N )$ time (and memory) efficiency of
-@foot_optimal_mamba2_recursion. This is just the basic recurrent solution in slightly fancy language.
+// @foot_optimal_mamba2_recursion. This is just the basic recurrent solution in slightly fancy language.
 
 
 ==== Notes On the `mamba-ssm` Implementation
@@ -1797,7 +1764,7 @@ A different strategy is the following:
 === Aren't These Just RNNs?<rnns_and_ssm>
 Yes, but very special ones with the important computational difference that the recursion relations
 are #emph[linear] in the hidden state $h$. This crucial difference improves the ability to
-parallelize the computations. Compare @eq_s4_discrete to what typical RNN recursion relations would
+parallelize the computations. Compare to what typical RNN recursion relations would
 look like:
 $
   h_( b s ) &= phi (A_( b b\' )h_( b\' (s-1) ) + B_( b a )x_( a s ) )\
@@ -2333,7 +2300,7 @@ laws (in our notation):
 
 - $cal(L) (C) approx  ( C ^( star ) / C
    ) ^( alpha _( C ) )$, with
-  $alpha_C approx 0.050$ and $C^star.op approx 3.1 times 10^8$
+  $alpha_C approx 0.050$ and $C^convolve approx 3.1 times 10^8$
   PFLOP/s-days, where the batch size was assumed to be chosen to be
   compute optimal per the criteria they outline
 
@@ -2452,7 +2419,7 @@ y_l))$. The reward model is commonly an LLM with a scalar output head attached.
 
 First, a quick review of RLHF, which proceeds in stages. First,
 $cal(D)$ is used to train a reward model informed by the dataset
-$cal(D)$. The optimal reward model $r_star.op$ minimizes the binary
+$cal(D)$. The optimal reward model $r_convolve$ minimizes the binary
 cross-entropy loss over $cal(D)$, which is just
 $
   cal(L)_( r ) &= -E_( x, y_( l ), y_( w ) cal(D) ) ln p(y_( w ) succ y_( l )| x ) .
@@ -2484,8 +2451,8 @@ opposite direction: first, find the functional form of $pi_theta$ which minimize
 an arbitrary reward function, and then use this form when minimizing of the cross-entropy defining
 the reward function#footnote[This is analogous to minimizing the regular function $f (x \, y)$
 subject to also minimizing $g (x)$. This can either be done by solving the second for
-$x_star.op$ and minimizing $f (x_star.op \, y)$ (the RLHF strategy), or first solving
-$frac(partial f, partial y) = 0$ to find $x_star.op (y)$ and then minimizing $g (x_star.op (y))$
+$x_convolve$ and minimizing $f (x_convolve \, y)$ (the RLHF strategy), or first solving
+$frac(partial f, partial y) = 0$ to find $x_convolve (y)$ and then minimizing $g (x_convolve (y))$
 (the DPO strategy).].
 
 The $pi_theta$ which minimizes the RLHF loss
@@ -2614,12 +2581,12 @@ R_t (a_t, s_t, s_(t+1))$ in general, though for LLM RL often $R_t = R_t (a_t)$ a
 
 
 Starting from some initial state described by distribution $rho(s_0)$, the probability distribution
-over a given chain of state-action pairs is given by
+for a specific state-action pair _trajectory_, often denoted by $tau$, is given by
 $
-  P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 )| pi ) = rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi(a_t|s_t)
+  P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 ), pi ) eq.triple P(tau, pi) = rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi(a_t|s_t)
 $
-policy $pi(a_t|s_t)$ describing the probability that action $a_t$ is taken given the current state
-$s_t$, and where $p( s_( t+1 )| a_( t ), s_( t ) )$ is a (probably unknown) distribution describing
+where the policy $pi(a_t|s_t)$ describes the probability that action $a_t$ is taken given the current state
+$s_t$, and where $p( s_( t+1 )| a_( t ), s_( t ) )$ is a distribution describing
 the probability of transitioning to state $s_( t+1 )$ given that action $a_t$ was taken.
 
 === Policy Gradients
@@ -2628,12 +2595,12 @@ the probability of transitioning to state $s_( t+1 )$ given that action $a_t$ wa
 In _policy gradient_ (PG) RL, the goal is to learn an improved policy which maximizes some reward
 function which grades the policy's chosen actions#footnote[An alternative RL method is $Q$-learning,
   which we skip for now.]. In general, the goal is to maximize some quantity $R$ defined over the
-state-action path taken by the system. A common historical choice is to use a weighted sum of
-rewards (or advantages): $R(s_( T ), a_( T-1 ), ..., s_( 0 )) = sum_( t ) gamma^( t ) R_t (a_t, s_t,
-s_(t+1))$. The expected value is then
+state-action path taken by the system. A common historical choice is to use a weighted
+sum#footnote[This can help with training variance and stability.] of rewards (or advantages): $R(s_(
+T ), a_( T-1 ), ..., s_( 0 )) = sum_( t ) gamma^( t ) R_t (a_t, s_t, s_(t+1))$. The expected value
+is then
 $
-  J(pi) &eq.triple angle.l R angle.r \
-  &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t )) P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 )| pi ) R(s_( T ), a_( T-1 ), ..., s_( 0 )) \
+  J(pi) &eq.triple angle.l R angle.r_( tau ) \
   &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t )) rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi(a_t,s_t) R(s_( T ), a_( T-1 ), ..., s_( 0 )) space .
 $
 
@@ -2641,37 +2608,50 @@ If the policy depend on parameters $theta$, $pi= pi_( theta )$, then we could at
 the above through gradient-based optimization strategies, as usual. Taking a gradient and
 manipulating terms, we have $J(pi) = J(theta) $ and
 $
-  nabla_( theta ) J(theta) &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t ) )P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 )| pi ) nabla_( theta ) ln pi_( theta )(a_( t ), s_( t )) R(s_( T ), a_( T-1 ), ..., s_( 0 )) \
-  &eq.triple angle.l R nabla_( theta ) ln pi_( theta ) angle.r .
+  nabla_( theta ) J(theta) &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t ) )rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi_( theta )(a_( t ), s_( t ))R(s_( T ), a_( T-1 ), ..., s_( 0 ))\
+  & quad times sum_( t\'=0 )^( T-1 )nabla_( theta ) ln pi_( theta )(a_( t\' ), s_( t\' )) \
+  &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t ) )P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 ), pi ) R(s_( T ), a_( T-1 ), ..., s_( 0 ))times sum_( t\'=0 )^( T-1 )nabla_( theta ) ln pi_( theta )(a_( t\' ), s_( t\' )) \
+  &eq.triple angle.l R sum_( tau ) nabla_( theta ) ln pi_( theta ) angle.r_( tau ) .
 $
 
-When we try to compute the above gradient in practice, there are important subtleties which can be
-quite confusing. The natural strategy is to follow one or more trajectories generated by a given
-policy, compute the empirical average $S(theta) =angle.l R ln pi_( theta ) angle.r_( "empirical" )$
-over the realized sequence of states and actions, and use back propagation to compute the gradient.
-The subtlety is that this _surrogate_ function $S(theta)$ is not the same as the expectation value above:
-$S(theta) != J(theta)$. Only their first derivatives match in general#footnote[Due to the gradient
-  only hitting the $ln$ term in the empirical average, while they also hit the distribution in
-  $J(theta)$. For example: $nabla_i nabla_j J(theta) = angle.l R (nabla_( i ) ln pi_( theta )
+Some practical notes:
+- The transition probabilities are generally not known and not being modeled, rather they
+  are just treated as an environment#footnote[Think of training a model $pi_( theta )(a_( t )|s_( t
+  ))$ to learn a video game with non-trivial random elements in it, as described by $p(s_( t+1 )|a_( t
+  ), s_( t))$.], and so we estimate the average by generating multiple trajectories and averaging over
+  them: $S(theta) =angle.l R sum_( tau )ln pi_( theta ) angle.r_( "empirical" )$
+- A subtlety is that this _surrogate_ function $S(theta)$ is not the same as the expectation value
+  above: $S(theta) != J(theta)$. Only their first derivatives match in general#footnote[Due to the
+  gradient only hitting the $ln$ term in the empirical average, while they also hit the distribution
+  in $J(theta)$. For example: $nabla_i nabla_j J(theta) = angle.l R (nabla_( i ) ln pi_( theta )
   nabla_( j ) ln pi_( theta ) +nabla_( i ) nabla_( j ) ln pi_( theta )) angle.r$ while $nabla_i
-  nabla_j S(theta) = angle.l R nabla_( i ) nabla_( j ) ln pi_( theta ) angle.r _( "empirical" )$ ].
-$S(theta)$ itself is therefore not an inherently meaningful quantity and so you may not want to plot
-the surrogate loss! Decreasing surrogate loss is not necessarily informative of anything.
+  nabla_j S(theta) = angle.l R nabla_( i ) nabla_( j ) ln pi_( theta ) angle.r _( "empirical" )$,
+  schematically.]. $S(theta)$ itself is therefore not an inherently meaningful quantity and so you
+  may not want to plot the surrogate loss! Decreasing surrogate loss is not necessarily informative of
+  anything.
 
+=== Specialization to LLMs
+
+For generative language models, the state $s_( t )$ is just the current prefix and $pi_( theta)(a_(
+t )|s_( t ))$ is the probability the LLM assigns for $a_( t )$ to be the next token. The initial
+state $s_0$ is often some initial prompt, usually a question we'd like the model to be able to
+answer. Unlike in canonical RL cases, the transition probabilities here are trivial: $p(s_( t+1)|a_(
+t ), s_( t))=delta(s_( t+1 ) - CAT(a_( t ),s_( t )))$, and $rho(s_0)$ is similarly a delta
+function.
 
 == PPO
 <sec_ppo>
 
-Promximal policy optimization @schulman2017proximalpolicyoptimizationalgorithms (PPO) is the
+Proximal policy optimization @schulman2017proximalpolicyoptimizationalgorithms (PPO) is the
 starting point which most LLM RL pipelines build upon. Essentially, it just adds clipping to the
 surrogate objective.
 
 Let $pi_( theta )(a_t|s_t)$ be the current model, $pi_( theta_( "old" ) )(a_t|s_t)$ be the same
-model with parameters $theta_( "old" )$ (which may or may not be different from $theta$), and $r_(
+model with parameters $theta_( "old" )$, and $r_(
 t)(theta) =(pi_( theta)(y_t|x_(t-1)))/(pi_( theta_("old"))(y_t|x_(t-1)))$. The PPO empirical
 surrogate objective is:
 $
-  S(theta) = angle.l min(r_(t)(theta)A_( t ), "clip"(r_(t)(theta), 1-epsilon, 1+epsilon) A_t ) angle.r_( "emiprical" ) space .
+  S(theta) = angle.l sum_( t )min(r_(t)(theta)A_( t ), "clip"(r_(t)(theta), 1-epsilon, 1+epsilon) A_t ) angle.r_( "empirical" ) space .
 $<eq_ppo>
 Here $epsilon >0$ is a hyperparameter#footnote[$epsilon~cal(O)( 1e-1 )$ is common], $A_t$ is the
 advantage, and $"clip"(x, l, h)$ is
@@ -2684,7 +2664,10 @@ $
 $
 In practice, the min and clip operations are applied for every token prediction and averaged over
 the sequence length, rather than computed once at the sequence level, but we leave the notation
-schematic above and will be more precise in later sections.
+schematic above and will be more precise in later sections. Note that if all the RL steps are
+strictly on-policy, then $theta=theta_( "old" )$ and the clipping is completely trivial#footnote[In
+  this case, we take the derivative before setting $theta --> theta_( "old" )$, which still
+  trivializes the derivative.].
 
 
 The PPO surrogate creates the same derivatives as the surrogate in @sec_policy_grads in the limit
@@ -2726,33 +2709,32 @@ In DeepSeek's work on Group-Relative Policy Optimization (GRPO)
 @deepseekai2025deepseekr1incentivizingreasoningcapability, they dispense with the need for a
 secondary model and define their advantage function as follows. The reference model $pi_( theta_(
 "old" ) )$ is the current version of the model.
-1. For each state $s_t$ (that is, prefix question $q$), sample $G$ responses from $pi_( theta_(
-   "old" ) )$: $a_( t)^( g )$, $g in {0, ..., G-1}$.
-2. A reward is computed for each such response: $r_( t )^( g )= r(a_( t )^( g ))$.
-  Programmatically verifiable rewards are especially attractive for this step, where $r_( t )^( g
+1. For initial state $s_0$ (that is, prefix question), sample $G$ total responses (trajectories)
+  from $pi_( theta_( "old" ) )$: $a_( g )$, $g in {0, ..., G-1}$.
+2. A reward is computed for each such response: $r_( g ) $.
+  Programmatically verifiable rewards are especially attractive for this step, where $r_( g
    )$ takes on some pair of binary values depending on whether the answer is correct or not#footnote[Such
   simple scoring is also claimed to be robust against "reward hacking", where the model optimizes RL
   rewards through unintended means, e.g. through undesirably short or long answer,
   style-over-substance generation, etc.].
 3. The advantage of each response is just the z-score:
 $
-  A_t^( g ) = (r_( t )^( g ) - "mean"_( g\' )(r_( t )^( g\' ))) / ("std"_( g\' )(r_( t )^( g\' )))
+  A_( t,g ) = (r_( g ) - "mean"_( g\' )(r_( g\' ))) / ("std"_( g\' )(r_( g\' )))
 $<eq_grpo_advantage>
 If we always take the current model as the $pi_( theta_( "old" ) )$, then we use @eq_ppo with
 $theta_( "old" ) --> theta$ post-derivative, in which case the $min$ and $"clip"$ operations are
 trivial. DeepSeek's GRPO also uses the KL-divergence penalty, but uses a
 #link("http://joschu.net/blog/kl-approx.html")[different unbiased estimator] than the naive one.
 
-The empirical average, which we have conspicuously avoided defining, is taken as (neglecting the KL
-term)
+An important point is that $A_(t, g )$ is independent of $t$: we are assigning the same reward to
+every step in the trajectory. So, writing $A_(t, g )= A_( g )$ the policy gradients factorize in the
+form:
 $
-  S(theta) = 1 / G sum_( g ) min(r_(t)^( g )(theta)A_( t )^( g ), "clip"(r_(t)^( g )(theta), 1-epsilon, 1+epsilon) A_t^( g ) ) space .
+  nabla S(theta) = angle.l sum_(t ,g ) A_( t,g )nabla_( theta )C(r_( theta )) angle.r_( tau )=angle.l sum_( g ) A_( g )sum_( t )nabla_( theta )C(r_( theta )) angle.r_( tau )
 $
-Namely, every response is weighted the same.
-
-#warn_box[
-  NOTE: not currently clear to me if the min op is applied at the full output sequence or token level.
-]
+where $C(r_( theta ))$ is the clipping function above, or some similar variant thereof. Thus there
+is no token-specific feedback with these advantages, as there might be in some more sophisticated
+scheme.
 
 == DAPO
 <sec_dapo>
