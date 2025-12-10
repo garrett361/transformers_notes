@@ -13,6 +13,7 @@
 /* Custom objects */
 #let DR = `Dropout`
 #let int = math.integral
+#let prod = math.product
 #let SM = math.op(`Softmax`)
 #let CAT = math.op(`Concat`)
 #let LIN = math.op(`Linear`)
@@ -1228,13 +1229,15 @@ attention.
 === Flash Linear Attention
 
 Two natural, but naive, approaches to linear attention are suboptimal on modern hardware:
-- Fully parallelized: compute $q dot k$ first, apply the mask, and then dot into the values. The
-  positive is that this uses GPU-friendly matmuls, but the total computational complexity is too
-  high#footnote[Overloading $S$ to be both sequence length and state here.]: $cal(O)( S^2 D + D^( 2 )
-  S )$, rather than being purely linear in $S$.
-- Fully recurrent: use recursion as in @eq_linear_attn_state to build up the state and perform a dot
-  product over the hidden dimension to compute the outputs. This is cheaper in FLOPs, realizing
-  linear-in-sequence scaling $cal(O)( D^2 S)$, but all of the operations have low arithmetic intensity.
+- Fully parallelized: for $o_( s d ) = q_( s d\' ) k_( s\' d\') v_( s\' d )m_( s s\' )$, compute $q
+  dot k$ first, apply the mask, and then dot into the values. The positive is that this uses
+  GPU-friendly matmuls, but the total computational complexity is too high#footnote[Overloading $S$ to
+  be both sequence length and state here.]: $cal(O)( S^2 D + D^( 2 ) S )$, rather than being purely
+  linear in $S$.
+- Fully recurrent: use recursion to compute $o_( s d ) = q_( s d\' )S_(s d \' d ) $ as in
+  @eq_linear_attn_state, iteratively building up $S_( s d\' d )$ at total cost $cal(O)( S D^( 2 ) )$.
+  This is cheaper in FLOPs, realizing linear-in-sequence scaling $cal(O)( D^2 S)$, but all of the
+  operations have low arithmetic intensity.
 
 
 A middle-ground chunked strategy can perform better than either of the above. We chunk the sequence
@@ -1331,6 +1334,86 @@ challenging; finish later.
 
 
 === Delta
+
+An efficient chunking strategy for the delta rule brings in some new elements. We chunk
+@eq_delta_rule_linear_attn_state as above and partially unroll:
+$
+  S_( t r d\' d ) & = (delta_( d\' d\'\' ) -beta_( t r ) k_( t r d\' )k_( t r d \'\') )S_( t( r-1) d\'\' d \'\' ) + beta_( t r )k_( t r d\' )v_( t r d ) \
+  &=prod_( r\'=0 )^( r )(delta_( d\' d\'\' ) - beta_( t r\' ) k_( t r\' d\' ) k_( t r \'\' d\'\' )) cal(S)_( t d\'\' d ) \
+  & quad+ sum_( r\'\'=0 )^( r )prod_( r\'=r\'\'+1 )^( r )(delta_( d\' d\'\' ) - beta_( t r\' ) k_( t r\' d\' ) k_( t r\' d\'\' ))beta_( t r\'\' ) k_( t r\'\' d\' )v_( t r\'\' d ) \
+  & eq.triple (delta_( d\' d\'\' ) - sum_( r\'=0 )^( r ) k_( t r\' d\' ) w_( t r\' d\'\' ) ) cal(S)_( t d\'\' d ) + sum_( r\'=0 )^( r ) k_( t r\' d\' )u_( t r\' d )
+$
+defining the $w_(  t r d )$ and $u_( t r d )$ tensors, following @songlin_deltanet_ii. The total output
+of the layer can be written as
+$
+  o_( t r d ) &= q_( t r d\' )S_( t r d\' d ) \
+  &=q_( t r d\' )(delta_( d\' d\'\' ) - sum_( r\'=0 )^( r ) k_( t r\' d\' ) w_( t r\' d\'\' ) ) cal(S)_( t d\'\' d ) + q_( t r d\' ) sum_( r\'=0 )^( r ) k_( t r\' d\' )u_( t r\' d ) \
+  &=q_( t r d\' )cal(S)_( t d\'\' d ) + q_( t r d\' )sum_( r\'=0 )^( r ) k_( t r\' d\' )(u_( t r\' d ) - w_( t r\' d\'\' )cal(S)_(t d\'\' d )) \
+  &=q_( t r d\' )cal(S)_( t d\'\' d ) + q_( t r d\' ) k_( t r\' d\' ) m_( r r\' )(u_( t r\' d ) - w_( t r\' d\'\' )cal(S)_(t d\'\' d ))
+$
+where we inserted the inter-chunk causal mask $m_( r r\' )$ in the final line so that we can compute the explicit sum via a
+matmul.
+
+The final expression above is hardware friendly, but requires knowing the $u_( t r d )$ and $w_( t r
+d )$ tensors, which were only implicitly defined above. Recursive expressions for these quantities
+follow from the expressions above, but they suffer from the now-familiar affliction of being
+hardware unfriendly if actually computed via direct recurrence#footnote[And so we won't reproduce
+  them, but see @songlin_deltanet_ii for explicit expressions.]. Fortunately, there is a neat trick
+for computing these in an alternate way.
+
+
+Start with $w_( t r d )$ and let us suppress the $d$ index in what follows for simplicity; dot
+product dimensions are hopefully clear from context. Then, from its definition, $w_( t r )$ is given
+by
+$
+  w_( t r ) =beta_( t r )k_( t r ) dot (bold(1) - beta_( t (r-1) )k_( t (r-1)) times.o k_( t (r-1) ) ) dot ... dot (bold(1) - beta_( t 0 )k_( t 0) times.o k_( t 0 ) ) space .
+$
+Now if we let
+$
+  A_( t r r\' ) &=
+  cases(
+  -beta_( t r ) k_( t r )dot k_( t (r-1) ) wide & r < r\',
+  0 & r >= r\'
+  )
+$
+then the above can be written as:
+$
+  w_( t r )&= beta_( t r ) k_( t r ) +A_( r r\' )beta_( t r\' )k_( t r\' ) + A_( r r\' ) A_( r\'r\'\' )beta_( t r\'\' )k_( t r\'\' ) + ... \
+  & eq.triple ( bold(1) + A + A^( 2 )+ ...+ A^( r-1 ))_( r r\' ) beta_( t r\' )k_( t r\' ) \
+  & = (bold(1) - A)^( -1 )_( r r\' )beta_( t r\' )k_( t r\' )
+$
+where the final equality relies on the fact that the $A_( r r\' )$ matrix above obeys the special
+quality that $A^( n )=0$ for $n>=r$ (ultimately due to causality). This can be seen either from the usual Taylor matrix
+expansion (assuming convergence) which terminates early due to the preceding property, or just from direct computation:
+$
+  (bold(1) - A )dot (bold(1) + A + A^( 2 ) + ... +A^( r-1 )) & = (bold(1) + A + A^( 2 ) + ...+ A^( r-1 ))\
+  & quad - A dot (bold(1) + A + A^( 2 ) + ... A^( r-1 ))\
+  & = (bold(1) + A + A^( 2 ) + ... A^( r-1 )) \
+  & quad - (A + A^( 2 ) + ... A^( r-1 ))\
+  &= bold(1) space .
+$
+Because of the triangular nature of $A_( r r\' )$, the inverse can be computed relatively cheaply
+and then all of the remaining operations are matmuls, taking $cal(O)( S R )$ time. In exactly the
+same way, we can also derive a similar equation for $u_( t r )$:
+$
+  u_( t r ) = (bold(1) - A)^( -1 )_( r r\' ) beta_( t r\' )v_( t r\' ) space .
+$
+This trick is called the UT transformation @Joffrain2006AccumulatingHT, and the recursive
+representation of $w$ and $u$ (that we didn't write) is called the WY representation
+@Bischof1985TheWR.
+
+The final, hardware friendly representation of the delta model outputs is:
+$
+  o_( t r d ) &= q_( t r d\' )cal(S)_( t d\'\' d ) \
+  & quad + q_( t r d\' ) k_( t r\' d\' ) m_( r r\' )(bold(1) - A)^( -1 )_( r\' r\'\' ) beta_( t r\'\' )v_( t r\'\'d )\
+  & quad - q_( t r d\' ) k_( t r\' d\' ) m_( r r\' ) (bold(1) - A)^( -1 )_( r\' r\'\' )beta_( t r\'\' )k_( t r\'\'d\'\' )cal(S)_(t d\'\' d ) space .
+$
+Computational complexity:
++ Compute the first line in $cal(O)( S D^( 2 ) )$
++ Compute $q_( t r d\' ) k_( t r\' d\' ) m_( r r\' )$ in $cal(O)( S R D )$.
++ Compute $(bold(1) - A)^( -1 )_( r\' r\'\' )$ in $cal(O)( R^2 )$.
++ Compute all remaining matmuls in $cal(O)( S R^( 2 ) + S R D + S D^( 2 ) )$
+
 
 
 
