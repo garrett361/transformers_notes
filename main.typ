@@ -12,6 +12,7 @@
 
 /* Custom objects */
 #let DR = `Dropout`
+#let int = math.integral
 #let SM = math.op(`Softmax`)
 #let CAT = math.op(`Concat`)
 #let LIN = math.op(`Linear`)
@@ -102,7 +103,6 @@
   set text(
     lang: lang,
     region: region,
-    font: font,
     size: fontsize,
   )
   set heading(numbering: sectionnumbering)
@@ -591,10 +591,10 @@ $
 and so the model is trained using the usual cross-entropy/maximum-likelihood loss#footnote[Here's an
 alternative derivation for why this loss is minimized when the learned distribution perfectly
 matches the actual one. Let $p (x)$ be the actual distribution and $q_theta (x)$ be the model.
-Taking the continuous case, the expected loss is $cal(L) = - integral dif x thin p(x)ln q _(
-theta)(x)$. We want to minimize this, subject to the condition that $integral dif x q _( theta)(x)
+Taking the continuous case, the expected loss is $cal(L) = - int dif x thin p(x)ln q _(
+theta)(x)$. We want to minimize this, subject to the condition that $int dif x q _( theta)(x)
 =1$. So, we use the #link("https://e n.wikipedia.org/wiki/Calculus_of_variations")[calculus of
-  variations] on the loss with a Lagrange multiplier: $cal(L)' = cal(L) + lambda integral dif x
+  variations] on the loss with a Lagrange multiplier: $cal(L)' = cal(L) + lambda int dif x
 thin q_( theta )(x)$. Solving $( delta cal(L)' )/( delta q _( theta )(x) )=0$ yields $q_theta (x)
 = p (x)$. This seems more straightforward and general than the usual argument via the
 KL-divergence and Jensen's inequality.]
@@ -755,7 +755,7 @@ $
 where $ theta_h & = 10^(- 4 h \/ H) med . $ The RoPE memory costs are thus $cal(O) ( K
 H)$#footnote[A single RoPE buffer can be shared amongst all attention layers and are broadcast
   across all heads, amortizing the memory costs.]. The sparsity present in this constrained form of
-the RoPE matrices means that @eq_rope] can be computed in $cal(O) ( B S H )$ time, rather than
+the RoPE matrices means that @eq_rope can be computed in $cal(O) ( B S H )$ time, rather than
 $cal(O) ( B S H ^2 )$, as it would be for a general rotation matrix. See the paper for explicit
 expressions.
 
@@ -1169,13 +1169,15 @@ points, as discussed below.
 === $S_( s d\' d )$ as a Look-up Table
 <sec_S_look_up>
 A common mental model is to think of $S_( s  d\' d ) = sum_( s\'=0 )^( s )k_( s\' d\' )v_( s\' d )$
-as a noisy dictionary we are extracting keys from. In the simplifying limit where the $k_( s\'d\' )$
-are all orthonormal for different $s$ values, we can extract out a given value at $s\'$ up to an
-error term (which is not obviously small at all) as in
+as a noisy dictionary we are extracting information from. That is, in the limit where the $k_( s d )$
+each have unit norm and have small inner products for $s != s\'$, then we can extract out a given value at $s\'$ up to an
+error term as in#footnote[Of couse, there is no reason to assume the $k_( s d )$ are nearly orthonormal in general, and they
+cannot be if $S > D$, but this is nevertheless a sometimes-useful perspective.]
 $
   k_( s\'d\' ) S_( s d\' d ) = v_( s\' d ) + sum_( s\'\'!= s\' ) v_( s\'\' d )k_( s\'\' d\' ) k_( s\'d\' ) eq.triple v_( s\' d ) + epsilon space .
 $<eq_kv_dict>
-From this perspective, the limitation with constant-space state and long sequence is clear: there can
+
+From this viewpoint, the limitation with constant-space state and long sequence is clear: there can
 be at most $D$ orthogonal keys, whereas we may be storing $S >> D$ steps worth of information.
 #link("https://sustcsonglin.github.io/blog/2024/deltanet-1/")[Songling Yang has a nice writeup
   here.]
@@ -1204,16 +1206,16 @@ which is what the _delta rule_ strives for @schlag2021lineartransformerssecretly
 of the update is
 $
   S_( s d\' d ) & = (delta_( d\' d\'\' ) -beta_( s ) k_( s d\' )k_( s d \'\') )S_( (s-1) d\'\' d \'\' ) + beta_( s )k_( s d\' )v_( s d )
-$<eq_delta_rule_linear_attn_state>-
+$<eq_delta_rule_linear_attn_state>
 where $beta_( s )$ is again data-dependent#footnote[The value range of $beta_( s )$ varies by model,
   but usually it's between zero and 1 or -1 and 1.].
 
 Taking the viewpoint in Sec. @sec_S_look_up that we query the state $S_( s d\' d )$ as in $k dot S ~
 v$, the above modification makes the architecture capable of removing entries from the dictionary.
 For instance, in the limit that $beta_( s ) = 1/ (k_s dot k_s)$ the matrix $bold(1) -beta_( s ) k_( s d\'\') k_( s
-d\')$ is a projector onto the space orthogonal#footnote[That is, $S dot (1 - k times.circle k) dot k
+d\')$ is a projector onto the space orthogonal#footnote[That is, $S dot (1 - k times.o k) dot k
   = 0$, schematically.] to $k_( s d )$ and so this removes the corresponding entry from the old
-dictionary at step $s-1$ and overwrites it with the new $v times.circle k$ entry. Often the $k$ and
+dictionary at step $s-1$ and overwrites it with the new $~v times.o k$ entry. Often the $k$ and
 $v$ tensors are explicitly normalized prior to use, as well.
 
 
@@ -1228,44 +1230,56 @@ attention.
 Two natural, but naive, approaches to linear attention are suboptimal on modern hardware:
 - Fully parallelized: compute $q dot k$ first, apply the mask, and then dot into the values. The
   positive is that this uses GPU-friendly matmuls, but the total computational complexity is too
-high#footnote[Overloading $S$ to be both sequence length and state here.]: $cal(O)( S^2 D + D^( 2 )
-S )$.
+  high#footnote[Overloading $S$ to be both sequence length and state here.]: $cal(O)( S^2 D + D^( 2 )
+  S )$, rather than being purely linear in $S$.
 - Fully recurrent: use recursion as in @eq_linear_attn_state to build up the state and perform a dot
-  product over the hidden dimension to compute the outputs. This is cheaper in FLOPs, $cal(O)(
-D^2 S)$, but all of the operations have low arithmetic intensity.
+  product over the hidden dimension to compute the outputs. This is cheaper in FLOPs, realizing
+  linear-in-sequence scaling $cal(O)( D^2 S)$, but all of the operations have low arithmetic intensity.
 
 
 A middle-ground chunked strategy can perform better than either of the above. We chunk the sequence
-index $s -> (c t) -> c t$ into chunks of size $C$ with $t in {0, ..., C-1}$ and $t in {0, ...,
-S/C-1}$. We then compute:
+index $s -> (t r) -> t r$ into chunks of size $R$ with $t in {0, ..., S/R-1}$ and $t in {0, ...,
+R-1}$. We then compute:
 $
-  o_( c t d ) = q_( c t d\' ) S_( c t d\' d )
+  o_( t r d ) = q_( t r d\' ) S_( t r d\' d )
 $
 where the recursion relation becomes:
 $
-  S_( c t d\' d ) &= S_( (c-1) 0 d\' d ) + sum_( t\'=0 )^( t )k_( c t\' d\' ) v_( c t\' d ) \
-  &eq.triple cal(S)_( (c-1) d\' d ) + sum_( t\'=0 )^( t )k_( c t\' d\' ) v_( c t\' d ),
+  S_( t r d\' d ) &= S_( (t-1) 0 d\' d ) + sum_( r\'=0 )^( r )k_( t r\' d\' ) v_( t r\' d ) \
+  &eq.triple cal(S)_( (t-1) d\' d ) + sum_( r\'=0 )^( r )k_( t r\' d\' ) v_( t r\' d ),
 $
 introducing notation for the state at the start of each chunk boundary. Getting only the states at
-chunk boundaries is easy and GPU friendly, since the sum extends over the entire $t$-index (i.e. it
+chunk boundaries is easy and GPU friendly, since the sum extends over the entire $r$-index (i.e. it
 is a matmul):
 $
-  cal(S)_( c d\' d ) &= cal(S)_( (c-1) d\' d ) + k_( c t d\' ) v_( c t d ) space ,
+  cal(S)_( t d\' d ) &= cal(S)_( (t-1) d\' d ) + k_( t r d\' ) v_( t r d ) space ,
 $
 all such tensors computable in $cal(O)( D^( 2 ) S )$ time.
 And so the entire output can be written as:
 $
-  o_( c t d ) = q_( c t d\' ) cal(S)_( (c-1) d\' d ) + q_( c t d\' )sum_( t\'=0 )^( t )k_( c t\' d\' ) v_( c t\' d ) space .
+  o_( r t d ) = q_( t r d\' ) cal(S)_( (t-1) d\' d ) + q_( t r d\' )sum_( r\'=0 )^( r )k_( t r\' d\' ) v_( t r \' d ) space .
 $
-The first term takes $cal(O)( D^2 S )$ time, again, and the second can be computed in the
+The first term takes $cal(O)( D^2 S )$ time, again#footnote[Note, however, that these are more
+  efficient flops than those of the $cal(O)( D^( 2 )S )$ flops of the recurrent implementation.
+  Here, this scaling arises from a true matmul, which may have high arithmetic intensity, while in
+  the recurrent case the scaling comes from performing $D$ separate vector outer products, $~ k
+  times.o k$, which are all necessarily low arithmetic intensity.], and the second can be computed
+in the
 fully-parallelized manner described above:
 $
-  q_( c t d\' )sum_( t\'=0 )^( t )k_( c t\' d\' ) v_( c t\' d ) = q_( c t d\' ) k_( c t\' d\' )v_( c t\' d ) m_( t t\' ) space ,
+  q_( t r d\' )sum_( r\'=0 )^( r )k_( t r\' d\' ) v_( t r\' d ) = q_( t r d\' ) k_( t r\' d\' )v_( t r\' d ) m_( r r\' ) space ,
 $
-computing $q dot k$ first in $cal(O)( S C D )$. If $C << D$, then this is both:
-+ Cheaper than full recursion, asymptotically.
-+ Hardware friendly.
+where $m_( r r\' )$ is the inter-chunk mask. The time complexity of the above is $cal(O)(S R D)$.
+Note that the $R --> 1$ and $R --> S$ limits reduce to the fully recurrent and fully parallel
+limits, respectively.
 
+So, for $ 1 << R << S$, then this is both:
++ Parametrically cheaper than the fully parallelized implementation.
++ Hardware friendly#footnote[Specifically, taking the  chunk size $R$ to be a multiple of 16, allows
+  for the use of the ~16x faster tensor cores on modern GPUS, which can make up the difference in
+  scaling. Roughly, the recurrent flops are $cal(O)(S D^2)$ but they are all at least 16x slower than the
+  chunk implementation flops, so the recurrent to chunk time ratio is something like
+  $( 16 S D^( 2)) / (S D^( 2 ) + S R D)= 16 / (1+ R/D)$, meaning we are faster as long $R lt.tilde 10 D $.]
 There are further important implementation details, such as whether all the $cal(S)$ are realized in
 HBM or not as this affects the degree of parallelism, but the above is the core strategy that
 everything builds on.
@@ -1295,45 +1309,28 @@ $
 
 Chunking again#footnote[Almost certainly have some off-by one or worse errors in this section.], we have:
 $
-  S_( c t d\' d ) & = product_( t\'=0 )^( t )alpha_( c t\' d\' )cal(S)_( (c-1) d\' d ) + sum_( t\'=0 )^( t )product_( t\'\'=t\'+1 )^( t-1 )alpha_( c t\'\' d\' )k_( c t\' d\' )v_( c t\' d ) space ,
+  S_( t r d\' d ) & = product_( r\'=0 )^( r )alpha_( t r\' d\' )cal(S)_( (t-1) d\' d ) + sum_( r\'=0 )^( r )product_( r\'\'=r\'+1 )^( r-1 )alpha_( t r\'\' d\' )k_( t r\' d\' )v_( t r\' d ) space ,
 $
 and the boundary value recursion simplifies to
 $
-  cal(S)_( c d\' d ) & = product_( t )alpha_( c t d\' )cal(S)_( (c-1) d\' d ) + sum_( t\'=0 )product_( t\'\'=t\'+1 )^( C-1 )alpha_( c t\'\' d\' )k_( c t\' d\' )v_( c t\' d ) \
-  & eq.triple cal(B)_( c d\' )cal(S)_( (c-1) d\' d ) + sum_( t\'=0 )product_( t\'\'=t\'+1 )^( C-1 )alpha_( c t\'\' d\' )k_( c t\' d\' )v_( c t\' d ) \ \
+  cal(S)_( t d\' d ) & = product_( r )alpha_( c r d\' )cal(S)_( (t-1) d\' d ) + sum_( r\'=0 )product_( r\'\'=r\'+1 )^( R-1 )alpha_( t r\'\' d\' )k_( t r\' d\' )v_( t r\' d ) \
+  & eq.triple cal(B)_( t d\' )cal(S)_( (t-1) d\' d ) + sum_( r\'=0 )product_( r\'\'=r\'+1 )^( R-1 )alpha_( t r\'\' d\' )k_( t r\' d\' )v_( t r\' d ) \ \
 $
 The last term can be computed in a GPU friendly way by, say, first computing $product_( t\'\'=t\'+1
-)^( C-1 )alpha_( c t\'\' d\' )k_( c t\' d\' )$ and finally computing the dot product on $t\'$.
+)^( R-1 )alpha_( t r\'\' d\' )k_( t r\' d\' )$ and finally computing the dot product on $r\'$.
 
 And so the entire output can be written as:
 $
-  o_( c t d ) = q_( c t d\' ) product_( t\'=0 )^( t )alpha_( c t\' d\' )cal(S)_( (c-1) d\' d ) + q_( c t d\' )sum_( t\'=0 )^( t )product_( t\'\'=t\'+1 )^( t-1 )alpha_( c t\'\' d\' )k_( c t\' d\' )v_( c t\' d ) space .
+  o_( t r d ) = q_( t r d\' ) product_( r\'=0 )^( r )alpha_( t r\' d\' )cal(S)_( (t-1) d\' d ) + q_( t r d\' )sum_( r\'=0 )^( r )product_( r\'\'=r\'+1 )^( r-1 )alpha_( t r\'\' d\' )k_( t r\' d\' )v_( t r\' d ) space .
 $
 The first term we compute in $cal(O)( D^( 2 )S )$, first solving the recursion relation for the
-$cal(S)_( c d d\' )$ computing $q_( c t d\' ) product_( t\'=0 )^( t )alpha_( c t\' d\' )$ and dotting the result
-against $cal(S)_( (c-1) d\' d )$, all relatively GPU friendly operations which are themselves constructed
-in $cal(O)( D^( 2 )S )$ via recursion. The final term is more challenging; finish later.
+$cal(S)_( t d d\' )$ computing $q_( t r d\' ) product_( r\'=0 )^( r )alpha_( t r\' d\' )$ and
+dotting the result against $cal(S)_( (t-1) d\' d )$, all relatively GPU friendly operations which
+are themselves constructed in $cal(O)( D^( 2 )S )$ via recursion. The final term is more
+challenging; finish later.
 
 
 === Delta
-
-We have
-$
-  S_( s d\' d ) & = (delta_( d\' d\'\' ) -beta_( s ) k_( s d\' )k_( s d \'\') )S_( (s-1) d\'\' d \'\' ) + beta_( s )k_( s d\' )v_( s d )
-$
-which we chunk as#footnote[As always, off-by-one errors are highly likely.]
-$
-  S_( c t d\' d ) & = (delta_( d\' d\'\' ) -beta_( c t ) k_(c t d\' )k_(c t d \'\') )S_( c(t-1) d\'\' d ) + beta_(c t)k_(c t d\' )v_(c t d ) \
-  & = ( product_( t\'=0 )^( t )(delta_( d\' d\'\' ) -beta_( c t\' ) k_(c t\' d\' )k_(c t\' d \'\') ) )cal(S)_( (c-1) d\'\' d \'\' ) \
-  &+ sum_( t\'=0 )^( t ) ( product_( t\'\'=t\'+1 )^( t )(delta_( d\' d\'\' ) -beta_( c t\'\' ) k_(c t\'\' d\' )k_(c t\'\' d \'\') ) )beta_(c t\')k_(c t\' d\' )v_(c t\' d ) \
-  & eq.triple P_( c t d\' d\' \' ) cal(S)_( (c-1) d\'\' d ) + H_( c t d d\' )
-$
-Let
-$
-  P_(c t d\' d\'\' ) &eq.triple product_( t\'=0 )^( t )(delta_( d\' d\'\' ) -beta_( c t\' ) k_(c t\' d\' )k_(c t\' d \'\') ) \
-  H_(c t d\' d\'\' ) &eq.triple sum_( t\'=0 )^( t ) ( product_( t\'\'=t\'+1 )^( t )(delta_( d\' d\'\' ) -beta_( c t\'\' ) k_(c t\'\' d\' )k_(c t\'\' d \'\') ) )beta_(c t\')k_(c t\' d\' )v_(c t\' d )
-$
-so that
 
 
 
@@ -1376,7 +1373,7 @@ $
 $
 and the final output of the model is a projection of the normed, gated scan outputs:
 $
-  z_( s e ) = W_( d e )^( O )space NORM_( e )(y_( s e ) times.circle G_( s e )) space .
+  z_( s e ) = W_( d e )^( O )space NORM_( e )(y_( s e ) times.o G_( s e )) space .
 $
 
 Circling back to notation, we have:
@@ -2460,11 +2457,11 @@ The $pi_theta$ which minimizes the RLHF loss
 function $r (x \, y)$ is given by#footnote[This is easy to show using
 the calculus of variations, though it's not the route taken in the
 paper. The explicit RLHF loss is
-$cal(L) _"RLHF" = integral dif x thin dif y thin p(x) pi _( theta  )(y|x) ( -r(x,y) +beta ln pi _(
+$cal(L) _"RLHF" = int dif x thin dif y thin p(x) pi _( theta  )(y|x) ( -r(x,y) +beta ln pi _(
 theta )(y|x) /pi _"ref"(y|x)  )$ and we want to
 minimize this subject to the constraint that $pi_theta (y \| x)$ is
 properly normalized. So, we use a Lagrange multiplier and extremize
-$cal(L)\'  = cal(L) _"RLHF"+ integral dif x thin dif y thin lambda (x) pi _( theta
+$cal(L)\'  = cal(L) _"RLHF"+ int dif x thin dif y thin lambda (x) pi _( theta
 )(y|x)$. Solving
 $( delta cal(L) \' )/( delta pi _( theta  ) (y|x)) =0$
 yields @eq_dpo_soln;.]
@@ -2472,7 +2469,7 @@ $
   pi_(theta)(y|x) &= ( pi_"ref" (y|x)e^( r(x, y) / beta ) ) / ( Z(x) ) ,
 $<eq_dpo_soln>
 where
-$Z(x) = integral dif y thin pi_"ref"(y|x)e^( r(x, y) / beta )$
+$Z(x) = int dif y thin pi_"ref"(y|x)e^( r(x, y) / beta )$
 is a intractable normalization (partition function) factor. However, if
 $p (y_w succ y_l \| x)$ only depends on $r (x \, y_w)$ and
 $r (x \, y_l)$ through their difference#footnote[In
@@ -2533,7 +2530,7 @@ form. See the paper for a further discussion and comparison of HALO vs
 non-HALO methods.] is taken to be: $
 cal(L)_"KTO" &= - E _( x, y  D )v(r _( theta )(x, y) - z _( 0 ))\
 v(r _( theta )(x, y)-z _( 0 ))&eq.triple cases(
-lambda _( D )sigma  ( beta  ( r _( theta )(x, y) - z _( 0 )  )  ) & y in cal(Y)_( D )\
+lambda _( D )sigma  ( beta  ( r _( theta )(x, y) - z _( 0 )  )  ) & y in cal(Y)_( D ),
 lambda _( U )sigma  ( beta  ( -r _( theta )(x, y) + z _( 0 )  )  ) & y in cal(Y)_( U )
 )
 $<eq_kto_loss>
@@ -2600,18 +2597,25 @@ sum#footnote[This can help with training variance and stability.] of rewards (or
 T ), a_( T-1 ), ..., s_( 0 )) = sum_( t ) gamma^( t ) R_t (a_t, s_t, s_(t+1))$. The expected value
 is then
 $
-  J(pi) &eq.triple angle.l R angle.r_( tau ) \
-  &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t )) rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi(a_t,s_t) R(s_( T ), a_( T-1 ), ..., s_( 0 )) space .
+  J(pi) &= (product_( t=0 )^( T -1 ) int d a_( t ) d s_( t )) rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi(a_t,s_t) R(s_( T ), a_( T-1 ), ..., s_( 0 )) \
+  & = E[R|pi] eq.triple chevron.l R chevron.r_( tau ) \
 $
+$J(pi)$ is a functional of the policy and is called the *Policy Value* or *Expected Return*. Other
+related quantities are defined by integrating over fewer variables:
+- The *Value Function* $V(pi, s_t)=E[R|pi, s_t]$, $J(pi) = int d s_t V(pi, s_t)$. Useful for
+  comparing the relative merits of different states.
+- The *Q Function* $Q(pi, a_t, s_t)=E[R|pi, a_t, s_t]$, $J(pi) = int d s_t d a_t Q(pi,a_t, s_t)$.
+  Given that you're in state $s_t$, the $Q$ function can be used to determine your optimal action,
+  by maximizing over $a_t$.
 
 If the policy depend on parameters $theta$, $pi= pi_( theta )$, then we could attempt to maximize
 the above through gradient-based optimization strategies, as usual. Taking a gradient and
 manipulating terms, we have $J(pi) = J(theta) $ and
 $
-  nabla_( theta ) J(theta) &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t ) )rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi_( theta )(a_( t ), s_( t ))R(s_( T ), a_( T-1 ), ..., s_( 0 ))\
+  nabla_( theta ) J(theta) &= (product_( t=0 )^( T -1 ) int d a_( t ) d s_( t ) )rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi_( theta )(a_( t ), s_( t ))R(s_( T ), a_( T-1 ), ..., s_( 0 ))\
   & quad times sum_( t\'=0 )^( T-1 )nabla_( theta ) ln pi_( theta )(a_( t\' ), s_( t\' )) \
-  &= (product_( t=0 )^( T -1 ) integral d a_( t ) d s_( t ) )P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 ), pi ) R(s_( T ), a_( T-1 ), ..., s_( 0 ))times sum_( t\'=0 )^( T-1 )nabla_( theta ) ln pi_( theta )(a_( t\' ), s_( t\' )) \
-  &eq.triple angle.l R sum_( tau ) nabla_( theta ) ln pi_( theta ) angle.r_( tau ) .
+  &= (product_( t=0 )^( T -1 ) int d a_( t ) d s_( t ) )P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 ), pi ) R(s_( T ), a_( T-1 ), ..., s_( 0 ))times sum_( t\'=0 )^( T-1 )nabla_( theta ) ln pi_( theta )(a_( t\' ), s_( t\' )) \
+  &eq.triple chevron.l R sum_( tau ) nabla_( theta ) ln pi_( theta ) chevron.r_( tau ) .
 $
 
 Some practical notes:
@@ -2619,13 +2623,13 @@ Some practical notes:
   are just treated as an environment#footnote[Think of training a model $pi_( theta )(a_( t )|s_( t
   ))$ to learn a video game with non-trivial random elements in it, as described by $p(s_( t+1 )|a_( t
   ), s_( t))$.], and so we estimate the average by generating multiple trajectories and averaging over
-  them: $S(theta) =angle.l R sum_( tau )ln pi_( theta ) angle.r_( "empirical" )$
+  them: $S(theta) =chevron.l R sum_( tau )ln pi_( theta ) chevron.r_( "empirical" )$
 - A subtlety is that this _surrogate_ function $S(theta)$ is not the same as the expectation value
   above: $S(theta) != J(theta)$. Only their first derivatives match in general#footnote[Due to the
   gradient only hitting the $ln$ term in the empirical average, while they also hit the distribution
-  in $J(theta)$. For example: $nabla_i nabla_j J(theta) = angle.l R (nabla_( i ) ln pi_( theta )
-  nabla_( j ) ln pi_( theta ) +nabla_( i ) nabla_( j ) ln pi_( theta )) angle.r$ while $nabla_i
-  nabla_j S(theta) = angle.l R nabla_( i ) nabla_( j ) ln pi_( theta ) angle.r _( "empirical" )$,
+  in $J(theta)$. For example: $nabla_i nabla_j J(theta) = chevron.l R (nabla_( i ) ln pi_( theta )
+  nabla_( j ) ln pi_( theta ) +nabla_( i ) nabla_( j ) ln pi_( theta )) chevron.r$ while $nabla_i
+  nabla_j S(theta) = chevron.l R nabla_( i ) nabla_( j ) ln pi_( theta ) chevron.r _( "empirical" )$,
   schematically.]. $S(theta)$ itself is therefore not an inherently meaningful quantity and so you
   may not want to plot the surrogate loss! Decreasing surrogate loss is not necessarily informative of
   anything.
@@ -2651,7 +2655,7 @@ model with parameters $theta_( "old" )$, and $r_(
 t)(theta) =(pi_( theta)(y_t|x_(t-1)))/(pi_( theta_("old"))(y_t|x_(t-1)))$. The PPO empirical
 surrogate objective is:
 $
-  S(theta) = angle.l sum_( t )min(r_(t)(theta)A_( t ), "clip"(r_(t)(theta), 1-epsilon, 1+epsilon) A_t ) angle.r_( "empirical" ) space .
+  S(theta) = chevron.l sum_( t )min(r_(t)(theta)A_( t ), "clip"(r_(t)(theta), 1-epsilon, 1+epsilon) A_t ) chevron.r_( "empirical" ) space .
 $<eq_ppo>
 Here $epsilon >0$ is a hyperparameter#footnote[$epsilon~cal(O)( 1e-1 )$ is common], $A_t$ is the
 advantage, and $"clip"(x, l, h)$ is
@@ -2730,7 +2734,7 @@ An important point is that $A_(t, g )$ is independent of $t$: we are assigning t
 every step in the trajectory. So, writing $A_(t, g )= A_( g )$ the policy gradients factorize in the
 form:
 $
-  nabla S(theta) = angle.l sum_(t ,g ) A_( t,g )nabla_( theta )C(r_( theta )) angle.r_( tau )=angle.l sum_( g ) A_( g )sum_( t )nabla_( theta )C(r_( theta )) angle.r_( tau )
+  nabla S(theta) = chevron.l sum_(t ,g ) A_( t,g )nabla_( theta )C(r_( theta )) chevron.r_( tau )=chevron.l sum_( g ) A_( g )sum_( t )nabla_( theta )C(r_( theta )) chevron.r_( tau )
 $
 where $C(r_( theta ))$ is the clipping function above, or some similar variant thereof. Thus there
 is no token-specific feedback with these advantages, as there might be in some more sophisticated
@@ -4535,7 +4539,7 @@ $"Var"\[bold(g) _( B ) (x),
 bold(g) _( B )(x\')\]=Sigma /B$.
 
 Study the mean loss across the entire dataset:
-$cal(L)  ( w  ) = angle.l cal(L)  ( w, x ) angle.r$. Using SGD we take a step
+$cal(L)  ( w  ) = chevron.l cal(L)  ( w, x ) chevron.r$. Using SGD we take a step
 $w --> w -eta bold(g) _( B )$ and change the loss as
 $
   cal(L) ( w -eta bold(g)_( B ) ) = cal(L) ( w ) -eta overline(bold(g))dot
@@ -4564,7 +4568,7 @@ for more.
 We can further characterize the trade-off between compute and
 optimization steps. The expected decrease in loss per update is then
 $
-  angle.l delta cal(L) angle.r & approx eta_"max" / ( 1 + B_"noise" / B ) bar(bold(g) )^(2 ) + cal(O) ( eta_"max"^2 ) ,
+  chevron.l delta cal(L) chevron.r & approx eta_"max" / ( 1 + B_"noise" / B ) bar(bold(g) )^(2 ) + cal(O) ( eta_"max"^2 ) ,
 $ that is, we would need
 $1 +  B _"noise" / B $ times as many SGD steps to
 make the same progress we would have as compared to full-batch SGD. If
@@ -4656,12 +4660,12 @@ $E( W ^( ell )_( i j )W ^( ell )_( j k
 )) = ( C _( ell ) )/( D ) delta _( i j )$ for some $C_ell$ it
 straightforward to show that $
 E( z^1_( i )) &= 0 \
-E( z^1_( i )z^1_( j )) &= C _( 1 )delta _( i j ) angle.l phi(z )^2angle.r
+E( z^1_( i )z^1_( j )) &= C _( 1 )delta _( i j ) chevron.l phi(z )^2chevron.r
 $ where
-$angle.l phi(z)^( n )angle.r eq.triple integral dif thin rho(z) phi(z)^( n )$
+$chevron.l phi(z)^( n )chevron.r eq.triple int dif thin rho(z) phi(z)^( n )$
 with $rho (z)$ a single-variable standard normal Gaussian#footnote[This
 is similar notation as used in @physicalDL, with $E(dot)$ being a
-multivariate expectation value and $angle.l dot.op angle.r$ an
+multivariate expectation value and $chevron.l dot.op chevron.r$ an
 expectation value over a 1D distribution.] (the $D$ in the denominator
 was chosen to counteract a factor of $D$ from an index sum), which are
 all some $cal(O) ( 1 )$, $D$-independent numbers.
@@ -4687,9 +4691,9 @@ $
 $ where the expectation is over the distribution of
 $z_i^0$ and $W_(i j)^1$ and the dot-product is over hidden-dimension
 indices. This can be written in terms of the single-variable expectation
-values $angle.l phi (z)^n angle.r$ with the result:
+values $chevron.l phi (z)^n chevron.r$ with the result:
 $
-  V_4^(ell = 1) & = C_1^2 / D (angle.l phi (z)^4 angle.r - angle.l phi (z)^2 angle.r^2) med .
+  V_4^(ell = 1) & = C_1^2 / D (chevron.l phi (z)^4 chevron.r - chevron.l phi (z)^2 chevron.r^2) med .
 $
 So, there is indeed non-gaussianity (even for a linear network
 $phi (x) = x$) and is it of $cal(O)
@@ -4754,10 +4758,10 @@ Our goal is to choose the hyperparameters (weight initialization, learning rates
 all models in this class have similar behaviors, which translates to the model outputs and updates
 all being $lambda$ independent at first non-trivial order, in a way made more precise below. We
 require#footnote[In general, we define the size of a random variable $Z$ through the size of its
-first non-vanishing moment: if it's the $n$-th moment, then we write $Z ~  cal(O) ( angle.l Z^( n)
-angle.r^(1/n) )$. The common cases are when the $Z$ has a non-trivial mean, $Z~ cal(O) ( angle.l Z
-angle.r )$, and the case where the mean is zero, but the second moment is non-trivial: $Z ~ cal(O)
-( sqrt(angle.l Z Z angle.r) )$.]:
+first non-vanishing moment: if it's the $n$-th moment, then we write $Z ~  cal(O) ( chevron.l Z^( n)
+chevron.r^(1/n) )$. The common cases are when the $Z$ has a non-trivial mean, $Z~ cal(O) ( chevron.l Z
+chevron.r )$, and the case where the mean is zero, but the second moment is non-trivial: $Z ~ cal(O)
+( sqrt(chevron.l Z Z chevron.r) )$.]:
 
 - All intermediate tensors
   $z ^( ell ) _(d )~  cal(O) ( 1 )$.
@@ -4779,18 +4783,18 @@ scenarios:
 
 + If the inputs are approximately normally distributed (say be whitening
   features), then we take
-  $angle.l I_(d i) I_(d' i') angle.r = frac(delta_(d d') delta_(i i'), D_I)$.
+  $chevron.l I_(d i) I_(d' i') chevron.r = frac(delta_(d d') delta_(i i'), D_I)$.
 
 + If the inputs are instead one-hot (as in LLMs), then we take
-  $angle.l I_(d i) I_(d' i') angle.r = delta_(d d') delta_(i i')$.
+  $chevron.l I_(d i) I_(d' i') chevron.r = delta_(d d') delta_(i i')$.
 
 Both scenarios produce outputs, defined to be $z_d^(- 1)$, which
 obey#footnote[We consider the inputs $x_i$ fixed, for simplicity. A
 better treatment would also consider the data distribution.]:
 $
-  angle.l z_d^(- 1) angle.r = 0 thin quad angle.l z_d^(- 1) z_(d')^(- 1) angle.r = delta_(d d') med \,
+  chevron.l z_d^(- 1) chevron.r = 0 thin quad chevron.l z_d^(- 1) z_(d')^(- 1) chevron.r = delta_(d d') med \,
 $
-with $angle.l dot.op angle.r$ an expectation value over all weight
+with $chevron.l dot.op chevron.r$ an expectation value over all weight
 distributions. Subsequently, all of the $z_d^ell$ will be zero mean with
 unit two-point correlation functions#footnote[They are not normally
 distributed, however: their higher-point, connected correlation
@@ -4800,11 +4804,11 @@ such a product is not Gaussian. However, the degree of non-Gaussianity
 is small: $cal(O) ( ell/D )$.] if we
 initialize the $H_(d d')^ell$ as
 $
-  angle.l H_(d e)^ell H_(d' e')^ell angle.r & = frac(delta_(d d') delta_(e e'), D_(ell - 1)) arrow.r.double.long angle.l z_d^ell angle.r = 0 med \, quad angle.l z_d^ell z_(d')^ell angle.r = delta_(d d') med .
+  chevron.l H_(d e)^ell H_(d' e')^ell chevron.r & = frac(delta_(d d') delta_(e e'), D_(ell - 1)) arrow.r.double.long chevron.l z_d^ell chevron.r = 0 med \, quad chevron.l z_d^ell z_(d')^ell chevron.r = delta_(d d') med .
 $
 We will leave the variance of the output layer undetermined for now:
 $
-  angle.l O_(o d) O_(o' d') angle.r & = frac(delta_(o o') delta_(d d'), D_(L - 1)^(1 + s)) med \, quad arrow.r.double.long ⟨z_d^L⟩ = 0 med \, quad ⟨z_d^L z_(d')^L⟩ = delta_(d d') D_(L - 1)^(- s) med \,
+  chevron.l O_(o d) O_(o' d') chevron.r & = frac(delta_(o o') delta_(d d'), D_(L - 1)^(1 + s)) med \, quad arrow.r.double.long ⟨z_d^L⟩ = 0 med \, quad ⟨z_d^L z_(d')^L⟩ = delta_(d d') D_(L - 1)^(- s) med \,
 $
 for some $s$ (chosen to match the $s$ of
 @yaida2022metaprincipledfamilyhyperparameterscaling. Setting $s = 0$
@@ -4839,28 +4843,28 @@ the network gets updated.].
 We are interested in the typical size of the updates in @app_eq_general_output_update, for which we
 compute the following expectation values:
 $
-  angle.l ( partial z^( L )_( o\' )(x) ) / ( partial I_( d i ) )( partial z^( L )_( o )(y) ) / ( partial I_( d i ) ) angle.r &= angle.l O_( o\'d\' )H^( L-1 )_(d\'e\' ) ... H^0_( f\'d ) times O_( o d\'\' )H^( L-1 )_(d\'\'e\'\' ) ... H^0_( f\'\'d ) angle.r x_( i ) y_( i )\
+  chevron.l ( partial z^( L )_( o\' )(x) ) / ( partial I_( d i ) )( partial z^( L )_( o )(y) ) / ( partial I_( d i ) ) chevron.r &= chevron.l O_( o\'d\' )H^( L-1 )_(d\'e\' ) ... H^0_( f\'d ) times O_( o d\'\' )H^( L-1 )_(d\'\'e\'\' ) ... H^0_( f\'\'d ) chevron.r x_( i ) y_( i )\
   &= delta_( o o' )( x dot y ) / ( D^( s )_( L-1 ) ) \
-  angle.l ( partial z^( L )_( o\' )(x) ) / ( partial H^( ell )_( d d\' ) )( partial z^( L )_( o )(y) ) / ( partial H^( ell )_( d d\' ) ) angle.r &= angle.l O_( o\'e\' )H^( L-1 )_(e\'f\' ) ... H^( ell+1 )_( g\'d ) z^( ell-1 )_( d\' ) times O_( o e )H^( L-1 )_(e f ) ... H^( ell+1 )_( g d ) z^( ell-1 )_( d\' ) angle.r \
-  &= delta_( o o' ) ( angle.l z^( ell-1 )(x)dot z^( ell-1 )(y) angle.r ) / ( D^( s )_( L-1 ) )\
+  chevron.l ( partial z^( L )_( o\' )(x) ) / ( partial H^( ell )_( d d\' ) )( partial z^( L )_( o )(y) ) / ( partial H^( ell )_( d d\' ) ) chevron.r &= chevron.l O_( o\'e\' )H^( L-1 )_(e\'f\' ) ... H^( ell+1 )_( g\'d ) z^( ell-1 )_( d\' ) times O_( o e )H^( L-1 )_(e f ) ... H^( ell+1 )_( g d ) z^( ell-1 )_( d\' ) chevron.r \
+  &= delta_( o o' ) ( chevron.l z^( ell-1 )(x)dot z^( ell-1 )(y) chevron.r ) / ( D^( s )_( L-1 ) )\
   &= delta_( o o' ) (D_( ell-1 )) / ( D^( s )_( L-1 ) ) times cases( x dot y wide & x "and" y  "one-hot", ( x dot y )/( D_( I ) ) & x "and" y  "normal")\
-  angle.l ( partial z^( L )_( o\' )(x) ) / ( partial O_( o\'\'d ) )( partial z^( L )_( o )(y) ) / ( partial O_( o\'\'d ) ) angle.r &= delta_( o\'o\'\'\' )delta_( o o'\' ) angle.l z^( L-1 )(x)dot z^( L-1 )(y) angle.r \
+  chevron.l ( partial z^( L )_( o\' )(x) ) / ( partial O_( o\'\'d ) )( partial z^( L )_( o )(y) ) / ( partial O_( o\'\'d ) ) chevron.r &= delta_( o\'o\'\'\' )delta_( o o'\' ) chevron.l z^( L-1 )(x)dot z^( L-1 )(y) chevron.r \
   &= delta_( o o' ) D_( L-1 ) times cases( x dot y wide & x "and" y  "one-hot", ( x dot y )/( D_( I ) ) & x "and" y  "normal") .
 $<app_eq_mup_expectation_vals>
 
 The above are useful if we can compute the expectation value of the model output updates, $Delta
 z_o^L equiv z_o^L (t = 1) - z_o^L (t = 0)$, @app_eq_general_output_update as in
 $
-  angle.l Delta z^( L )_( o ) ( y ) angle.r &approx
-  - angle.l ( partial cal(L)(z(x)) ) / (partial z^( L )_( o\' ) )( eta_( I ) ( partial z^( L )_( o\'
+  chevron.l Delta z^( L )_( o ) ( y ) chevron.r &approx
+  - chevron.l ( partial cal(L)(z(x)) ) / (partial z^( L )_( o\' ) )( eta_( I ) ( partial z^( L )_( o\'
     )(x) ) / ( partial I_( d i ) )( partial z^( L )_( o )(y) ) / ( partial I_( d i ) )
     + eta_( ell )( partial z^( L )_( o\' )(x) ) / ( partial H^( ell )_( d d\' ) )( partial z^( L )_( o )(y) ) / ( partial H^( ell )_( d d\' ) )
-    + eta_( O )( partial z^( L )_( o\' )(x) ) / ( partial O_( o\'\'d ) )( partial z^( L )_( o )(y) ) / ( partial O_( o\'\'d ) ) ) angle.r\
+    + eta_( O )( partial z^( L )_( o\' )(x) ) / ( partial O_( o\'\'d ) )( partial z^( L )_( o )(y) ) / ( partial O_( o\'\'d ) ) ) chevron.r\
   &approx
-  - angle.l ( partial cal(L)(z(x)) ) / (partial z^( L )_( o\' ) )angle.r angle.l( eta_( I ) ( partial
+  - chevron.l ( partial cal(L)(z(x)) ) / (partial z^( L )_( o\' ) )chevron.r chevron.l( eta_( I ) ( partial
   z ^( L )_( o\' )(x) )/( partial I_( d i ) )( partial z^( L )_( o )(y) )/( partial I_( d i ) )
 + eta_( ell )( partial z ^( L )_( o\' )(x) )/( partial H^( ell )_( d d\' ) )( partial z^( L )_( o )(y) )/( partial H^( ell )_( d d\' ) )
-+ eta_( O )( partial z ^( L )_( o\' )(x) )/( partial O_( o\'\'d ) )( partial z^( L )_( o )(y) )/( partial O_( o\'\'d ) )  ) angle.r .
++ eta_( O )( partial z ^( L )_( o\' )(x) )/( partial O_( o\'\'d ) )( partial z^( L )_( o )(y) )/( partial O_( o\'\'d ) )  ) chevron.r .
 $
 
 This questionable assumption, which appears to be made in @yang2022tensor as well as @physicalDL, is
@@ -4868,7 +4872,7 @@ at least justifiable in the limit of a mean-squared-error loss or in the essenti
 limit where the loss is well-approximated as a quadratic expansion about its minimum. Using
 @app_eq_mup_expectation_vals with this assumption gives
 $
-  angle.l Delta z_o^L (y) angle.r & approx - angle.l frac(partial cal(L) (z (x)), partial z_o^L)angle.r times (eta_I x dot.op y + eta_ell D_(ell - 1) + eta_O D_(L - 1)^(1 + s)) / D_(L - 1)^s med .
+  chevron.l Delta z_o^L (y) chevron.r & approx - chevron.l frac(partial cal(L) (z (x)), partial z_o^L)chevron.r times (eta_I x dot.op y + eta_ell D_(ell - 1) + eta_O D_(L - 1)^(1 + s)) / D_(L - 1)^s med .
 $
 
 Some conclusions from
@@ -4907,7 +4911,7 @@ Some conclusions from
 
 - The parameter $s$ is currently undetermined. The muTransfer limit
   @yang2022tensor corresponds
-  /* to#footnote[@app_eq_mup_lr_lambda_scaling_adam */
+  to#footnote[@app_eq_mup_lr_lambda_scaling_adam
   agrees with Table 3 of @yang2022tensor when $s = 1$.] $s = 1$, for
 which the model outputs at initialization scale as
 $z_d^L tilde.op 1 / sqrt(D)$, an undesirable scaling which is
@@ -4938,9 +4942,9 @@ $ Demanding that the true neural tangent kernel
 $N_(o o')^L$ be width-independent and that all layers provide
 parametrically-equal contributions lands us on the same equations and
 solutions as above#footnote[The equivalence follows from the fact that
-$angle.l Delta z^( L )_( o )
-angle.r = -  angle.l ( partial cal(L)  )/( partial o\' ) N^( L )_( o o' )
-angle.r$]. Extending this analysis to higher orders in $eta$,
+$chevron.l Delta z^( L )_( o )
+chevron.r = -  chevron.l ( partial cal(L)  )/( partial o\' ) N^( L )_( o o' )
+chevron.r$]. Extending this analysis to higher orders in $eta$,
 @yaida2022metaprincipledfamilyhyperparameterscaling derives another
 bound: $s lt.eq 1$, placing muTransfer's prescription at the edge of the
 bounded region.
@@ -4957,7 +4961,7 @@ $cal(O) ( 1 )$.
 That is, let the Adam update for some weight
 $W_(d e) in RR^(D times E)$ be, schematically,
 $
-  Delta^"Adam" W_( d e ) =- ( angle.l ( partial cal(L) ) / ( partial W_( d e ) ) angle.r ) / ( sqrt( angle.l  (( partial cal(L) )/( partial W_( d e ) ) )^2 angle.r ) ) ,
+  Delta^"Adam" W_( d e ) =- ( chevron.l ( partial cal(L) ) / ( partial W_( d e ) ) chevron.r ) / ( sqrt( chevron.l  (( partial cal(L) )/( partial W_( d e ) ) )^2 chevron.r ) ) ,
 $ while
 $Delta^"Adam" W_( d e ) =- ( partial cal(L) )/( partial W_( d e ) )$,
 omitting the learning rate and where expectation values are really
@@ -4975,8 +4979,8 @@ small errors (whose size we will not attempt to quantify).
 
 With these assumptions, we can determine the value of $alpha_W$ through
 $
-  angle.l Delta^"Adam" W_( d e )Delta^"Adam" W_( d e ) angle.r
-  &approx alpha_( W )^2 angle.l Delta^"SGD" W_( d e )Delta^"SGD" W_( d e ) angle.r .
+  chevron.l Delta^"Adam" W_( d e )Delta^"Adam" W_( d e ) chevron.r
+  &approx alpha_( W )^2 chevron.l Delta^"SGD" W_( d e )Delta^"SGD" W_( d e ) chevron.r .
 $
 
 The left hand side is approximately $D times E$ (the
@@ -4991,20 +4995,20 @@ optimizer @chen2023symbolicdiscoveryoptimizationalgorithms for which
 $Delta^"LION"    W_( d e ) = plus.minus 1$ for all components.] are 1. The right side can be approximated
 using the same assumptions used in @app_mup_toy_limit:
 $
-  angle.l Delta^"SGD" W_( d e )Delta^"SGD" W_( d e ) angle.r &= angle.l ( partial cal(L) ) / ( partial W_( d e ) )( partial cal(L) ) / ( partial W_( d e ) ) angle.r\
-  &=angle.l ( partial cal(L) ) / ( partial z_( o ) )( partial z_( o ) ) / ( partial W_( d e ) )(partial cal(L) ) / ( partial z_( o\' ) )( partial z_( o\' ) ) / ( partial W_( d e ) ) angle.r\
-  &approx angle.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o\' ) )angle.r angle.l ( partial z_( o ) ) / ( partial W_( d e ) )( partial z_( o\' ) ) / ( partial W_( d e ) ) angle.r .
+  chevron.l Delta^"SGD" W_( d e )Delta^"SGD" W_( d e ) chevron.r &= chevron.l ( partial cal(L) ) / ( partial W_( d e ) )( partial cal(L) ) / ( partial W_( d e ) ) chevron.r\
+  &=chevron.l ( partial cal(L) ) / ( partial z_( o ) )( partial z_( o ) ) / ( partial W_( d e ) )(partial cal(L) ) / ( partial z_( o\' ) )( partial z_( o\' ) ) / ( partial W_( d e ) ) chevron.r\
+  &approx chevron.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o\' ) )chevron.r chevron.l ( partial z_( o ) ) / ( partial W_( d e ) )( partial z_( o\' ) ) / ( partial W_( d e ) ) chevron.r .
 $
 
 These final factors were computed in @app_eq_mup_expectation_vals and the relations for the various
 weights become:
 $
-  D_( -1 )D_( I ) &=alpha_( I )^2 angle.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o ) )angle.r ( x dot y ) / ( D^( s )_( L-1 ) )\
-  D_( ell )D_( ell-1 ) &=alpha_( ell )^2 angle.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o ) )angle.r ( D_( ell-1 ) ) / ( D_( L-1 )^( s ) ) times cases( x dot y & x, y  "one-hot" ( x dot y )/( D_( I ) ) & x, y  "normal")\
-  D_( O )D_( L-1 ) &=alpha_(O)^2 angle.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o ) ) angle.r D_( L-1) times cases( x dot y & x, y  "one-hot" ( x dot y )/( D_( I ) ) & x, y  "normal")\
+  D_( -1 )D_( I ) &=alpha_( I )^2 chevron.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o ) )chevron.r ( x dot y ) / ( D^( s )_( L-1 ) )\
+  D_( ell )D_( ell-1 ) &=alpha_( ell )^2 chevron.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o ) )chevron.r ( D_( ell-1 ) ) / ( D_( L-1 )^( s ) ) times cases( x dot y & x, y  "one-hot" ( x dot y )/( D_( I ) ) & x, y  "normal")\
+  D_( O )D_( L-1 ) &=alpha_(O)^2 chevron.l ( partial cal(L) ) / ( partial z_( o ) )(partial cal(L) ) / ( partial z_( o ) ) chevron.r D_( L-1) times cases( x dot y & x, y  "one-hot" ( x dot y )/( D_( I ) ) & x, y  "normal")\
 $
-Considering the scaling @app_eq_mup_width_scaling;, we assume the $angle.l ( partial cal(L) )/(
-partial z_( o ) )(partial cal(L) )/( partial z_( o ) ) angle.r$ factors to be $lambda$-independent
+Considering the scaling @app_eq_mup_width_scaling;, we assume the $chevron.l ( partial cal(L) )/(
+partial z_( o ) )(partial cal(L) )/( partial z_( o ) ) chevron.r$ factors to be $lambda$-independent
 (since the goal of muTransfer is to keep the model outputs $z_0^L$ $lambda$-independent) and
 matching the remaining factors gives:
 $
@@ -5072,10 +5076,10 @@ Notes on various operations and their implementations.
 
 Associative scans @prefixSumsBlelloch take some arbitrary tensor $x_( i ... )$, $i in {0, ..., N-1}$
 and other indices arbitrary (and omitted in the below), an associative operation $a(x, y) eq.triple
-x plus.circle y$ and computes the output $z_( i )$
+x plus.o y$ and computes the output $z_( i )$
 $
-  z_( i ) & eq.triple plus.circle.big_( j=0 )^( i )x_( j ) \
-  &=x_( 0 ) plus.circle x_( 1 ) plus.circle ... plus.circle x_( i )\
+  z_( i ) & eq.triple plus.o.big_( j=0 )^( i )x_( j ) \
+  &=x_( 0 ) plus.o x_( 1 ) plus.o ... plus.o x_( i )\
   &=a( z_( i-1 ), x_( i )) =a( a(z_( i-2 ), x_( i-1 )), x_( i )) = ...
 $
 where $a(z_( -1 ), x_( 0 )) eq.triple x_( 0 )$. For now, we assume the operation is elementwise
@@ -5085,15 +5089,15 @@ index for the dimension over which we are scanning.
 Assuming sufficiently many processors are available, such scans can be computed in $cal(O)( log N )$
 time, due to associativity. Common examples (which also turn out to be special cases, for technical
 reasons discussed below):
-- $CUMSUM$: $plus.circle = + $, and $CUMSUM( x_( i ) ) = sum_( j=0 )^( i )x_( j ) eq.triple theta(i >= j)
+- $CUMSUM$: $plus.o = + $, and $CUMSUM( x_( i ) ) = sum_( j=0 )^( i )x_( j ) eq.triple theta(i >= j)
   x_( j )$, with and implicit summation over the $j$-index in the final expression and where
   $theta(x)$ equals 1 if $x$ is true, and zero otherwise.
-- $CUMPROD$: $plus.circle = times $.
+- $CUMPROD$: $plus.o = times $.
 
 Let's compute the backwards $(partial z_( j )) / (partial x_( i ))$. First, $(partial z_( j )) /
 (partial x_( i ))prop theta(j >= i)$. Another useful fact is that by associativity we can write
 $
-  z_( j ) &= (x_( 0 ) plus.circle ... plus.circle x_( i )) plus.circle ( x_( i+1 ) plus.circle ... plus.circle x_( j )) \
+  z_( j ) &= (x_( 0 ) plus.o ... plus.o x_( i )) plus.o ( x_( i+1 ) plus.o ... plus.o x_( j )) \
   &=a(a(z_( i-1 ), x_( i )), z_( i+1:j+1 ))
 $
 where the final factor $z_( i+1: )$ is the scan of terms $i+1$ through $j$, in `python` notation.
@@ -5137,8 +5141,8 @@ $
 $
 by which we mean that the $CUMSUM$ runs on the tensor arguments with positions reversed over the scan
 axis. Both of the specific cases above have this property:
-- $plus.circle = + $: $(partial z_( j )) / (partial x_( i ))= theta(j>=i) $
-- $plus.circle = times $: $(partial z_( j )) / (partial x_( i ))= theta(j>=i) z_( j ) / x_( i ) $
+- $plus.o = + $: $(partial z_( j )) / (partial x_( i ))= theta(j>=i) $
+- $plus.o = times $: $(partial z_( j )) / (partial x_( i ))= theta(j>=i) z_( j ) / x_( i ) $
 
 Writing the derivative as in
 $
