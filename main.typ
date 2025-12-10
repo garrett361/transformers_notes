@@ -178,7 +178,7 @@
 }
 #outline(indent: auto)
 
-#show link: it => text(blue)[#it]
+#show link: it => underline(text(fill: blue)[#it])
 /* Eq ref styling https://typst.app/docs/reference/model/ref/ */
 #set math.equation(
   numbering: "(1)",
@@ -214,7 +214,6 @@
     it
   }
 }
-
 
 
 = Architecture
@@ -1357,9 +1356,13 @@ matmul.
 The final expression above is hardware friendly, but requires knowing the $u_( t r d )$ and $w_( t r
 d )$ tensors, which were only implicitly defined above. Recursive expressions for these quantities
 follow from the expressions above, but they suffer from the now-familiar affliction of being
-hardware unfriendly if actually computed via direct recurrence#footnote[And so we won't reproduce
-  them, but see @songlin_deltanet_ii for explicit expressions.]. Fortunately, there is a neat trick
-for computing these in an alternate way.
+hardware unfriendly if actually computed via direct recurrence#footnote[The explicit expressions are
+  in @songlin_deltanet_ii, and are of the form $w_(  t r d ) = B_( t r d ) + A_( t r r\' ) w_( t r\'
+  d )$ for some tensors $B, A$ with $A_(  r r\' ) = 0 $ if $r' >= r$ (making the relation
+  recursive), from which it follows that $w_( t r d ) = (bold(1) - A_( t ) )^( -1 )_( r r\' ) B_( t
+  r\' d ) $; thanks to #link("https://youtu.be/HEFM4NXsWpQ?si=O8y4Yr5Gqqh5PRfk")[this Eleuther AI]
+  video for this explanation. Below we go through a more explicit form of this argument.].
+Fortunately, there is a neat trick for computing these in an alternate way.
 
 
 Start with $w_( t r d )$ and let us suppress the $d$ index in what follows for simplicity; dot
