@@ -1383,8 +1383,9 @@ $
   & = (bold(1) - A)^( -1 )_( r r\' )beta_( t r\' )k_( t r\' )
 $
 where the final equality relies on the fact that the $A_( r r\' )$ matrix above obeys the special
-quality that $A^( n )=0$ for $n>=r$ (ultimately due to causality). This can be seen either from the usual Taylor matrix
-expansion (assuming convergence) which terminates early due to the preceding property, or just from direct computation:
+quality that $A^( n )=0$ for $n>=r$ (ultimately due to causality). The above can be proven either
+from the usual Taylor matrix expansion (assuming convergence) which terminates early due to the
+preceding property, or just from direct computation:
 $
   (bold(1) - A )dot (bold(1) + A + A^( 2 ) + ... +A^( r-1 )) & = (bold(1) + A + A^( 2 ) + ...+ A^( r-1 ))\
   & quad - A dot (bold(1) + A + A^( 2 ) + ... A^( r-1 ))\
@@ -1393,14 +1394,14 @@ $
   &= bold(1) space .
 $
 Because of the triangular nature of $A_( r r\' )$, the inverse can be computed relatively cheaply
-and then all of the remaining operations are matmuls, taking $cal(O)( S R )$ time. In exactly the
+and then all of the remaining operations are matmuls. In exactly the
 same way, we can also derive a similar equation for $u_( t r )$:
 $
   u_( t r ) = (bold(1) - A)^( -1 )_( r r\' ) beta_( t r\' )v_( t r\' ) space .
 $
-This trick is called the UT transformation @Joffrain2006AccumulatingHT, and the recursive
-representation of $w$ and $u$ (that we didn't write) is called the WY representation
-@Bischof1985TheWR.
+This trick is related to the UT transformation @Joffrain2006AccumulatingHT (though it's presented
+fairly differently), and the recursive representation of $w$ and $u$ (that we didn't write) is called
+the WY representation @Bischof1985TheWR.
 
 The final, hardware friendly representation of the delta model outputs is:
 $
