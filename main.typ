@@ -4268,12 +4268,11 @@ of shape `X.shape=Size(R, ...)` such that the tensor on rank `r` is `x=X[r]`. Th
   T_((macron(r) y))$, each worker getting a $macron(r)$-shard. If `x` is the chief's data, rank `r`
   receives `x_out = x.tensor_split(R, dim=0)[r]`.
 
-- `AllToAll`: All workers receive shards of all others worker's tensors. If every
-  worker has a tensor $T_(macron(r) y)$, for one value of $macron(r)$,
-  which we imagine came from a sharding a tensor
-  $T_x = T_((macron(r) y))$, then an over the $y$ index produces
-  produces the tensor $T_(z macron(r))$ defined by
-  $T_(z macron(r)) = T_x$ on all workers. E.g. rank `r` receives `x_out = X.reshape(X.shape[1], R, X.shape[:2])[:,r]`.
+- `AllToAll`: Nearly arbitrary communication pattern. Typical implementation: each worker has a
+  tensor $T_( n  ... )$ with a leading dimension of size $N$ and specifies a rank $R$ tensor of
+  counts, $c_r$, with $sum_( r )c_( r ) = N$ determining what slice of $T_( n ... )$ to send to rank
+  $r$. E.g. the slice of the first $c_0$ along the $n$ dimension is sent to rank $0$, the next $c_1$
+  to rank 1, etc.
 
 = Device Meshes <app_device_meshes>
 
