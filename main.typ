@@ -2665,7 +2665,8 @@ R_t (a_t, s_t, s_(t+1))$ in general, though for LLM RL often $R_t = R_t (a_t)$ a
 
 
 Starting from some initial state described by distribution $rho(s_0)$, the probability distribution
-for a specific state-action pair _trajectory_, often denoted by $tau$, is given by
+for a specific state-action pair _trajectory_, often denoted by $tau$, is given by#footnote[Note
+  that this is not a completely general formula: we have some Markov-like assumptions here.]
 $
   P( s_( T ), a_( T-1 ), ..., a_( 0 ), s_( 0 ), pi ) eq.triple P(tau, pi) = rho(s_0) product_( t=0 )^( T -1 ) p( s_( t+1 )| a_( t ), s_( t ) ) pi(a_t|s_t)
 $
@@ -3996,7 +3997,7 @@ In the second, iterative part of generation (the #strong[decode] stage) we have 
 one-or-more tokens to the sequence and we again want the next prediction, i.e. `z[:, -1, :]` for the
 last-layer outputs $z_(b s d)$. In this stage, we can avoid re-processing the entire $x_(b s)$
 tensor and get away with only processing the final, newly added token, #emph[if] we are clever and
-cache old results (and accept a very reasonable approximation).
+cache old results.
 
 The important pieces occur in the $CA$ layer, as that's the only location in which the sequence index is
 not completely parallelized across operations. Referring back to @attn_layer, given the input $z_(b
@@ -4014,16 +4015,7 @@ Therefore, we can cut out many steps and the minimum requirements are:
   $k_(b s d)^a \, v_(b s d)^a$ is needed, but because of the causal
   mask, all components except for the last in the sequence dimension
   ($s eq.not - 1$) are the same as they were in the last iteration, up
-  to a shift by one position#footnote[This is where we need to accept a
-  mild approximation, if using a sliding attention window. With an
-  infinite context window, if we add a label $t$ which indexes the
-  iteration of generation we are on, then we would have that
-  $z_(b s d)^((t + 1)) = z_(b (s - 1) d)^((t))$ for every tensor in the
-  network, except for when $s = - 1$, the last position. The finiteness
-  of the context window makes this statement slightly inaccurate because
-  we can only ever keep $K$ positions in context and the loss of the
-  early tokens upon sliding the window over will slightly change the
-  values in the residual stream.]
+  to a shift by one position.
 
 So, we are led to the concept of the #strong[kv-cache] in which we cache
 old key and query vectors for generation. The cache represents a
