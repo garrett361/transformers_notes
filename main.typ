@@ -4447,10 +4447,12 @@ Summary of some relevant NVIDIA GPU statistics:
           [$lambda_"comms"$],
         ),
         table.hline(),
+        [#link("https://www.tomshardware.com/pc-components/gpus/nvidias-next-gen-ai-gpu-revealed-blackwell-b200-gpu-delivers-up-to-20-petaflops-of-compute-and-massive-improvements-over-hopper-h100")[B200]], [80GiB], [2250
+          TFLOP/s], [8 TiB/s], [281 FLOPS/B], [900 GiB/s],
+        [#link("https://resources.nvidia.com/en-us-hopper-architecture/nvidia-tensor-core-gpu-datasheet")[H100]], [80GiB], [989
+          TFLOP/s], [3.35 TiB/s], [295 FLOPS/B], [450 GiB/s],
         [#link("https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf")[A100]], [80GiB], [312
           TFLOP/s], [2.0 TiB/s], [156 FLOPS/B], [300 GiB/s],
-        [#link("https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet.pdf")[A100]], [40GiB], [312
-          TFLOP/s], [1.6 TiB/s], [195 FLOPS/B], [300 GiB/s],
         [#link("https://images.nvidia.com/content/technologies/volta/pdf/volta-v100-datasheet-update-us-1165301-r5.pdf")[V100]], [32GiB], [130
           TFLOP/s], [1.1 TiB/s], [118 FLOPS/B], [16 GiB/s],
       )],
