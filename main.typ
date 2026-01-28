@@ -394,7 +394,7 @@ those inputs $x_(b s' d')$ with $s' lt.eq s$.
 These weights come from $SM$-ed attention scores, which are just a
 normalized dot-product over the hidden dimension:
 $
-  w_( b s s' d a ) & =SM_( s' ) (m_( s s' )+(q_( b s e )k_( b s' e a ) )( sqrt(D / A)) ), "s.t." sum_(s')w_( b d s s' a ) =1
+  w_( b s s' d a ) & =SM_( s' ) ((q_( b s e )k_( b s' e a ) )/sqrt(D \/ A) + m_( s s' ) ), "s.t." sum_(s')w_( b d s s' a ) =1
 $
 
 The tensor $m_(s s')$ is the causal mask which zeroes
