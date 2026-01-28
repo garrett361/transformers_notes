@@ -412,7 +412,7 @@ $s' lt.eq s$. This is crucial for inference-time optimizations, in particular th
 
 The $sqrt(D \/ A)$ normalization is motivated by demanding that the variance of the $SM$ argument be 1 at
 initialization, assuming that other components have been configured so that that the query and key
-components are i.i.d. from a Gaussian normal distribution .
+components are i.i.d. from a Gaussian normal distribution#footnote[The square root is removed in the normalization espou @mutransfer-and-similar-ideas].
 
 The weights above are then passed through a dropout layer and used to
 re-weigh the #strong[value] vectors and form the tensors
@@ -4017,72 +4017,89 @@ Therefore, we can cut out many steps and the minimum requirements are:
   ($s eq.not - 1$) are the same as they were in the last iteration, up
   to a shift by one position.
 
-So, we are led to the concept of the #strong[kv-cache] in which we cache
-old key and query vectors for generation. The cache represents a
-tradeoff: fewer FLOPs are needed for inference, but the memory costs are
-potentially enormous, since the size of the cache grows with batch size
-and sequence length: $
-M _"kv-cache" & = 2p B D L S /T ,
+So, we are led to the concept of the #strong[kv-cache] in which we cache old key and query vectors
+for generation. The cache represents a tradeoff: fewer FLOPs are needed for inference, but the
+memory costs are potentially enormous, since the size of the cache grows with batch size and
+sequence length:
+$
+  M_"kv-cache" & = (2p B D L S) / (T times "GQA") ,
 $<eq_kv_cache_memory>
-in the general case with tensor-parallelism. This can
-easily be larger than the memory costs of the model parameter:
-$M _"params" ^"inference"  p N _"params"  p D L
-^2$ (dropping $cal(O) ( 1 )$ factors), so that the
-cache takes up more memory when $B S gt.tilde D$, i.e. when the total
-number of token exceeds the hidden dimension. Using the kv-cache
-eliminates a would-be $cal(O) ( S ^2 )$ factor in the
-FLOPs needed to compute a new token, reducing it to linear-in-$S$
-dependence everywhere.
+in the general case with tensor-parallelism and grouped-query attention @subsec_grouped_attn.
+This can easily be larger than the memory costs of the model parameters:
+$M _"params" ^"inference" ~  p N _"params"  L
+D^2/T$ (dropping $cal(O) ( 1 )$ factors), so that the cache takes up more memory when $(B S) /
+("GQA") gt.tilde D$, i.e. when the total number of token exceeds the hidden dimension. Using the
+kv-cache eliminates a would-be $cal(O) ( S ^2 )$ factor in the FLOPs needed to compute a new token,
+reducing it to linear-in-$S$ dependence everywhere.
 
 === Basic Memory, FLOPs, Communication, and Latency
 <basic-memory-flops-communication-and-latency>
 The essentials of inference-time math, much of it based on
 @kipply_inference_math.
 
-==== Naive Inference
+==== Prefill Timing
 <naive-inference>
-Processing a single `(B, S, D)`-shaped tensor to generate a single next input costs
-the $2B S N _"params"$ FLOPs we found for the forwards-pass
-in @sec_flops_training (assuming $S lt.tilde D$). Memory costs just
-come from the parameters themselves:
-$M _"infer"^"naive"=p N _"params"$. Per
-the analysis of @app_compute_mem_bound, naive inference is
-generally compute-bound and so the per-token-latency is
-approximately#footnote[Assuming we do the naive thing here and generate
-the next token in a similarly naive way, shifting over the context
-window.] $2B S N _( "params"
-)/ lambda _"FLOP/s"$ where the FLOPs bandwidth in the
-denominator is again defined in @app_compute_mem_bound.
+The prefill FLOPs required for a `(B, S)`-shaped input is $2B S N _"params"$, the same as the
+forwards-pass FLOPs compute from @sec_flops_training (assuming $S lt.tilde D$). Memory costs
+primarily come from the parameters themselves: $M _"infer"^"naive"=p N _"params"$. Per the analysis
+of @app_compute_mem_bound, naive inference is generally compute-bound and so the per-token-latency
+is approximately#footnote[Assuming we do the naive thing here and generate the next token in a
+  similarly naive way, shifting over the context window.] $2B S N _( "params")/ lambda _"FLOP/s"$
+where the FLOPs bandwidth in the denominator is again defined in @app_compute_mem_bound. If using a
+non-trivial tensor-parallel degree $T$, as is usually done, the time is approximately reduced by a
+factor of $~1/T$; we will expand upon this later.
 
-==== kv-Cache Inference
+==== Decode Timing
 <kv-cache-inference>
-The FLOPs requirements for the hidden-dimension matrix multiplies during
-generation are $2 B N _"params"$, since we are only
-processing a single token, per previous results. This is in addition to
-the up-front cost of $2B S N _(
-"params)"$ for the prefill. But, the memory
-requirements are raised to $
-M _"infer"^"kv-cache" & =p N _"params" + 2 p B D L S/T .
-$ Inference now has a computational-intensity of
+Decode, i.e. single-token generation using the kv-cache, is generally memory bound. We can confirm
+this fact by looking at the rough FLOPs to compute ratio at the model level. Since we are only
+computing a single-new token per batch, the total compute per forwards pass is roughly $2 B N
+_"params"$, i.e. it is the $S->1$ limit of the prefill FLOPs. But we unfortunately still need to pay
+the costs of reading in the entire model weights, making the arithmethic intensity
+approximately#footnote[This neglects the kv-cache memory reads, which are significant when $(B S) /
+("GQA") gt.tilde D$ as discussed above in @sec_kv_cache. Note that the FLOPs estimate should also be
+  altered if $S gt.tilde 10 D$, as attention-FLOPs start to dominate in this regime. We will largely
+  assume that we are not in the regime where either of these conditions hold. Realistic workloads
+  also contain a mix of requests with different characteristics, making this entire analysis fairly
+  toy-like.]
 $
-  ( C_"infer"^"kv-cache" ) / ( M_"infer"^"kv-cache" ) & ( B D ) / S ,
-$ dropping $cal(O) ( 1 )$ factors, is
-now memory-bound (again, see @app_compute_mem_bound), and has
-per-token-latency of approximately $M _"infer"/
-lambda _"mem"$, unless the batch-size is very large.
+  ~ (2 B N_( "params" )) / (2 p N_( "params" )) ~ cal(O)( B ) space .
+$
+From @app_gpu_stats, we would need $B gt.tilde cal(O)( 100 )$ to escape the memory bound regime,
+which we will not typically be able to achieve in practice. Both the memory and compute estimates
+get divided by $T$ when using tensor-parallelism, which therefore does not qualitatively change the
+story.
 
-==== Intra-Node Communication
-<intra-node-communication>
-For $T$-way tensor parallelism, two `AllReduce`s are needed, one for each $MLP$ and each $CA$ layer,
-where each accelerator is sending $p B D S$ bytes of data (see @subsec_tensor_parallelism). This
-requires a total of $4 (T - 1) p B D S \/ T approx 4 p B D S$ bytes to be transferred between
-workers in the tensor-parallel group (see @foot_all_reduce), taking a total of $ 4p B D L S/ lambda
-_"comms"$ time for the model as a whole. For an A100 80GiB, `torch.bfloat16` setup, this is $ B D S
-times 10 ^( -11 )  "sec"$
+The decode step time is then $~ cal(O)((2 p N_( "params" ) )/ lambda_( "mem" ))$, independent of the batch
+size.
 
-==== Latency
-<latency>
-TODO
+
+==== Tensor Parallelism
+
+Tensor parallelism requires a single all-reduce in the forwards pass, which takes time $~ (2 p B D S
+(T - 1) )/ (T  lambda_( "comms" ))$ per operation. This is done twice per layer, once for the MLP
+and once for the self-attention block, making the total time $~ (4 p  B D L S (T - 1) )/ (T lambda_(
+"comms" )) ~ cal(O)( (B S N_( "params" )) / ( D lambda_( "comms" )) )$. Meanwhile, the total prefill
+compute time is $cal(O)( (B S N_( "params" )) / ( T lambda_( "compute" )) )$ and so the
+communication to compute ratio is $cal(O)((T lambda_( "compute" )) / ( D lambda_( "comms" )) )$ with
+rates in FLOP/s and B/s. For H100s, say, $lambda_( "compute" ) ~ 500$ TFLOP/s while $lambda_(
+"comms" ) ~ 300$ GiB/s.
+
+== Optimizations
+
+=== PagedAttention
+
+Naive inference would allocate a large, static kv-cache which can contain up to to the maximum
+sequence-length of tokens the model is allowed to generate on. This is obviously wasteful, causing
+severe memory fragmentation and over-allocating.
+
+vLLM @kwon2023efficientmemorymanagementlarge solved this by creating PagedAttention, which is just
+allocating the physical kv-cache by partitioning a large segment of memory into small pages and
+maintaining a mapping from logical entries to physical pages. These small pages are filled up one at
+a time. PagedAttention also gives other familiar benefits from this indirection, such as more
+efficient sharing of memory across prompts with common prefixes
+@zheng2024sglangefficientexecutionstructured.
+
 
 #show: appendix
 
