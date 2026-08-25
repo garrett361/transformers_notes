@@ -1076,41 +1076,6 @@ $
 This quantity is important and frequently used, e.g. in distributed attention implementations.
 
 
-=== Linear Attention <subsec_linear_attn>
-Linear attention @katharopoulos2020transformersrnnsfastautoregressive
-removes the $SM$ operation in the attention layer in order to reduce
-the inference costs in terms of compute and time, both.
-
-To review, the (single-head) attention operation is $
-z _( s d ) &= SM_( s\' ) ( q _( s d\' ) k _( s\'d\' ) ) v _( s\'d )\
-&eq.triple A _( s s\' ) v _( s\'d )  .
-$ In order to generate the final, $s = - 1$ token using
-a kv-cache, generation time then requires reading in
-$cal(O) ( D S )$ bytes and performing
-$cal(O) ( D S )$ operations to generate the new token.
-However, if we remove the $SM$, then we can write the above as
-$
-  z_( s d ) &= q_( s d\' ) k_( s\'d\' ) v_( s\'d )= q_( s d\' )B_(d\' d ) .
-$ This would let us cache the
-$cal(O) ( D ^2 )$ $B_(d' d)$ matrix and generating
-the next token only takes $cal(O) ( D ^2 )$
-operations, an $cal(O) ( D/S
-)$ improvement on both fronts.
-
-The essential point is that for standard attention, the entire
-$A_(s s')$ matrix must be computed anew for each new token, while
-$B_(d d')$ can instead be iteratively updated via a cheap computation.
-
-The causal masking looks a little different for linear attention. The
-causal mask is not needed during vanilla next-token generation, but is
-for parallelized training. Computing of the $z_(s d)$ in parallel, as in
-training, requires generating $S$ different matrices $B_(d' d)^s$, one
-for each token position:
-$B_(d' d)^s = CUMSUM_s (k_(s d') v_(s d))$, effectively.
-Flash-attention-like techniques can be used to avoid materializing all
-of the $cal(O) ( S D ^2 )$ elements at once.
-
-
 = Linear Attention
 
 <linear-attn>
